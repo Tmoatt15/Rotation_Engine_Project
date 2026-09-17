@@ -6,9 +6,9 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId, teamQuery } from '@/team-api';
+import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { getRoster, getSeasonSettings } from '@/services/team-service';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 const palette = {
   ink: '#17221f',
   muted: '#6b7873',
@@ -111,11 +111,9 @@ export default function CoverageScreen() {
     getActiveTeam()
       .then((activeTeam) => {
         if (active) setTeamName(activeTeam.name);
-        return fetch(`${API_URL}/roster?${teamQuery(activeTeam.id)}`);
+        return getRoster(activeTeam.id);
       })
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load season roster.');
+      .then((payload) => {
         if (!Array.isArray(payload.players)) throw new Error('The roster response did not contain a player list.');
         if (active) setPlayers(payload.players as Player[]);
       })
@@ -126,10 +124,8 @@ export default function CoverageScreen() {
         if (active) setLoading(false);
       });
     getActiveTeamId()
-      .then((activeTeamId) => fetch(`${API_URL}/season?${teamQuery(activeTeamId)}`))
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load season settings.');
+      .then((activeTeamId) => getSeasonSettings(activeTeamId))
+      .then((payload) => {
         if (active && typeof payload.formation === 'string') setFormation(payload.formation);
       })
       .catch((requestError) => {

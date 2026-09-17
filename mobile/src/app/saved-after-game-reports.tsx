@@ -5,7 +5,8 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { API_URL, getActiveTeam, teamQuery } from '@/team-api';
+import { getActiveTeam } from '@/team-api';
+import { deleteSavedReport, getSavedReports, renameSavedReport as renameReportInStorage } from '@/services/report-service';
 import type { AfterGameReport } from '@/live-schedule';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
@@ -21,9 +22,9 @@ export default function SavedAfterGameReportsScreen() {
   const [renameReport, setRenameReport] = useState<SavedReport | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
-  const load = useCallback(async () => { try { const team = await getActiveTeam(); const response = await fetch(`${API_URL}/game-reports?${teamQuery(team.id)}`); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail); setTeamName(payload.team_name ?? team.name); setReports(payload.reports ?? []); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to load reports.'); } }, []);
+  const load = useCallback(async () => { try { const team = await getActiveTeam(); setTeamName(team.name); setReports(await getSavedReports(team.id) as SavedReport[]); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to load reports.'); } }, []);
   useEffect(() => { void load(); }, [load]);
-  function deleteReport(report: SavedReport) { Alert.alert('Delete after-game report?', reportLabel(report), [{ text: 'CANCEL', style: 'cancel' }, { text: 'DELETE', style: 'destructive', onPress: async () => { const team = await getActiveTeam(); const response = await fetch(`${API_URL}/game-reports/${report.id}?${teamQuery(team.id)}`, { method: 'DELETE' }); if (response.ok) setReports((current) => current.filter((item) => item.id !== report.id)); } }]); }
+  function deleteReport(report: SavedReport) { Alert.alert('Delete after-game report?', reportLabel(report), [{ text: 'CANCEL', style: 'cancel' }, { text: 'DELETE', style: 'destructive', onPress: async () => { await deleteSavedReport(report.id); setReports((current) => current.filter((item) => item.id !== report.id)); } }]); }
   function openRename(report: SavedReport) { setError(null); setRenameReport(report); setRenameValue(reportLabel(report)); }
   async function renameSavedReport() {
     const name = renameValue.trim();
@@ -31,11 +32,9 @@ export default function SavedAfterGameReportsScreen() {
     setRenaming(true);
     setError(null);
     try {
-      const team = await getActiveTeam();
-      const response = await fetch(`${API_URL}/game-reports/${renameReport?.id}?${teamQuery(team.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to rename after-game report.');
-      setReports((current) => current.map((item) => item.id === renameReport?.id ? { ...item, name: payload.name ?? name } : item));
+      if (!renameReport) throw new Error('Unable to rename after-game report.');
+      await renameReportInStorage(renameReport.id, name);
+      setReports((current) => current.map((item) => item.id === renameReport.id ? { ...item, name } : item));
       setRenameReport(null);
       setRenameValue('');
     } catch (requestError) {

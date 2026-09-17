@@ -5,9 +5,8 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, teamQuery } from '@/team-api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { getActiveTeam } from '@/team-api';
+import { deleteSavedSchedule, getSavedSchedules, renameSavedSchedule as renameScheduleInStorage } from '@/services/schedule-service';
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
   green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c',
@@ -36,11 +35,8 @@ export default function SavedSchedulesScreen() {
     setError(null);
     try {
       const team = await getActiveTeam();
-      const response = await fetch(`${API_URL}/schedules?${teamQuery(team.id)}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to load saved schedules.');
-      setTeamName(payload.team_name ?? team.name);
-      setSchedules(payload.schedules ?? []);
+      setTeamName(team.name);
+      setSchedules(await getSavedSchedules(team.id) as unknown as SavedSchedule[]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load saved schedules.');
     } finally {
@@ -57,9 +53,7 @@ export default function SavedSchedulesScreen() {
       { text: 'CANCEL', style: 'cancel' },
       { text: 'DELETE', style: 'destructive', onPress: async () => {
         try {
-          const team = await getActiveTeam();
-          const response = await fetch(`${API_URL}/schedules/${savedSchedule.id}?${teamQuery(team.id)}`, { method: 'DELETE' });
-          if (!response.ok) throw new Error('Unable to delete saved schedule.');
+          await deleteSavedSchedule(savedSchedule.id);
           setSchedules((current) => current.filter((item) => item.id !== savedSchedule.id));
         } catch (requestError) {
           setError(requestError instanceof Error ? requestError.message : 'Unable to delete saved schedule.');
@@ -83,15 +77,9 @@ export default function SavedSchedulesScreen() {
     setRenaming(true);
     setError(null);
     try {
-      const team = await getActiveTeam();
-      const response = await fetch(`${API_URL}/schedules/${renameSchedule?.id}?${teamQuery(team.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to rename saved schedule.');
-      setSchedules((current) => current.map((item) => item.id === renameSchedule?.id ? { ...item, name: payload.name ?? name } : item));
+      if (!renameSchedule) throw new Error('Unable to rename saved schedule.');
+      await renameScheduleInStorage(renameSchedule.id, name);
+      setSchedules((current) => current.map((item) => item.id === renameSchedule.id ? { ...item, name } : item));
       setRenameSchedule(null);
       setRenameValue('');
     } catch (requestError) {

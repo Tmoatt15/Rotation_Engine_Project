@@ -5,9 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId, teamQuery } from '@/team-api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { getSeasonSettings, updateSeasonSettings } from '@/services/team-service';
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
   green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c',
@@ -68,9 +67,7 @@ export default function SettingsScreen() {
     async function loadSettings() {
       try {
         const activeTeam = await getActiveTeam();
-        const response = await fetch(`${API_URL}/season?${teamQuery(activeTeam.id)}`);
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load season settings.');
+        const payload = await getSeasonSettings(activeTeam.id);
         if (!active) return;
         setTeamId(activeTeam.id);
         setTeamName(activeTeam.name);
@@ -117,22 +114,16 @@ export default function SettingsScreen() {
     setError(null);
     try {
       const activeTeamId = await getActiveTeamId();
-      const response = await fetch(`${API_URL}/season?${teamQuery(activeTeamId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await updateSeasonSettings(activeTeamId, {
           game_length_minutes: Number(settings.game_length_minutes),
-          game_format: settings.game_format,
+          game_format: settings.game_format as '4v4' | '5v5' | '7v7' | '9v9' | '11v11',
           total_blocks: Number(settings.total_blocks),
+          block_length_minutes: Number(settings.game_length_minutes) / Number(settings.total_blocks),
           formation: settings.formation,
           total_games: Number(settings.total_games),
           substitution_alert: settings.substitution_alert,
-          substitution_warning_seconds: Number(settings.substitution_warning_seconds),
-          team_id: activeTeamId,
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to save season settings.');
+          substitution_warning_seconds: Number(settings.substitution_warning_seconds) as 15 | 30 | 60,
+        });
       setEditing(false);
       setMessage('Season settings saved.');
     } catch (requestError) {

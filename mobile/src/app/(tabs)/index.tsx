@@ -9,6 +9,7 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import LiveScreen from './live';
 import { clearAcceptedSchedule, getAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { notifyTeamChanged } from '@/team-api';
+import { activateTeam, getTeams } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -21,8 +22,6 @@ const palette = {
   coral: '#d96f4c',
   yellow: '#f1c76b',
 };
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
-
 type Team = {
   id: string;
   name: string;
@@ -97,9 +96,7 @@ export default function HomeScreen() {
         setHasAcceptedSchedule(Boolean(schedule));
       }
     });
-    fetch(`${API_URL}/teams`).then(async (teamsResponse) => {
-      if (!teamsResponse.ok) throw new Error('Unable to load teams.');
-      const teamsPayload = await teamsResponse.json();
+    getTeams().then((teamsPayload) => {
       if (!Array.isArray(teamsPayload.teams)) throw new Error('Invalid teams response.');
       const loadedTeams = teamsPayload.teams as Team[];
       const loadedActiveTeam = loadedTeams.find((team) => team.active);
@@ -128,9 +125,7 @@ export default function HomeScreen() {
   async function selectTeam(team: Team) {
     if (team.active) return;
     try {
-      const response = await fetch(`${API_URL}/teams/${team.id}/activate`, { method: 'PUT' });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to activate team.');
+      const payload = await activateTeam(team.id);
       setTeams((current) => current.map((savedTeam) => ({ ...savedTeam, active: savedTeam.id === team.id })));
       setActiveTeamName(payload.name);
       notifyTeamChanged();

@@ -6,8 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { notifyTeamChanged } from '@/team-api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { activateTeam, createLocalTeam } from '@/services/team-service';
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
   green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c',
@@ -39,16 +38,8 @@ export default function CreateTeamScreen() {
     setMessage(null);
     setError(null);
     try {
-      const response = await fetch(`${API_URL}/teams`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: teamName.trim(), players }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to create team.');
-      const activateResponse = await fetch(`${API_URL}/teams/${payload.id}/activate`, { method: 'PUT' });
-      const activatePayload = await activateResponse.json();
-      if (!activateResponse.ok) throw new Error(activatePayload.detail ?? 'Unable to activate the new team.');
+      const payload = await createLocalTeam(teamName.trim(), players);
+      await activateTeam(payload.id);
       notifyTeamChanged();
       setTeamName('');
       setPlayerName('');

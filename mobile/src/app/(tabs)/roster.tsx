@@ -5,9 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, teamQuery } from '@/team-api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { getActiveTeam } from '@/team-api';
+import { getRoster } from '@/services/team-service';
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 type Player = { name: string };
 
@@ -31,11 +30,9 @@ export default function RosterListScreen() {
     getActiveTeam()
       .then((team) => {
         if (active) setTeamName(team.name);
-        return fetch(`${API_URL}/roster?${teamQuery(team.id)}`);
+        return getRoster(team.id);
       })
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load roster.');
+      .then((payload) => {
         if (!Array.isArray(payload.players)) throw new Error('The roster response did not contain a player list.');
         if (active) setPlayers((payload.players as Player[]).sort((first, second) => first.name.localeCompare(second.name)));
       })

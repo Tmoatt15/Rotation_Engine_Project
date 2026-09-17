@@ -6,7 +6,8 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges, teamQuery } from '@/team-api';
+import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/team-api';
+import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -18,7 +19,6 @@ const palette = {
   greenSoft: '#dcebe2',
   coral: '#d96f4c',
 };
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Group = 'core' | 'developing' | 'rotational';
 type Filter = 'all' | Group;
@@ -142,23 +142,13 @@ export default function RosterScreen() {
       try {
         const activeTeam = await getActiveTeam();
         const activeTeamId = activeTeam.id;
-        const [rosterResponse, seasonResponse] = await Promise.all([
-          fetch(`${API_URL}/roster?${teamQuery(activeTeamId)}`),
-          fetch(`${API_URL}/season?${teamQuery(activeTeamId)}`),
-        ]);
-        const rosterPayload = await rosterResponse.json();
-        const seasonPayload = await seasonResponse.json();
-        if (!rosterResponse.ok) throw new Error(rosterPayload.detail ?? 'Unable to load season roster.');
-        if (!seasonResponse.ok) throw new Error(seasonPayload.detail ?? 'Unable to load season formation.');
+        const [rosterPayload, seasonPayload] = await Promise.all([getRoster(activeTeamId), getSeasonSettings(activeTeamId)]);
         if (!Array.isArray(rosterPayload.players)) throw new Error('The roster response did not contain a player list.');
         if (!active) return;
         setTeamId(activeTeamId);
         setTeamName(activeTeam.name);
-        setPlayers(rosterPayload.players);
-        const mappedRows = Array.isArray(seasonPayload.position_rows)
-          ? mapApiPositionRows(seasonPayload.position_rows)
-          : null;
-        setPositionRows(mappedRows ?? formationPositionRows(seasonPayload.formation ?? fallbackFormation));
+        setPlayers(rosterPayload.players as Player[]);
+        setPositionRows(formationPositionRows(seasonPayload.formation ?? fallbackFormation));
       } catch (requestError) {
         if (!active) return;
         setPositionRows(formationPositionRows(fallbackFormation));
@@ -225,14 +215,8 @@ export default function RosterScreen() {
     setError(null);
     try {
       const activeTeamId = await getActiveTeamId();
-      const response = await fetch(`${API_URL}/roster`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players, team_id: activeTeamId }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to save season roster.');
-      setPlayers(payload.players);
+      const payload = await updateRoster(activeTeamId, players);
+      setPlayers(payload.players as Player[]);
       setMessage('Season roster saved.');
       router.replace('/');
     } catch (requestError) {

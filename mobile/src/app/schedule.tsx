@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import LiveScreen from './(tabs)/live';
 import { setAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
-import { API_URL } from '@/team-api';
+import { saveLocalSchedule } from '@/services/schedule-service';
 
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
@@ -176,13 +176,7 @@ export default function ScheduleScreen() {
     setSavingSchedule(true);
     setSaveError(null);
     try {
-      const response = await fetch(`${API_URL}/schedules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, schedule: { ...schedule, blocks, team_id: schedule.team_id } }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to save schedule.');
+      await saveLocalSchedule(name, { ...schedule, blocks: blocks as unknown as LiveSchedule['blocks'] } as unknown as import('@/engine/models').LiveSchedule);
       setScheduleName('');
       setShowSaveSchedule(false);
       router.replace('/');

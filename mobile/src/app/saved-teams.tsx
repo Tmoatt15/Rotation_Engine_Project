@@ -6,8 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { notifyTeamChanged } from '@/team-api';
+import { getTeams, removeTeam } from '@/services/team-service';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 type Team = { id: string; name: string; players: string[]; active?: boolean };
 
@@ -20,10 +20,8 @@ export default function SavedTeamsScreen() {
   const loadTeams = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(`${API_URL}/teams`)
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load saved teams.');
+    getTeams()
+      .then((payload) => {
         setTeams(payload.teams as Team[]);
       })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load saved teams.'))
@@ -43,12 +41,8 @@ export default function SavedTeamsScreen() {
 
   async function deleteTeam(team: Team) {
     try {
-      const response = await fetch(`${API_URL}/teams/${team.id}`, { method: 'DELETE' });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to delete team.');
-      setTeams((current) => current
-        .filter((savedTeam) => savedTeam.id !== team.id)
-        .map((savedTeam) => ({ ...savedTeam, active: savedTeam.id === payload.active_team_id })));
+      const payload = await removeTeam(team.id);
+      setTeams(payload.teams);
       if (team.active) notifyTeamChanged();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete team.');

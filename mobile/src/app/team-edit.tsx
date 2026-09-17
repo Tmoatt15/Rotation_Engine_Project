@@ -5,8 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
+import { getLocalTeam, updateTeam } from '@/services/team-service';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 type Team = { id: string; name: string; players: string[] };
 
@@ -22,12 +22,8 @@ export default function EditTeamScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/teams`)
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load team.');
-        const team = (payload.teams as Team[]).find((candidate) => candidate.id === teamId);
-        if (!team) throw new Error('Team was not found.');
+    (teamId ? getLocalTeam(teamId) : Promise.reject(new Error('Team was not found.')))
+      .then((team) => {
         setTeamName(team.name);
         setPlayers(team.players);
       })
@@ -53,9 +49,7 @@ export default function EditTeamScreen() {
     setMessage(null);
     setError(null);
     try {
-      const response = await fetch(`${API_URL}/teams/${teamId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: teamName.trim(), players }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to save team.');
+      const payload = await updateTeam(teamId, teamName.trim(), players);
       setMessage(`${payload.name} was updated.`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to save team.');

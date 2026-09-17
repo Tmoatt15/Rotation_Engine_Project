@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { API_URL, getActiveTeam } from '@/team-api';
+import { getActiveTeam } from '@/team-api';
+import { saveLocalReport } from '@/services/report-service';
 import type { AfterGameReport } from '@/live-schedule';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
@@ -28,9 +29,7 @@ export default function AfterGameScreen() {
     setSaveError(null);
     try {
       const activeTeam = await getActiveTeam();
-      const response = await fetch(`${API_URL}/game-reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: { ...report, team_id: report.team_id ?? activeTeam.id, team_name: report.team_name ?? activeTeam.name } }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? 'Unable to save after-game report.');
+      await saveLocalReport(activeTeam.id, { ...report, team_id: report.team_id ?? activeTeam.id, team_name: report.team_name ?? activeTeam.name });
       router.replace('/');
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Unable to save after-game report.');

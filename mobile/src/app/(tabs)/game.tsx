@@ -5,7 +5,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId, teamQuery } from '@/team-api';
+import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { generateLocalSchedule } from '@/services/schedule-service';
+import { getRoster } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -17,8 +19,6 @@ const palette = {
   greenSoft: '#dcebe2',
   coral: '#d96f4c',
 };
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type RosterPlayer = { name: string; primary_positions?: string[]; group?: string };
 
@@ -48,11 +48,9 @@ export default function GameScreen() {
       .then((activeTeam) => {
         setTeamId(activeTeam.id);
         setTeamName(activeTeam.name);
-        return fetch(`${API_URL}/roster?${teamQuery(activeTeam.id)}`);
+        return getRoster(activeTeam.id);
       })
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Unable to load season roster.');
+      .then((payload) => {
         const rosterPlayers = payload.players as RosterPlayer[];
         const eligibleGoalkeepers = rosterPlayers
           .filter((player) => player.primary_positions?.some((position) => position.toUpperCase() === 'GK') || player.group === 'rotational_gk')
@@ -90,21 +88,7 @@ export default function GameScreen() {
     setError(null);
     try {
       const activeTeamId = teamId ?? await getActiveTeamId();
-      const response = await fetch(`${API_URL}/schedule`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          available_player_names: playerNames.filter((name) => !unavailable.has(name)),
-          game_number: 1,
-          first_half_gk: firstHalfGK,
-          second_half_gk: secondHalfGK,
-          team_id: activeTeamId,
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.detail ?? 'Unable to generate the schedule.');
-      }
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: 1, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.');
