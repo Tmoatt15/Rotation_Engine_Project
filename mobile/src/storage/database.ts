@@ -1,7 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 const DATABASE_NAME = 'rotation-engine.db';
-const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 1;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
@@ -58,16 +58,37 @@ const schema = `
   CREATE INDEX IF NOT EXISTS idx_game_reports_team_id ON game_reports(team_id);
 `;
 
+type Migration = {
+  version: number;
+  apply: (database: SQLiteDatabase) => Promise<void>;
+};
+
+const migrations: Migration[] = [
+  {
+    version: 1,
+    apply: async (database) => {
+      await database.execAsync(schema);
+    },
+  },
+];
+
 async function migrate(database: SQLiteDatabase): Promise<void> {
   const versionRow = await database.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  const version = versionRow?.user_version ?? 0;
-  if (version > CURRENT_SCHEMA_VERSION) {
-    throw new Error(`Database version ${version} is newer than this app supports.`);
+  const currentVersion = versionRow?.user_version ?? 0;
+  if (currentVersion > CURRENT_SCHEMA_VERSION) {
+    throw new Error(`Database version ${currentVersion} is newer than this app supports.`);
   }
-  if (version < 1) {
-    await database.execAsync(schema);
-    await database.execAsync('PRAGMA user_version = 1');
+
+  for (const migration of migrations.filter(({ version }) => version > currentVersion)) {
+    await database.withTransactionAsync(async () => {
+      await migration.apply(database);
+      await database.execAsync(`PRAGMA user_version = ${migration.version}`);
+    });
   }
+}
+
+export async function initializeDatabase(): Promise<SQLiteDatabase> {
+  return getDatabase();
 }
 
 export async function getDatabase(): Promise<SQLiteDatabase> {
