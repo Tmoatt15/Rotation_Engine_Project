@@ -1,0 +1,71 @@
+[
+  {
+    "id": "4v4-basic",
+    "game": {
+      "total_blocks": 4,
+      "formation": "1-2-1",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {"name": "Ava", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Ben", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Cara", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Drew", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Eli", "group": "developing", "general_positions": ["F"], "primary_positions": ["F"]},
+      {"name": "Finn", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]}
+    ],
+    "expect": {"timeline_blocks": 4, "has_goalkeeper": false, "field_player_count": 4, "oracle_sha256": "065f7b37e00f373d13ba5b89317b201e861749853ac9a13ecf1b5d0c7e809688"}
+  },
+  {
+    "id": "7v7-gk-and-groups",
+    "game": {
+      "total_blocks": 6,
+      "formation": "2-3-1",
+      "gk_assignment": "Gio",
+      "season_total_games": 3,
+      "season_game_number": 2
+    },
+    "players": [
+      {"name": "Gio", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "Hana", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Ira", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Jules", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Kai", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Lena", "group": "developing", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Milo", "group": "core", "general_positions": ["F"], "primary_positions": ["F"]},
+      {"name": "Nia", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Owen", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Pia", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
+    ],
+    "expect": {"timeline_blocks": 6, "has_goalkeeper": true, "field_player_count": 7, "assigned_goalkeeper": "Gio", "oracle_sha256": "00d004cca7ff500497acd7b06a69875368c307d9efce21017827519448f11e50"}
+  },
+  {
+    "id": "11v11-position-flexibility",
+    "game": {
+      "total_blocks": 4,
+      "formation": "4-4-2",
+      "first_half_gk": "Quinn",
+      "second_half_gk": "Rae",
+      "season_total_games": 10,
+      "season_game_number": 4
+    },
+    "players": [
+      {"name": "Quinn", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "Rae", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "Sam", "group": "core", "general_positions": ["D"], "primary_positions": ["LB"]},
+      {"name": "Toni", "group": "core", "general_positions": ["D"], "primary_positions": ["CB"]},
+      {"name": "Uma", "group": "core", "general_positions": ["D"], "primary_positions": ["RB"]},
+      {"name": "Vic", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "Will", "group": "core", "general_positions": ["M"], "primary_positions": ["LM"]},
+      {"name": "Xena", "group": "core", "general_positions": ["M"], "primary_positions": ["CM"]},
+      {"name": "Yuri", "group": "core", "general_positions": ["M"], "primary_positions": ["RM"]},
+      {"name": "Zara", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "Aaron", "group": "developing", "general_positions": ["F"], "primary_positions": ["LF"]},
+      {"name": "Bea", "group": "developing", "general_positions": ["F"], "primary_positions": ["RF"]},
+      {"name": "Cory", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]},
+      {"name": "Dina", "group": "rotational", "general_positions": ["M", "F"], "primary_positions": ["M"], "backup_positions": ["F"]}
+    ],
+    "expect": {"timeline_blocks": 4, "has_goalkeeper": true, "field_player_count": 11, "first_goalkeeper": "Quinn", "second_goalkeeper": "Rae", "oracle_sha256": "1919404c1d03dafd1ea4ad8a4a6f4b47e79faa087d1a0fefb7eaf81ccc29538c"}
+  }
+]
