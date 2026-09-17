@@ -1,0 +1,21 @@
+[
+  {"name": "Max", "group": "core", "general_positions": ["F"], "primary_positions": ["LF"], "backup_positions": ["M"], "excluded_positions": []},
+  {"name": "Sawyer", "group": "core", "general_positions": ["F"], "primary_positions": ["F"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Alvin", "group": "core", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Hanshith", "group": "core", "general_positions": ["F"], "primary_positions": ["F"], "backup_positions": ["M"], "excluded_positions": []},
+  {"name": "Dane", "group": "core", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Jonathan", "group": "core", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Everett", "group": "core", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Blake", "group": "core", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": ["F"], "excluded_positions": []},
+  {"name": "Thanish", "group": "developing", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Yash", "group": "developing", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Ryan", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Mahaswin", "group": "developing", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Cameron", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M", "GK"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Brad", "group": "developing", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Artur", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Sid", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Prerith", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Eitan", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D", "GK"], "backup_positions": [], "excluded_positions": []},
+  {"name": "Frank", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D"], "backup_positions": ["M"], "excluded_positions": []}
+]

@@ -1,0 +1,42 @@
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Node, Expo, and build output
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/.cache/
+.expo/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Nested mobile repository metadata
+mobile/.git/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+*.jks
+*.mobileprovision
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db
+
+# Local player and season data
+roster.json
+season_roster.json
+teams.json
+season.json
