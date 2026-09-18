@@ -248,9 +248,19 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           for (const rested of roster) {
             if (!rested.available || !coreGroups.has(rested.group) || assigned.has(rested.name) || rested.name === goalkeeperNames[blockIndex]) continue;
             if (!eligiblePlayers(roster, position, game.allow_emergency_positions).some((player) => player.name === rested.name)) continue;
+            if (!usable(rested, position, blockIndex)) continue;
             const slot = plans[position][blockIndex].indexOf(currentName);
             plans[position][blockIndex][slot] = rested.name;
-            if (coreRestScore(blockIndex) < before) { improved = true; break; }
+            if (coreRestScore(blockIndex) < before) {
+              const half = blockIndex < halfLength ? 0 : 1;
+              rawCounts.set(current.name, (rawCounts.get(current.name) ?? 0) - 1);
+              fieldCounts.set(current.name, (fieldCounts.get(current.name) ?? 0) - 1);
+              const currentHalfCounts = halfCounts.get(current.name) ?? [0, 0] as [number, number]; currentHalfCounts[half] -= 1; halfCounts.set(current.name, currentHalfCounts);
+              rawCounts.set(rested.name, (rawCounts.get(rested.name) ?? 0) + 1);
+              fieldCounts.set(rested.name, (fieldCounts.get(rested.name) ?? 0) + 1);
+              const restedHalfCounts = halfCounts.get(rested.name) ?? [0, 0] as [number, number]; restedHalfCounts[half] += 1; halfCounts.set(rested.name, restedHalfCounts);
+              improved = true; break;
+            }
             plans[position][blockIndex][slot] = currentName;
           }
           if (improved) break;
