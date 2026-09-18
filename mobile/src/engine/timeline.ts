@@ -120,6 +120,9 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const assignedGoalkeepers = new Set(goalkeeperNames.filter(Boolean));
   const rawCounts = new Map(roster.map((player) => [player.name, player.block_count]));
   const fieldCounts = new Map(roster.map((player) => [player.name, player.block_count]));
+  for (const goalkeeperName of goalkeeperNames) {
+    if (goalkeeperName) rawCounts.set(goalkeeperName, (rawCounts.get(goalkeeperName) ?? 0) + 1);
+  }
   const halfCounts = new Map(roster.map((player) => [player.name, [...player.blocks_by_half] as [number, number]]));
   const halfLength = Math.ceil(game.total_blocks / 2);
   const coreGroups = new Set<Player['group']>(['core', 'core_a', 'core_b']);
