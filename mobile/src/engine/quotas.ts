@@ -1,4 +1,5 @@
 import type { Game, Player, RotationResult } from './models';
+import { backupEligiblePlayers, eligiblePlayers } from './positional';
 
 export const CORE_A_TARGET = 0.8;
 export const CORE_B_TARGET = 0.7;
@@ -13,6 +14,10 @@ export const GK_FIELD_MINIMUM = 0.2;
 export const GK_FIELD_MAXIMUM = 0.3;
 
 const GROUP_HARD_MINIMUM: Record<string, number> = { core: CORE_MIN, core_a: CORE_MIN, core_b: CORE_B_TARGET, rotational: ROTATIONAL_MIN, developing: DEVELOPMENTAL_MIN, developmental: DEVELOPMENTAL_MIN };
+
+function isDedicatedGoalkeeper(player: Player): boolean {
+  return player.general_positions.some((position) => position.toUpperCase() === 'GK');
+}
 
 function seededValue(seed: number, text: string): number {
   let hash = seed | 0;
@@ -50,15 +55,22 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     highCore = rotatingHighNames({ ...game, season_seed: game.season_seed } as Game, core, 'core');
     game.core_high_names = [...highCore];
   }
-  const rotationalHigh = rotatingHighNames(game, roster.filter((player) => player.group === 'rotational' && !player.primary_positions.includes('GK')), 'rotational');
+  const rotationalHigh = rotatingHighNames(game, roster.filter((player) => player.group === 'rotational' && !isDedicatedGoalkeeper(player)), 'rotational');
   const developingHigh = rotatingHighNames(game, roster.filter((player) => ['developing', 'developmental'].includes(player.group)), 'developing');
   const formation = game.formation.split('-').map(Number);
   const fieldSlots = formation.every(Number.isFinite) ? game.total_blocks * formation.reduce((sum, value) => sum + value, 0) : 0;
+  const formationCounts: Record<'D' | 'M' | 'F', number> = game.formation === '2-1-2-1'
+    ? { D: 2, M: 3, F: 1 }
+    : game.formation === '4-2-3-1'
+      ? { D: 4, M: 5, F: 1 }
+      : formation.length === 2
+        ? { D: formation[0] ?? 0, M: 0, F: formation[1] ?? 0 }
+        : { D: formation[0] ?? 0, M: formation[1] ?? 0, F: formation[2] ?? 0 };
   let requestedFieldSlots = 0;
   for (const player of roster) {
     let target = 0; let minimum = 0; let maximum = 0;
     if (['core', 'core_a', 'core_b'].includes(player.group)) { target = Math.round(game.total_blocks * (highCore.has(player.name) ? CORE_A_TARGET : CORE_B_TARGET)); minimum = Math.round(game.total_blocks * CORE_MIN); maximum = target; }
-    else if (player.primary_positions.includes('GK')) { target = Math.round(game.total_blocks * GK_TARGET); minimum = maximum = target; }
+    else if (isDedicatedGoalkeeper(player)) { target = Math.round(game.total_blocks * GK_TARGET); minimum = maximum = target; }
     else if (player.group === 'rotational') { minimum = Math.round(game.total_blocks * ROTATIONAL_MIN); maximum = Math.round(game.total_blocks * ROTATIONAL_MAX); target = rotationalHigh.has(player.name) ? maximum : minimum; }
     else if (['developing', 'developmental'].includes(player.group)) { minimum = Math.round(game.total_blocks * DEVELOPMENTAL_MIN); maximum = Math.round(game.total_blocks * DEVELOPMENTAL_MAX); target = developingHigh.has(player.name) ? maximum : minimum; }
     else { result.errors.push(`Unknown group for player ${player.name}`); }
@@ -69,8 +81,20 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     else player.hard_maximum_blocks = Math.min(game.total_blocks, player.hard_maximum_blocks + (game.replacement_bonuses[player.name] ?? 0));
     player.max_blocks_per_half = Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
     result.block_counts[player.name] = target;
-    if (!player.primary_positions.includes('GK') && player.group !== 'rotational_gk') requestedFieldSlots += target;
+    if (!isDedicatedGoalkeeper(player) && player.group !== 'rotational_gk') requestedFieldSlots += target;
   }
   if (requestedFieldSlots > fieldSlots) result.warnings.push(`Requested field targets require ${requestedFieldSlots} slots, but the formation provides ${fieldSlots}; targets cannot all be met.`);
+  for (const position of ['D', 'M', 'F'] as const) {
+    const slots = formationCounts[position] * game.total_blocks;
+    if (!slots) continue;
+    const eligible = new Map([
+      ...eligiblePlayers(roster, position, game.allow_emergency_positions),
+      ...backupEligiblePlayers(roster, position),
+    ].map((player) => [player.name, player] as const));
+    const minimumBlocks = [...eligible.values()]
+      .filter((player) => !isDedicatedGoalkeeper(player))
+      .reduce((total, player) => total + player.minimum_blocks, 0);
+    if (minimumBlocks > slots) result.warnings.push(`${position} minimums require ${minimumBlocks} player-blocks, but the formation provides ${slots}; some ${position} players must finish below minimum.`);
+  }
   return result;
 }

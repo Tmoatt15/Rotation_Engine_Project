@@ -7,6 +7,8 @@ export function computeSurplus(game: Game, roster: Player[]): RotationResult {
     result.position_summary[player.name] = { ...player.position_usage };
     if (player.primary_positions.includes('GK')) result.gk_summary[player.name] = { gk: player.gk_blocks, field: player.field_blocks, bench: player.bench_count };
     if (player.group.startsWith('core') && player.block_count < player.minimum_blocks) result.warnings.push(`${player.name} (core) is under target by ${player.minimum_blocks - player.block_count} blocks.`);
+    if (player.group === 'rotational' && player.block_count < player.minimum_blocks) result.warnings.push(`${player.name} (rotational) is under minimum by ${player.minimum_blocks - player.block_count} blocks.`);
+    if (['developing', 'developmental'].includes(player.group) && player.block_count < player.minimum_blocks) result.warnings.push(`${player.name} (developmental) is under minimum by ${player.minimum_blocks - player.block_count} blocks.`);
     if (['developing', 'developmental'].includes(player.group) && player.block_count > player.maximum_blocks) result.warnings.push(`${player.name} (developmental) exceeded target by ${player.block_count - player.maximum_blocks} blocks.`);
     if (player.group === 'rotational_gk' && player.gk_blocks === 0) result.warnings.push(`${player.name} is rotational_gk but received no GK blocks.`);
   }
