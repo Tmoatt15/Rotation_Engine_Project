@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/team-api';
 import { getSeasonSettings, updateSeasonSettings } from '@/services/team-service';
+import { shareDiagnosticSnapshot } from '@/services/diagnostic-service';
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
   green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c',
@@ -57,6 +58,7 @@ export default function SettingsScreen() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -133,6 +135,19 @@ export default function SettingsScreen() {
     }
   }
 
+  async function exportDiagnostics() {
+    setExporting(true);
+    setError(null);
+    try {
+      await shareDiagnosticSnapshot();
+      setMessage('Diagnostic snapshot is ready to share.');
+    } catch (snapshotError) {
+      setError(snapshotError instanceof Error ? snapshotError.message : 'Unable to create diagnostic snapshot.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -167,6 +182,13 @@ export default function SettingsScreen() {
                       <Text style={styles.editButtonText}>EDIT</Text>
                     </Pressable>
                   </View>
+                )}
+
+                {!editing && (
+                  <Pressable onPress={exportDiagnostics} disabled={exporting} style={[styles.exportButton, exporting && styles.disabledButton]} accessibilityRole="button">
+                    <Text style={styles.exportButtonText}>{exporting ? 'Preparing snapshot...' : 'Share diagnostic snapshot'}</Text>
+                    <SymbolView name={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }} size={19} tintColor={palette.panel} />
+                  </Pressable>
                 )}
 
                 {editing && (
@@ -283,6 +305,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper }, safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' }, content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
   header: { alignItems: 'center', flexDirection: 'row', marginBottom: 26 }, backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 }, headerCopy: { marginLeft: 13 }, eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
   section: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 16, padding: 16 }, sectionTitle: { color: palette.ink, fontSize: 17, fontWeight: '800' }, helperText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 5 }, formatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 15 }, formatButton: { borderColor: palette.line, borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 }, formatButtonSelected: { backgroundColor: palette.green, borderColor: palette.green }, formatText: { color: palette.muted, fontSize: 12, fontWeight: '800' }, formatTextSelected: { color: palette.panel },
-  summaryCard: { backgroundColor: palette.greenSoft, borderRadius: 17, marginBottom: 16, padding: 17 }, summaryDetails: { width: '100%' }, summaryEyebrow: { color: palette.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.4, marginBottom: 7 }, summaryLine: { flexDirection: 'row', marginBottom: 5, width: '100%' }, summaryLineLabel: { color: palette.muted, flexShrink: 0, fontSize: 12, fontWeight: '700', width: 205 }, summaryLineValue: { color: palette.ink, flex: 1, fontSize: 12, fontWeight: '800' }, editButton: { alignSelf: 'flex-start', backgroundColor: palette.coral, borderRadius: 10, marginTop: 10, paddingHorizontal: 14, paddingVertical: 9 }, editButtonText: { color: palette.panel, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
+  summaryCard: { backgroundColor: palette.greenSoft, borderRadius: 17, marginBottom: 16, padding: 17 }, summaryDetails: { width: '100%' }, summaryEyebrow: { color: palette.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.4, marginBottom: 7 }, summaryLine: { flexDirection: 'row', marginBottom: 5, width: '100%' }, summaryLineLabel: { color: palette.muted, flexShrink: 0, fontSize: 12, fontWeight: '700', width: 205 }, summaryLineValue: { color: palette.ink, flex: 1, fontSize: 12, fontWeight: '800' }, editButton: { alignSelf: 'flex-start', backgroundColor: palette.coral, borderRadius: 10, marginTop: 10, paddingHorizontal: 14, paddingVertical: 9 }, editButtonText: { color: palette.panel, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 }, exportButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', gap: 9, marginBottom: 16, minHeight: 52, paddingHorizontal: 16 }, exportButtonText: { color: palette.panel, fontSize: 14, fontWeight: '800' },
   fieldRow: { flexDirection: 'row', gap: 10, marginTop: 14 }, field: { flex: 1 }, fieldLabel: { color: palette.muted, fontSize: 11, fontWeight: '700', marginBottom: 6 }, input: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 10, borderWidth: 1, color: palette.ink, fontSize: 15, fontWeight: '700', minHeight: 44, paddingHorizontal: 11 }, saveButton: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', gap: 9, minHeight: 54 }, disabledButton: { opacity: 0.55 }, saveText: { color: palette.panel, fontSize: 15, fontWeight: '800' }, successText: { color: palette.green, fontSize: 13, fontWeight: '700', marginTop: 14, textAlign: 'center' }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 14 },
 });
