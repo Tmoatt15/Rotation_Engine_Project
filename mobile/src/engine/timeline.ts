@@ -317,6 +317,9 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
               .sort((left, right) => playerKey(left, other, blockIndex, new Set()).join('|').localeCompare(playerKey(right, other, blockIndex, new Set()).join('|')))[0];
             if (!replacement) continue;
             plans[other][blockIndex] = plans[other][blockIndex].filter((name) => name !== candidateName).concat(replacement.name);
+            rawCounts.set(replacement.name, (rawCounts.get(replacement.name) ?? 0) + 1);
+            fieldCounts.set(replacement.name, (fieldCounts.get(replacement.name) ?? 0) + 1);
+            const replacementHalfCounts = halfCounts.get(replacement.name) ?? [0, 0] as [number, number]; replacementHalfCounts[half] += 1; halfCounts.set(replacement.name, replacementHalfCounts);
             plans[position][blockIndex].push(candidateName); rescued = true; break;
           }
           if (rescued) break;
