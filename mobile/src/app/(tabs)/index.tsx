@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import LiveScreen from './live';
 import { clearAcceptedSchedule, getAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { notifyTeamChanged } from '@/team-api';
 import { activateTeam, getTeams } from '@/services/team-service';
+import { rosterMatchesFormation } from '@/position-validation';
 
 const palette = {
   ink: '#17221f',
@@ -27,7 +28,7 @@ type Team = {
   name: string;
   active?: boolean;
   players?: string[];
-  season_roster?: unknown[];
+  season_roster?: Parameters<typeof rosterMatchesFormation>[1];
   season_settings?: Record<string, unknown>;
 };
 
@@ -42,22 +43,40 @@ function isTeamReady(team: Team | undefined): boolean {
 type SymbolName = NonNullable<ComponentProps<typeof SymbolView>['name']>;
 type ActionProps = { icon: SymbolName; label: string; detail?: string; onPress?: () => void };
 
-function ActionTile({ icon, label, detail, onPress }: ActionProps) {
+function ActionTile({ icon, label, detail, onPress, alert = false }: ActionProps & { alert?: boolean }) {
+  const [opacity] = useState(() => new Animated.Value(1));
+
+  useEffect(() => {
+    if (!alert) {
+      opacity.stopAnimation();
+      opacity.setValue(1);
+      return;
+    }
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(opacity, { toValue: 0.35, duration: 450, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 450, useNativeDriver: true }),
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [alert, opacity]);
+
   return (
-    <TouchableOpacity style={styles.actionTile} accessibilityRole="button" onPress={onPress}>
-      <View style={styles.actionIcon}>
-        <SymbolView name={icon} size={21} tintColor={palette.green} />
-      </View>
-      <View style={styles.actionCopy}>
-        <Text style={styles.actionLabel}>{label}</Text>
-        {detail && <Text style={styles.actionDetail}>{detail}</Text>}
-      </View>
-      <SymbolView
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={18}
-        tintColor={palette.muted}
-      />
-    </TouchableOpacity>
+    <Animated.View style={{ opacity }}>
+      <TouchableOpacity style={[styles.actionTile, alert && styles.actionTileAlert]} accessibilityRole="button" onPress={onPress}>
+        <View style={[styles.actionIcon, alert && styles.actionIconAlert]}>
+          <SymbolView name={icon} size={21} tintColor={alert ? palette.panel : palette.green} />
+        </View>
+        <View style={styles.actionCopy}>
+          <Text style={[styles.actionLabel, alert && styles.actionTextAlert]}>{label}</Text>
+          {detail && <Text style={[styles.actionDetail, alert && styles.actionTextAlert]}>{detail}</Text>}
+        </View>
+        <SymbolView
+          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          size={18}
+          tintColor={alert ? palette.panel : palette.muted}
+        />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -70,6 +89,10 @@ export default function HomeScreen() {
   const [acceptedSchedule, setAcceptedSchedule] = useState<LiveSchedule | null>(null);
   const [showLiveGame, setShowLiveGame] = useState(false);
   const activeTeam = teams.find((team) => team.active);
+  const positionsNeedReview = Boolean(activeTeam && !rosterMatchesFormation(
+    String(activeTeam.season_settings?.formation ?? '4-4-2'),
+    activeTeam.season_roster ?? [],
+  ));
   const teamStatus: TeamStatus = teamsError
     ? 'DATA ERROR'
     : teams.length === 0
@@ -237,6 +260,7 @@ export default function HomeScreen() {
               icon="person.3"
               label="Player Positions"
               detail="Assign and Edit Player Positions"
+              alert={positionsNeedReview}
               onPress={() => router.navigate('/position-assignment')}
             />
             <ActionTile
@@ -478,6 +502,9 @@ const styles = StyleSheet.create({
     minHeight: 73,
     paddingHorizontal: 14,
   },
+  actionTileAlert: {
+    backgroundColor: palette.coral,
+  },
   actionIcon: {
     alignItems: 'center',
     backgroundColor: palette.greenSoft,
@@ -485,6 +512,9 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     width: 40,
+  },
+  actionIconAlert: {
+    backgroundColor: '#b85338',
   },
   actionCopy: {
     flex: 1,
@@ -499,5 +529,8 @@ const styles = StyleSheet.create({
     color: palette.muted,
     fontSize: 12,
     marginTop: 3,
+  },
+  actionTextAlert: {
+    color: palette.panel,
   },
 });

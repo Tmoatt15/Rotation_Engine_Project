@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/team-api';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
+import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
 
 const palette = {
   ink: '#17221f',
@@ -31,34 +32,10 @@ type Player = {
   excluded_positions: string[];
 };
 type PositionGroup = 'general_positions' | 'primary_positions' | 'backup_positions' | 'excluded_positions';
-type PositionPickerState = { playerName: string; group: PositionGroup; positions: string[] } | null;
+type PositionPickerState = { playerName: string; group: PositionGroup; positions: string[]; allowedPositions: string[] } | null;
+const ANY_POSITION = 'ANY';
 
 const fallbackFormation = '4-4-2';
-
-function formationPositionRows(formation: string) {
-  const specialFormations: Record<string, Record<string, string[]>> = {
-    '2-1-2-1': { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['F'] },
-    '4-2-3-1': { D: ['LB', 'LCB', 'RCB', 'RB'], M: ['LAM', 'CAM', 'RAM', 'LDM', 'RDM'], F: ['F'] },
-  };
-  const slots = specialFormations[formation] ?? (() => {
-    const [defenders, midfielders, forwards] = formation.split('-').map(Number);
-    const slotNames: Record<string, Record<number, string[]>> = {
-      D: { 1: ['CB'], 2: ['LB', 'RB'], 3: ['LB', 'CB', 'RB'], 4: ['LB', 'LCB', 'RCB', 'RB'], 5: ['LWB', 'LCB', 'CB', 'RCB', 'RWB'] },
-      M: { 1: ['CM'], 2: ['LCM', 'RCM'], 3: ['LM', 'CM', 'RM'], 4: ['LM', 'LCM', 'RCM', 'RM'], 5: ['LM', 'LCM', 'CM', 'RCM', 'RM'] },
-      F: { 1: ['ST'], 2: ['LF', 'RF'], 3: ['LF', 'CF', 'RF'], 4: ['LW', 'LS', 'RS', 'RW'] },
-    };
-    return {
-      D: slotNames.D[defenders] ?? Array.from({ length: defenders }, (_, index) => `D${index + 1}`),
-      M: slotNames.M[midfielders] ?? Array.from({ length: midfielders }, (_, index) => `M${index + 1}`),
-      F: slotNames.F[forwards] ?? Array.from({ length: forwards }, (_, index) => `F${index + 1}`),
-    };
-  })();
-  return [
-    { label: 'F', groupPositions: ['F'], exactPositions: slots.F },
-    { label: 'M', groupPositions: ['M'], exactPositions: slots.M },
-    { label: 'D', groupPositions: ['D'], exactPositions: slots.D },
-  ];
-}
 
 type ApiPositionRow = { label?: string; positions?: string[] };
 
@@ -119,6 +96,7 @@ export default function RosterScreen() {
   const [error, setError] = useState<string | null>(null);
   const [positionPicker, setPositionPicker] = useState<PositionPickerState>(null);
   const [positionRows, setPositionRows] = useState(() => formationPositionRows(fallbackFormation));
+  const [formation, setFormation] = useState(fallbackFormation);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
@@ -148,7 +126,9 @@ export default function RosterScreen() {
         setTeamId(activeTeamId);
         setTeamName(activeTeam.name);
         setPlayers(rosterPayload.players as Player[]);
-        setPositionRows(formationPositionRows(seasonPayload.formation ?? fallbackFormation));
+        const currentFormation = seasonPayload.formation ?? fallbackFormation;
+        setFormation(currentFormation);
+        setPositionRows(formationPositionRows(currentFormation));
       } catch (requestError) {
         if (!active) return;
         setPositionRows(formationPositionRows(fallbackFormation));
@@ -183,14 +163,22 @@ export default function RosterScreen() {
 
   function openPositionPicker(player: Player, group: PositionGroup) {
     const formationPositions = positionRows.flatMap((row) => row.exactPositions);
+    const generalGroups = player.general_positions.map((position) => position.toUpperCase());
+    const primaryFormationPositions = generalGroups.includes(ANY_POSITION)
+      ? formationPositions
+      : formationPositions.filter((position) => {
+        const row = positionRows.find((candidate) => candidate.exactPositions.includes(position));
+        return row ? generalGroups.includes(row.label) : false;
+      });
     const allowedPositions = group === 'general_positions'
-      ? ['D', 'M', 'F']
+      ? [ANY_POSITION, 'D', 'M', 'F']
       : group === 'backup_positions'
         ? ['D', 'M', 'F', ...formationPositions]
-        : formationPositions;
+        : [ANY_POSITION, ...primaryFormationPositions];
     setPositionPicker({
       playerName: player.name,
       group,
+      allowedPositions,
       positions: (group === 'primary_positions' ? withoutGoalkeeper(player[group]) : player[group])
         .filter((position) => allowedPositions.includes(position)),
     });
@@ -200,7 +188,11 @@ export default function RosterScreen() {
     if (!positionPicker) return;
     const player = players.find((candidate) => candidate.name === positionPicker.playerName);
     if (!player) return;
-    const positions = positionPicker.positions;
+    const positions = positionPicker.positions.includes(ANY_POSITION)
+      ? [ANY_POSITION]
+      : positionPicker.positions.length === 0 && positionPicker.group === 'general_positions'
+        ? [ANY_POSITION]
+        : positionPicker.positions;
     updatePlayer(player.name, {
       [positionPicker.group]: positionPicker.group === 'primary_positions' && isGoalkeeperAllowed(player)
         ? [...positions, 'GK']
@@ -225,6 +217,8 @@ export default function RosterScreen() {
       setSaving(false);
     }
   }
+
+  const positionsNeedReview = !rosterMatchesFormation(formation, players as Player[]);
 
   return (
     <>
@@ -267,6 +261,12 @@ export default function RosterScreen() {
                 </Text>
               </View>
             </View>
+            {positionsNeedReview && (
+              <View style={styles.warningCard}>
+                <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} size={20} tintColor={palette.coral} />
+                <Text style={styles.warningText}>Your formation changed. Update player positions to match the current formation.</Text>
+              </View>
+            )}
 
             <Text style={styles.filterLabel}>Filter by:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
@@ -352,7 +352,9 @@ export default function RosterScreen() {
           ...current,
           positions: current.positions.includes(position)
             ? current.positions.filter((selected) => selected !== position)
-            : [...current.positions, position],
+            : position === ANY_POSITION
+              ? [ANY_POSITION]
+              : [...current.positions.filter((selected) => selected !== ANY_POSITION), position],
         } : current)}
         onFinish={finishPositionPicker}
       />
@@ -361,6 +363,7 @@ export default function RosterScreen() {
 }
 
 function PositionField({ label, value, onPress }: { label: string; value: string[]; onPress: () => void }) {
+    <Text style={styles.positionValueText} numberOfLines={1}>{value.includes(ANY_POSITION) ? 'Any' : value.join(', ') || 'None'}</Text>
   return (
     <Pressable style={styles.positionField} onPress={onPress} accessibilityRole="button">
       <Text style={styles.positionFieldLabel}>{label}</Text>
@@ -402,6 +405,20 @@ function PositionPickerModal({
           </View>
           <Text style={styles.modalHint}>Tap each position to add or remove it.</Text>
           <ScrollView contentContainerStyle={styles.positionRows}>
+            {(picker.group === 'general_positions' || picker.group === 'primary_positions') && (
+              <View style={styles.pickerRow}>
+                <Text style={styles.pickerRowLabel}>Flexible</Text>
+                <View style={styles.pickerOptions}>
+                  <Pressable
+                    onPress={() => onToggle(ANY_POSITION)}
+                    style={[styles.positionOption, picker.positions.includes(ANY_POSITION) && styles.positionOptionSelected]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: picker.positions.includes(ANY_POSITION) }}>
+                    <Text style={[styles.positionOptionText, picker.positions.includes(ANY_POSITION) && styles.positionOptionTextSelected]}>Any</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
             {positionRows.map((row) => {
               const positions = useGroupPositions
                 ? [...row.groupPositions, ...(allowExactPositions ? row.exactPositions : [])]
@@ -410,7 +427,7 @@ function PositionPickerModal({
                 <View key={row.label} style={styles.pickerRow}>
                   <Text style={styles.pickerRowLabel}>{row.label}</Text>
                   <View style={styles.pickerOptions}>
-                    {positions.map((position) => {
+                    {positions.filter((position) => picker.allowedPositions.includes(position)).map((position) => {
                       const selected = picker.positions.includes(position);
                       return (
                         <Pressable
@@ -477,6 +494,24 @@ const styles = StyleSheet.create({
   summaryCopy: { flex: 1, marginLeft: 12 },
   summaryTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   summaryDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  warningCard: {
+    alignItems: 'center',
+    backgroundColor: '#fde4dc',
+    borderColor: palette.coral,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+    padding: 13,
+  },
+  warningText: {
+    color: '#8f3928',
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
   filters: { gap: 8, paddingBottom: 22 },
   filterLabel: { color: palette.muted, fontSize: 12, fontWeight: '800', marginBottom: 8, textTransform: 'uppercase' },
   filterButton: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 9 },

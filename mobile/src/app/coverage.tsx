@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/team-api';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
+import { calculateGroupCoverage } from '@/coverage-utils';
 
 const palette = {
   ink: '#17221f',
@@ -44,19 +45,6 @@ const roleGroups: RoleGroup[] = [
   { key: 'GK', label: 'Goalkeepers' },
 ];
 
-function formationGroupCounts(formation: string): Record<string, number> {
-  if (formation === '2-1-2-1') return { D: 2, M: 3, F: 1 };
-  if (formation === '4-2-3-1') return { D: 4, M: 5, F: 1 };
-  const parts = formation.split('-').map(Number);
-  if (parts.length === 2) return { D: parts[0], M: 0, F: parts[1] };
-  return { D: parts[0], M: parts[1], F: parts[2] };
-}
-
-function recommendedGroupDepth(formation: string, position: string): number {
-  const count = formationGroupCounts(formation)[position] ?? 0;
-  return count + (count <= 2 ? 1 : 2);
-}
-
 function displayPlayerName(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length < 2) return name;
@@ -83,10 +71,6 @@ function playerPositionEntries(player: Player): PositionEntry[] {
   addPositions(player.general_positions, 'general');
   addPositions(player.backup_positions, 'backup');
   return entries;
-}
-
-function isInPosition(player: Player, position: string): boolean {
-  return playerPositionEntries(player).some(({ position: playerPosition }) => belongsToRoleGroup(playerPosition, position));
 }
 
 function belongsToRoleGroup(position: string, group: string): boolean {
@@ -136,14 +120,16 @@ export default function CoverageScreen() {
     };
   }, []));
 
-  const depth = useMemo(() => positionLabels.map((position) => ({
-    position,
-    count: players.filter((player) => isInPosition(player, position)).length,
-    names: players.filter((player) => isInPosition(player, position)).map((player) => player.name),
-    recommended: formation
-      ? position === 'GK' ? 3 : recommendedGroupDepth(formation, position)
-      : null,
-  })), [formation, players]);
+  const coverage = useMemo(() => formation ? calculateGroupCoverage(formation, players) : [], [formation, players]);
+  const depth = useMemo(() => positionLabels.map((position) => {
+    const group = coverage.find((item) => item.group === position);
+    return {
+      position,
+      count: group?.assigned ?? 0,
+      recommended: group?.recommended ?? null,
+      backupNeeded: group?.backupNeeded ?? 0,
+    };
+  }), [coverage]);
 
   const groupedPlayers = useMemo(() => roleGroups.map((group) => ({
     ...group,
@@ -196,6 +182,7 @@ export default function CoverageScreen() {
                   <View style={styles.depthLabel}>
                     <Text style={styles.positionName}>{positionNames[item.position].toUpperCase()}</Text>
                     {item.recommended !== null && <Text style={[styles.recommendation, item.count >= item.recommended && styles.recommendationMet]}>{item.recommended} {positionNames[item.position]} recommended</Text>}
+                    {item.recommended !== null && <Text style={styles.coverageStatus}>{item.backupNeeded > 0 ? `Backup assignments recommended: ${item.backupNeeded} ${item.position}` : 'Covered'}</Text>}
                   </View>
                   <View style={styles.depthGraphRow}>
                     <View style={styles.depthBarTrack}>
@@ -259,6 +246,7 @@ const styles = StyleSheet.create({
   positionName: { color: palette.green, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
   recommendation: { color: palette.coral, fontSize: 9, fontWeight: '700', lineHeight: 12, marginTop: 3 },
   recommendationMet: { color: palette.green },
+  coverageStatus: { color: palette.muted, fontSize: 9, fontWeight: '700', lineHeight: 12, marginTop: 3 },
   depthGraphRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
   depthBarTrack: { backgroundColor: '#edf0e9', borderRadius: 5, flex: 1, height: 9, overflow: 'hidden' },
   depthBar: { backgroundColor: palette.coral, borderRadius: 5, height: 9, minWidth: 4 },

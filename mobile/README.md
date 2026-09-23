@@ -10,11 +10,15 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app
+2. Start the app in Expo Go
 
    ```bash
-   npx expo start
+   npm run start:go
    ```
+
+   Scan the QR code with Expo Go on your phone. Keep the phone and PC on the
+   same Wi-Fi network. Use `npx expo start --tunnel` if the local network
+   connection is unavailable.
 
 ## Run the rotation API
 
@@ -30,7 +34,7 @@ phone, point it at the computer's local network address before starting Expo:
 
 ```powershell
 $env:EXPO_PUBLIC_API_URL = "http://YOUR_COMPUTER_IP:8000"
-npx expo start
+npm run start:go
 ```
 
 The phone and computer must be on the same network.
@@ -41,7 +45,11 @@ assign each player's group and position rules. Saved teams can be switched from
 the Create new team screen; the active team's roster is used for availability
 and schedule generation.
 
-In the output, you'll find options to open the app in a
+For normal development, use Expo Go. The engine and app JavaScript reload from
+your PC without creating an EAS build. EAS builds are only needed to verify
+standalone packaging or release behavior.
+
+The Expo CLI output also includes options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)
 - [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)

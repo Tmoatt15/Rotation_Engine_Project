@@ -346,8 +346,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       const position = isGoalkeeper ? 'GK' : positionEntry?.[0];
       if (!position) return;
       const nextBlock = { ...block, positions: { ...block.positions }, bench: [...block.bench] };
-      if (isGoalkeeper) nextBlock.GK = selectedReplacement;
-      else nextBlock.positions[position] = selectedReplacement;
+      if (isGoalkeeper) {
+        nextBlock.GK = selectedReplacement;
+        nextBlock.positions.GK = selectedReplacement;
+      } else nextBlock.positions[position] = selectedReplacement;
       nextBlock.bench = nextBlock.bench.filter((player) => player !== selectedReplacement);
       nextBlocks = liveBlocks.map((item, index) => {
         if (index === availabilityBlockIndex) return nextBlock;
@@ -367,7 +369,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
         );
         if (!replacement) return futureBlock;
 
-        if (futureIsGoalkeeper) futureBlock.GK = replacement;
+        if (futureIsGoalkeeper) {
+          futureBlock.GK = replacement;
+          futureBlock.positions.GK = replacement;
+        }
         else if (futurePosition) futureBlock.positions[futurePosition] = replacement;
         futureBlock.bench = futureBlock.bench.filter((player) => player !== replacement);
         if (!futureBlock.bench.includes(selectedUnavailablePlayer)) futureBlock.bench.push(selectedUnavailablePlayer);
@@ -386,7 +391,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
         if (index <= availabilityBlockIndex) return item;
         const futureBlock = { ...item, positions: { ...item.positions }, bench: [...item.bench] };
         const displaced = record.position === 'GK' ? futureBlock.GK : futureBlock.positions[record.position];
-        if (record.position === 'GK') futureBlock.GK = record.player;
+        if (record.position === 'GK') {
+          futureBlock.GK = record.player;
+          futureBlock.positions.GK = record.player;
+        }
         else futureBlock.positions[record.position] = record.player;
         futureBlock.bench = futureBlock.bench.filter((player) => player !== record.player);
         if (displaced && displaced !== record.player && !futureBlock.bench.includes(displaced)) futureBlock.bench.push(displaced);

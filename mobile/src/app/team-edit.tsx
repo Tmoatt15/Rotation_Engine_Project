@@ -51,6 +51,7 @@ export default function EditTeamScreen() {
     try {
       const payload = await updateTeam(teamId, teamName.trim(), players);
       setMessage(`${payload.name} was updated.`);
+      router.replace('/');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to save team.');
     } finally {

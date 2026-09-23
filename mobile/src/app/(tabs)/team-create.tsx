@@ -44,7 +44,7 @@ export default function CreateTeamScreen() {
       setTeamName('');
       setPlayerName('');
       setPlayers([]);
-      setMessage(`${payload.name} was created and is now active.`);
+      router.replace('/settings');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create team.');
     } finally {

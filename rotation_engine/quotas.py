@@ -45,6 +45,19 @@ def rotating_high_names(game, players, group):
     }
 
 
+def rotating_core_bonus_names(game, players, count):
+    totals = getattr(game, "season_player_blocks", {})
+    ordered = sorted(
+        players,
+        key=lambda player: (
+            totals.get(player.name, 0),
+            random.Random(f"{game.season_seed}:{game.season_game_number}:core:{player.name}").random(),
+            player.name,
+        ),
+    )
+    return {player.name for player in ordered[:count]}
+
+
 def blocks_for_percentage(total_blocks, percentage, minimum=1):
     """Convert a playing-time percentage into a whole number of blocks."""
     return max(minimum, min(total_blocks, round(total_blocks * percentage)))
@@ -82,19 +95,6 @@ def compute_block_targets(game, roster):
         player for player in roster
         if player.group in {"core", "core_a", "core_b"}
     ]
-    high_core_names = set(game.core_high_names or [])
-    if core_players and not high_core_names:
-        ordered_names = sorted(player.name for player in core_players)
-        randomizer = random.Random(game.season_seed)
-        randomizer.shuffle(ordered_names)
-        high_count = len(ordered_names) // 2
-        offset = ((game.season_game_number - 1) * high_count) % len(ordered_names)
-        selected = [
-            ordered_names[(offset + index) % len(ordered_names)]
-            for index in range(high_count)
-        ]
-        high_core_names = set(selected)
-        game.core_high_names = selected
     rotational_players = [
         player for player in roster
         if player.group == "rotational" and "GK" not in player.primary_positions
@@ -132,6 +132,18 @@ def compute_block_targets(game, roster):
         }
     else:
         formation_counts = {}
+
+    group_minimums = {}
+    for position in ("D", "M", "F"):
+        group_minimums[position] = sum(
+            round(total_blocks * (CORE_MIN if player.group in {"core", "core_a", "core_b"} else GROUP_HARD_MINIMUM.get(player.group, DEVELOPMENTAL_MIN)))
+            for player in roster
+            if position in player.general_positions and "GK" not in player.general_positions
+        )
+    capacities = {position: formation_counts.get(position, 0) * total_blocks for position in ("D", "M", "F")}
+    minimums_feasible = all(group_minimums[position] <= capacities[position] for position in capacities) and sum(group_minimums.values()) <= field_slots
+    high_core_names = rotating_core_bonus_names(game, core_players, len(core_players) // 2) if minimums_feasible else set()
+    game.core_high_names = sorted(high_core_names)
 
     # A position needs one spare eligible player to rotate without forcing
     # someone to play every block. This is advisory only; the schedule still
@@ -171,7 +183,7 @@ def compute_block_targets(game, roster):
                 target = round(total_blocks * CORE_A_TARGET)
                 maximum = target
             else:
-                target = round(total_blocks * CORE_B_TARGET)
+                target = round(total_blocks * CORE_MIN)
                 maximum = target
             minimum = round(total_blocks * CORE_MIN)
 
@@ -224,6 +236,8 @@ def compute_block_targets(game, roster):
             player.hard_maximum_blocks = min(
                 total_blocks, player.hard_maximum_blocks + bonus
             )
+        if player.group in {"core", "core_a", "core_b"}:
+            player.hard_maximum_blocks = min(player.hard_maximum_blocks, target)
         player.max_blocks_per_half = max(1, -(-player.hard_maximum_blocks // 2))
         result.block_counts[player.name] = target
 

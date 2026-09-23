@@ -23,11 +23,19 @@ export function createPlayer(input: PlayerInput): Player {
 function prepareGame(input: Game | GameInput): Game {
   const game = input as Game;
   return {
-    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? game.gk_assignment ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_positions: game.allow_emergency_positions ?? false, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
+    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? game.gk_assignment ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_positions: game.allow_emergency_positions ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
 }
 
 function prepareRoster(roster: Player[]): Player[] { return roster.map((player) => player.position_usage && player.blocks_by_half ? player : createPlayer(player)); }
+
+function startingPositionCounts(timeline: ScheduleBlock[]): Record<string, Record<string, number>> {
+  const starts: Record<string, Record<string, number>> = {};
+  for (const [position, player] of Object.entries(timeline[0]?.positions ?? {})) {
+    starts[player] = { ...(starts[player] ?? {}), [position]: (starts[player]?.[position] ?? 0) + 1 };
+  }
+  return starts;
+}
 
 export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Player[]): RotationResult {
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput);
@@ -35,7 +43,7 @@ export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Play
   const quota = computeBlockTargets(game, roster);
   const timeline = buildTimeline(game, roster);
   const surplus = computeSurplus(game, roster);
-  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: surplus.metadata };
+  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: surplus.metadata, movement_metrics: timeline.movement_metrics, starting_position_counts: startingPositionCounts(timeline.timeline) };
 }
 
 export const generateSchedule = runRotationEngine;
@@ -71,5 +79,5 @@ export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previ
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); computeBlockTargets(game, roster);
   const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen);
   const surplus = computeSurplus(game, roster);
-  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors], metadata: surplus.metadata };
+  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors], metadata: surplus.metadata, movement_metrics: timeline.movement_metrics, starting_position_counts: startingPositionCounts(timeline.timeline) };
 }

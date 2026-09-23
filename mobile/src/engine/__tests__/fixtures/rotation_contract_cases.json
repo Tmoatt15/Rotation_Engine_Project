@@ -1,0 +1,44 @@
+[
+  {
+    "id": "small-field-no-gk",
+    "game": {
+      "total_blocks": 4,
+      "formation": "1-1-1",
+      "first_half_gk": "G1",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {"name": "G1", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "D1", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "D2", "group": "rotational", "general_positions": ["D"], "primary_positions": ["LCB"]},
+      {"name": "M1", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "M2", "group": "rotational", "general_positions": ["M"], "primary_positions": ["LCM"]},
+      {"name": "F1", "group": "core", "general_positions": ["F"], "primary_positions": ["F"]},
+      {"name": "F2", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
+    ],
+    "expect": {"field_players": 3, "has_goalkeeper": true}
+  },
+  {
+    "id": "split-goalkeepers",
+    "game": {
+      "total_blocks": 4,
+      "formation": "1-1-1",
+      "first_half_gk": "G1",
+      "second_half_gk": "G2",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {"name": "G1", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "G2", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "D1", "group": "core", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "D2", "group": "rotational", "general_positions": ["D"], "primary_positions": ["D"]},
+      {"name": "M1", "group": "core", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "M2", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
+      {"name": "F1", "group": "core", "general_positions": ["F"], "primary_positions": ["F"]},
+      {"name": "F2", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
+    ],
+    "expect": {"field_players": 3, "has_goalkeeper": true, "first_goalkeeper": "G1", "second_goalkeeper": "G2"}
+  }
+]

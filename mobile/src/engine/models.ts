@@ -115,6 +115,8 @@ export interface GameInput {
   season_game_number?: number;
   season_seed?: number;
   allow_emergency_positions?: boolean;
+  season_player_blocks?: Record<string, number>;
+  season_position_starts?: Record<string, Record<string, number>>;
 }
 
 export interface Game extends Required<
@@ -137,6 +139,8 @@ export interface Game extends Required<
   availability_changes: AvailabilityChange[];
   quota_exempt_players: Set<string>;
   timeline: ScheduleBlock[];
+  season_player_blocks?: Record<string, number>;
+  season_position_starts?: Record<string, Record<string, number>>;
 }
 
 export interface GoalkeeperSummary {
@@ -151,6 +155,22 @@ export interface RotationMetadata {
   [key: string]: unknown;
 }
 
+export interface MovementHalfMetrics {
+  turnovers: number;
+  exact_slot_switches: number;
+  group_switches: number;
+}
+
+export interface MovementMetrics {
+  turnovers: number;
+  exact_slot_switches: number;
+  group_switches: number;
+  primary_assignments: number;
+  backup_assignments: number;
+  emergency_assignments: number;
+  by_half: [MovementHalfMetrics, MovementHalfMetrics];
+}
+
 export interface RotationResult {
   timeline: ScheduleBlock[];
   block_counts: Record<string, number>;
@@ -159,6 +179,8 @@ export interface RotationResult {
   warnings: string[];
   errors: string[];
   metadata: RotationMetadata;
+  movement_metrics?: MovementMetrics;
+  starting_position_counts?: Record<string, Record<string, number>>;
 }
 
 export interface PositionRow {
@@ -207,6 +229,8 @@ export interface LiveSchedule {
   completed_blocks?: number[];
   live_returned_players?: Array<{ player: string; blockIndex: number }>;
   live_availability_history?: AvailabilityHistory[];
+  movement_metrics?: MovementMetrics;
+  review_status?: 'generated' | 'manually_edited';
   blocks: ScheduleBlock[];
 }
 

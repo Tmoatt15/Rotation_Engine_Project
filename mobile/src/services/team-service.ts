@@ -41,7 +41,7 @@ export async function getSeasonSettings(teamId: string): Promise<SeasonSettings 
 }
 
 export async function createLocalTeam(name: string, players: string[]): Promise<Team> {
-  const roster = players.map((player) => ({ name: player, group: 'rotational' as const, general_positions: ['M'], primary_positions: ['M'], backup_positions: [], excluded_positions: [] }));
+  const roster = players.map((player) => ({ name: player, group: 'rotational' as const, general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] }));
   return createTeam(await getDatabase(), { name, players: roster, season_settings: DEFAULT_SETTINGS });
 }
 
@@ -59,7 +59,7 @@ export async function updateTeam(teamId: string, name: string, players: string[]
   if (!team) throw new Error('Team was not found.');
   await renameTeam(database, teamId, name);
   const existing = team.season_roster ?? [];
-  const roster = players.map((player) => existing.find((item) => item.name === player) ?? ({ name: player, group: 'rotational', general_positions: ['M'], primary_positions: ['M'], backup_positions: [], excluded_positions: [] } as SeasonRosterPlayer));
+  const roster = players.map((player) => existing.find((item) => item.name === player) ?? ({ name: player, group: 'rotational', general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] } as SeasonRosterPlayer));
   await replaceRoster(database, teamId, roster);
   return (await getTeam(database, teamId)) as Team;
 }

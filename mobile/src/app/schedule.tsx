@@ -5,6 +5,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
+import { calculateMovementMetrics } from '@/engine/timeline';
 import LiveScreen from './(tabs)/live';
 import { setAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { saveLocalSchedule } from '@/services/schedule-service';
@@ -35,6 +36,8 @@ type ScheduleData = {
   blocks: ScheduleBlock[];
   warnings: string[];
   errors: string[];
+  movement_metrics?: import('@/engine/models').MovementMetrics;
+  review_status?: 'generated' | 'manually_edited';
 };
 
 type SelectedPosition = { blockIndex: number; position: string };
@@ -96,6 +99,27 @@ const positionRowOrder = [
   'GOALKEEPER',
 ];
 
+function playerHighlight(
+  blocks: ScheduleBlock[],
+  blockNumber: number,
+  position: string,
+  player: string,
+): 'subbedIn' | 'positionChanged' | null {
+  if (blockNumber === 1 || blockNumber === Math.ceil(blocks.length / 2) + 1) return null;
+  const currentBlock = blocks[blockNumber - 1];
+  const previousBlock = blocks[blockNumber - 2];
+  const previousPositions = Object.entries(previousBlock.positions ?? {});
+  const wasOnField = previousPositions.some(([, previousPlayer]) => previousPlayer === player);
+  const cameFromBench = previousBlock.bench?.includes(player) ?? false;
+  if (!wasOnField && cameFromBench) return 'subbedIn';
+
+  const previousPosition = previousPositions.find(([, previousPlayer]) => previousPlayer === player)?.[0];
+  if (previousPosition && currentBlock.positions[position] === player && previousPosition !== position) {
+    return 'positionChanged';
+  }
+  return null;
+}
+
 export default function ScheduleScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ data?: string }>();
@@ -113,6 +137,7 @@ export default function ScheduleScreen() {
   const [scheduleName, setScheduleName] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [hasManualChanges, setHasManualChanges] = useState(false);
   const playerBlockCounts = useMemo(
     () => countPlayerBlocks(schedule?.available_player_names ?? [], blocks),
     [blocks, schedule],
@@ -126,7 +151,30 @@ export default function ScheduleScreen() {
     setBlocks(schedule?.blocks ?? []);
     setSelectedPosition(null);
     setLiveSchedule(null);
+    setHasManualChanges(false);
   }, [schedule]);
+
+  const movementSlots = useMemo(() => {
+    const groups = { D: [] as string[], M: [] as string[], F: [] as string[] };
+    for (const row of positionRows) {
+      const group = row.label.includes('DEFENDER') ? 'D' : row.label.includes('MIDFIELD') ? 'M' : row.label.includes('FORWARD') ? 'F' : null;
+      if (group) groups[group].push(...row.positions.filter((position) => position !== 'GK'));
+    }
+    return groups;
+  }, [positionRows]);
+  const movementMetrics = useMemo(
+    () => {
+      if (!hasManualChanges && schedule?.movement_metrics) return schedule.movement_metrics;
+      const recalculated = calculateMovementMetrics(blocks as unknown as import('@/engine/models').ScheduleBlock[], blocks.length, [], movementSlots);
+      return {
+        ...recalculated,
+        primary_assignments: schedule?.movement_metrics?.primary_assignments ?? recalculated.primary_assignments,
+        backup_assignments: schedule?.movement_metrics?.backup_assignments ?? recalculated.backup_assignments,
+        emergency_assignments: schedule?.movement_metrics?.emergency_assignments ?? recalculated.emergency_assignments,
+      };
+    },
+    [blocks, hasManualChanges, movementSlots, schedule],
+  );
 
   function handlePositionPress(blockIndex: number, position: string) {
     if (position === 'GK') return;
@@ -164,6 +212,7 @@ export default function ScheduleScreen() {
 
       return nextBlocks;
     });
+    setHasManualChanges(true);
     setSelectedPosition(null);
   }
 
@@ -176,7 +225,7 @@ export default function ScheduleScreen() {
     setSavingSchedule(true);
     setSaveError(null);
     try {
-      await saveLocalSchedule(name, { ...schedule, blocks: blocks as unknown as LiveSchedule['blocks'] } as unknown as import('@/engine/models').LiveSchedule);
+      await saveLocalSchedule(name, { ...schedule, blocks: blocks as unknown as LiveSchedule['blocks'], movement_metrics: movementMetrics, review_status: hasManualChanges ? 'manually_edited' : 'generated' } as unknown as import('@/engine/models').LiveSchedule);
       setScheduleName('');
       setShowSaveSchedule(false);
       router.replace('/');
@@ -219,6 +268,26 @@ export default function ScheduleScreen() {
                     <Text style={styles.summaryTitle}>{schedule.available_player_names.length} players scheduled</Text>
                     <Text style={styles.summaryDetail}>{selectedPosition ? 'Tap another field player in this block to swap positions.' : 'Tap two field players in the same block to swap positions.'}</Text>
                   </View>
+                </View>
+                <View style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <Text style={styles.reviewTitle}>Review diagnostics</Text>
+                    <Text style={[styles.reviewStatus, hasManualChanges && styles.reviewStatusManual]}>{hasManualChanges ? 'MANUAL EDITS' : 'GENERATED'}</Text>
+                  </View>
+                  <View style={styles.metricGrid}>
+                    <View style={styles.metricCell}><Text style={styles.metricValue}>{movementMetrics.exact_slot_switches}</Text><Text style={styles.metricLabel}>exact switches</Text></View>
+                    <View style={styles.metricCell}><Text style={styles.metricValue}>{movementMetrics.turnovers}</Text><Text style={styles.metricLabel}>slot turnovers</Text></View>
+                    <View style={styles.metricCell}><Text style={styles.metricValue}>{movementMetrics.group_switches}</Text><Text style={styles.metricLabel}>group switches</Text></View>
+                  </View>
+                  <Text style={styles.reviewDetail}>Half 1: {movementMetrics.by_half[0].exact_slot_switches} exact, {movementMetrics.by_half[0].turnovers} turnovers</Text>
+                  <Text style={styles.reviewDetail}>Half 2: {movementMetrics.by_half[1].exact_slot_switches} exact, {movementMetrics.by_half[1].turnovers} turnovers</Text>
+                  {(movementMetrics.backup_assignments > 0 || movementMetrics.emergency_assignments > 0) && <Text style={styles.reviewDetail}>Position quality: {movementMetrics.backup_assignments} backup, {movementMetrics.emergency_assignments} emergency assignments</Text>}
+                </View>
+                {schedule.errors.length > 0 && <View style={styles.issueCard}><Text style={styles.issueTitle}>Hard errors</Text><Text style={styles.errorText}>{schedule.errors.join(' ')}</Text></View>}
+                {schedule.warnings.length > 0 && <View style={styles.warningCard}><Text style={styles.issueTitle}>Warnings</Text><Text style={styles.warningText}>{schedule.warnings.join(' ')}</Text></View>}
+                <View style={styles.legend}>
+                  <View style={styles.legendItem}><View style={[styles.legendSwatch, styles.subbedInCell]} /><Text style={styles.legendText}>Subbed in</Text></View>
+                  <View style={styles.legendItem}><View style={[styles.legendSwatch, styles.positionChangedCell]} /><Text style={styles.legendText}>Position changed</Text></View>
                 </View>
                 <Pressable
                   onPress={() => setShowPlayerBlocks(true)}
@@ -269,7 +338,7 @@ export default function ScheduleScreen() {
                                   key={`${index}-${position}`}
                                   onPress={() => handlePositionPress(index, position)}
                                   disabled={position === 'GK'}
-                                  style={[styles.assignmentCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
+                                  style={[styles.assignmentCell, playerHighlight(blocks, index + 1, position, player) === 'subbedIn' && styles.subbedInCell, playerHighlight(blocks, index + 1, position, player) === 'positionChanged' && styles.positionChangedCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
                                   accessibilityRole="button"
                                   accessibilityState={{ disabled: position === 'GK', selected: selectedPosition?.blockIndex === index && selectedPosition.position === position }}>
                                   <Text style={styles.positionLabel}>{position}</Text>
@@ -285,7 +354,7 @@ export default function ScheduleScreen() {
                             <View key={`${index}-${position}`} style={styles.positionRow}>
                               <Pressable
                                 onPress={() => handlePositionPress(index, position)}
-                                style={[styles.assignmentCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
+                                style={[styles.assignmentCell, playerHighlight(blocks, index + 1, position, player) === 'subbedIn' && styles.subbedInCell, playerHighlight(blocks, index + 1, position, player) === 'positionChanged' && styles.positionChangedCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
                                 accessibilityRole="button"
                                 accessibilityState={{ selected: selectedPosition?.blockIndex === index && selectedPosition.position === position }}>
                                 <Text style={styles.positionLabel}>{position}</Text>
@@ -302,14 +371,12 @@ export default function ScheduleScreen() {
                     </View>
                   );
                 })}
-                {schedule.warnings.length > 0 && <Text style={styles.warningText}>{schedule.warnings.join(' ')}</Text>}
-                {schedule.errors.length > 0 && <Text style={styles.errorText}>{schedule.errors.join(' ')}</Text>}
                 <Pressable onPress={() => { setSaveError(null); setShowSaveSchedule(true); }} style={styles.saveScheduleButton} accessibilityRole="button">
                   <Text style={styles.saveScheduleText}>SAVE SCHEDULE</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    const acceptedSchedule = { ...schedule, blocks };
+                    const acceptedSchedule = { ...schedule, blocks, movement_metrics: movementMetrics, review_status: hasManualChanges ? 'manually_edited' : 'generated' };
                     void setAcceptedSchedule(acceptedSchedule);
                     setLiveSchedule(acceptedSchedule);
                   }}
@@ -418,5 +485,7 @@ const styles = StyleSheet.create({
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 }, headerCopy: { flex: 1, marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 }, countBadge: { alignItems: 'flex-end' }, countValue: { color: palette.green, fontSize: 23, fontWeight: '800' }, countLabel: { color: palette.muted, fontSize: 11, marginTop: 1 },
   summaryCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 17, flexDirection: 'row', marginBottom: 20, padding: 15 }, summaryIcon: { alignItems: 'center', backgroundColor: palette.panel, borderRadius: 13, height: 44, justifyContent: 'center', width: 44 }, summaryCopy: { flex: 1, marginLeft: 12 }, summaryTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' }, summaryDetail: { color: palette.muted, fontSize: 12, marginTop: 3 },
-  halftimeDivider: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 17, flexDirection: 'row', gap: 12, marginBottom: 12, marginTop: 4, paddingHorizontal: 15, paddingVertical: 13 }, halftimeLine: { backgroundColor: '#9dc5ae', flex: 1, height: 2 }, halftimeText: { color: palette.green, fontSize: 14, fontWeight: '800', letterSpacing: 2 }, blockCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, overflow: 'hidden' }, blockHeader: { alignItems: 'baseline', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 12 }, blockTitle: { color: palette.green, fontSize: 16, fontWeight: '800' }, benchText: { color: palette.muted, fontSize: 11 }, assignmentList: { paddingHorizontal: 15, paddingVertical: 6 }, positionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 6 }, assignmentCell: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 0, paddingHorizontal: 4, paddingVertical: 8, width: '22%' }, assignmentCellSelected: { backgroundColor: '#f6e8c7', borderColor: palette.coral, borderWidth: 2 }, positionLabel: { color: palette.muted, fontSize: 10, fontWeight: '800' }, assignmentName: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 }, benchList: { backgroundColor: '#f7f4ed', borderTopColor: palette.line, borderTopWidth: 1, paddingHorizontal: 15, paddingVertical: 11 }, benchLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, benchNames: { color: palette.ink, fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 4 }, emptyCard: { backgroundColor: palette.panel, borderRadius: 17, padding: 18 }, emptyText: { color: palette.muted, fontSize: 13 }, warningText: { color: '#956d1b', fontSize: 12, lineHeight: 18, marginTop: 4 }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  reviewCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 16, padding: 15 }, reviewHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, reviewTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' }, reviewStatus: { color: palette.green, fontSize: 10, fontWeight: '900', letterSpacing: 1 }, reviewStatusManual: { color: palette.coral }, metricGrid: { flexDirection: 'row', gap: 8, marginTop: 14 }, metricCell: { backgroundColor: '#f7f4ed', borderRadius: 10, flex: 1, padding: 10 }, metricValue: { color: palette.green, fontSize: 20, fontWeight: '900' }, metricLabel: { color: palette.muted, fontSize: 10, marginTop: 2 }, reviewDetail: { color: palette.muted, fontSize: 11, marginTop: 8 }, issueCard: { backgroundColor: '#fbe9e4', borderColor: '#e8b4a6', borderRadius: 14, borderWidth: 1, marginBottom: 12, padding: 14 }, warningCard: { backgroundColor: '#fff4d8', borderColor: '#e8cc82', borderRadius: 14, borderWidth: 1, marginBottom: 12, padding: 14 }, issueTitle: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase' },
+  legend: { alignItems: 'center', flexDirection: 'row', gap: 16, marginBottom: 14, paddingHorizontal: 3 }, legendItem: { alignItems: 'center', flexDirection: 'row', gap: 6 }, legendSwatch: { borderRadius: 4, height: 12, width: 12 }, legendText: { color: palette.muted, fontSize: 11, fontWeight: '700' },
+  halftimeDivider: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 17, flexDirection: 'row', gap: 12, marginBottom: 12, marginTop: 4, paddingHorizontal: 15, paddingVertical: 13 }, halftimeLine: { backgroundColor: '#9dc5ae', flex: 1, height: 2 }, halftimeText: { color: palette.green, fontSize: 14, fontWeight: '800', letterSpacing: 2 }, blockCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, overflow: 'hidden' }, blockHeader: { alignItems: 'baseline', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 12 }, blockTitle: { color: palette.green, fontSize: 16, fontWeight: '800' }, benchText: { color: palette.muted, fontSize: 11 }, assignmentList: { paddingHorizontal: 15, paddingVertical: 6 }, positionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 6 }, assignmentCell: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 0, paddingHorizontal: 4, paddingVertical: 8, width: '22%' }, subbedInCell: { backgroundColor: '#dcebe2', borderColor: palette.green }, positionChangedCell: { backgroundColor: '#f8e5b2', borderColor: '#b4872e' }, assignmentCellSelected: { backgroundColor: '#f6e8c7', borderColor: palette.coral, borderWidth: 2 }, positionLabel: { color: palette.muted, fontSize: 10, fontWeight: '800' }, assignmentName: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 }, benchList: { backgroundColor: '#f7f4ed', borderTopColor: palette.line, borderTopWidth: 1, paddingHorizontal: 15, paddingVertical: 11 }, benchLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, benchNames: { color: palette.ink, fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 4 }, emptyCard: { backgroundColor: palette.panel, borderRadius: 17, padding: 18 }, emptyText: { color: palette.muted, fontSize: 13 }, warningText: { color: '#956d1b', fontSize: 12, lineHeight: 18, marginTop: 4 }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 4 },
 });

@@ -92,6 +92,7 @@ class Game:
         season_game_number=1,
         season_seed=2026,
         allow_emergency_positions=False,
+        season_player_blocks=None,
     ):
         # Number of blocks in the game (usually 10)
         self.total_blocks = total_blocks
@@ -108,6 +109,7 @@ class Game:
         self.season_total_games = season_total_games
         self.season_game_number = season_game_number
         self.season_seed = season_seed
+        self.season_player_blocks = season_player_blocks or {}
         self.core_high_names = None
         self.allow_emergency_positions = allow_emergency_positions
         # Mid-game replacement bookkeeping survives later regenerations.
