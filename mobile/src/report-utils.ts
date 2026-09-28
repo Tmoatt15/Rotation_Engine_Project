@@ -6,6 +6,15 @@ export type AvailabilityHistory = {
   position: string;
   endBlockIndex?: number;
 };
+export type LivePositionOverride = {
+  blockIndex: number;
+  player: string;
+  fromPosition: string;
+  toPosition: string;
+  scope: 'current_block' | 'rest_of_game';
+  reason: 'coach_swap';
+  legalBefore: boolean;
+};
 export type PlayerGameReport = {
   player: string;
   blocksPlayed: number;
@@ -19,12 +28,22 @@ export type AfterGameReport = {
   game_number: number;
   created_at: string;
   total_blocks: number;
+  attendance?: number;
   block_lengths_minutes?: number[];
+  structural_errors?: string[];
+  core_player_names?: string[];
+  starting_positions?: Record<string, string>;
+  ending_positions?: Record<string, string>;
+  position_overrides?: LivePositionOverride[];
+  position_override_warnings?: string[];
   players: PlayerGameReport[];
 };
 
 type ReportSchedule = Pick<AfterGameReport, 'team_id' | 'team_name' | 'game_number' | 'block_lengths_minutes'> & {
   block_start_minutes?: number[];
+  available_player_names?: string[];
+  core_player_names?: string[];
+  structural_errors?: string[];
 };
 
 const INVALID_ASSIGNMENTS = new Set(['UNASSIGNED', 'NO GK AVAILABLE']);
@@ -39,6 +58,7 @@ export function buildAfterGameReport(
   schedule: ReportSchedule,
   blocks: ScheduleBlock[],
   availabilityHistory: AvailabilityHistory[],
+  positionOverrides: LivePositionOverride[] = [],
 ): AfterGameReport {
   const players = new Map<string, PlayerGameReport>();
   blocks.forEach((block, blockIndex) => {
@@ -78,7 +98,14 @@ export function buildAfterGameReport(
     game_number: schedule.game_number,
     created_at: new Date().toISOString(),
     total_blocks: blocks.length,
+    attendance: schedule.available_player_names?.length,
     block_lengths_minutes: schedule.block_lengths_minutes,
+    structural_errors: schedule.structural_errors ?? [],
+    core_player_names: schedule.core_player_names,
+    starting_positions: Object.fromEntries(canonicalFieldAssignments(blocks[0] ?? { positions: {}, bench: [], GK: '' })),
+    ending_positions: Object.fromEntries(canonicalFieldAssignments(blocks[blocks.length - 1] ?? { positions: {}, bench: [], GK: '' })),
+    position_overrides: positionOverrides,
+    position_override_warnings: positionOverrides.filter((override) => !override.legalBefore).map((override) => `Manual position override: ${override.player} moved from ${override.fromPosition} to ${override.toPosition} in Block ${override.blockIndex + 1}.`),
     players: [...players.values()].sort((first, second) => first.player.localeCompare(second.player)),
   };
 }

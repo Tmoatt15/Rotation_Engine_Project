@@ -6,16 +6,30 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, Vi
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LiveSchedule } from '@/live-schedule';
+import { canCoverSlot } from '@/engine/timeline';
+import { POSITION_GROUP_BY_SLOT } from '@/engine/positional';
+import { createPlayer } from '@/engine/rotation';
+import type { Player, PositionGroup } from '@/engine/models';
+import { getRoster } from '@/services/team-service';
+import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
 
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
-  green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c',
+  green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c', halftime: '#496a78',
 };
 
 type ScheduleBlock = LiveSchedule['blocks'][number];
 type PositionRow = NonNullable<LiveSchedule['position_rows']>[number];
 type AvailabilityRecord = AvailabilityHistory;
+type PendingSwap = {
+  blockIndex: number;
+  firstPosition: string;
+  secondPosition: string;
+  firstPlayer: string;
+  secondPlayer: string;
+  firstLegal: boolean;
+  secondLegal: boolean;
+};
 
 const fallbackPositionRows: PositionRow[] = [
   { label: 'FORWARDS', positions: ['LF', 'RF'] },
@@ -43,11 +57,9 @@ function parseTimer(value: string): number | null {
 }
 
 function triggerVibrationPulse() {
-  if (Platform.OS === 'android') {
-    Vibration.vibrate(220);
-    return;
-  }
-  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  if (Platform.OS === 'web') return;
+  Vibration.vibrate([0, 260, 140, 260, 140, 260]);
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => undefined);
 }
 
 function formatBlockTime(minutes: number): string {
@@ -76,15 +88,13 @@ function blockHeader(schedule: LiveSchedule, blockIndex: number): { title: strin
   const halftimeIndex = Math.ceil(schedule.blocks.length / 2);
   const isFirstBlock = blockIndex === 0;
   const isSecondHalfStarter = blockIndex === halftimeIndex;
-  const isBeforeHalftime = blockIndex === halftimeIndex - 1;
   const isFinalBlock = blockIndex === schedule.blocks.length - 1;
   const blockLength = formatBlockTime(schedule.block_lengths_minutes?.[blockIndex] ?? 0);
 
-  if (isBeforeHalftime) return { title: 'Halftime', detail: 'Last substitution of the half.' };
-  if (isFinalBlock) return { title: isSecondHalfStarter ? 'Second Half Starters' : 'Substitution block', detail: 'Last substitution of the game.' };
+  if (isFinalBlock) return { title: isSecondHalfStarter ? 'Second Half Starters' : `Block ${blockIndex + 1}`, detail: 'Last substitution of the game.' };
   if (isFirstBlock) return { title: 'Game Starters', detail: `Next substitution occurs at ${blockStartTime(schedule, blockIndex + 1)}` };
   if (isSecondHalfStarter) return { title: 'Second Half Starters', detail: `Next substitution occurs at ${blockStartTime(schedule, blockIndex + 1)}` };
-  return { title: 'Substitution block', detail: `Next substitution occurs at ${blockStartTime(schedule, blockIndex + 1)}` };
+  return { title: `Block ${blockIndex + 1}`, detail: `Next substitution occurs at ${blockStartTime(schedule, blockIndex + 1)}` };
 }
 
 function playerHighlight(
@@ -106,6 +116,12 @@ function playerHighlight(
     return 'positionChanged';
   }
   return null;
+}
+
+function playerCameOffField(blocks: ScheduleBlock[], blockIndex: number, player: string): boolean {
+  if (blockIndex === 0 || blockIndex === Math.ceil(blocks.length / 2)) return false;
+  const previousPositions = Object.values(blocks[blockIndex - 1].positions ?? {});
+  return previousPositions.includes(player) && blocks[blockIndex].bench?.includes(player) === true;
 }
 
 type LiveScreenProps = {
@@ -138,6 +154,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [availabilityBlockIndex, setAvailabilityBlockIndex] = useState(0);
   const [selectedUnavailablePlayer, setSelectedUnavailablePlayer] = useState<string | null>(null);
   const [selectedReplacement, setSelectedReplacement] = useState<string | null>(null);
+  const [roster, setRoster] = useState<Player[]>([]);
+  const [positionOverrides, setPositionOverrides] = useState<LivePositionOverride[]>([]);
+  const [selectedPosition, setSelectedPosition] = useState<{ blockIndex: number; position: string } | null>(null);
+  const [pendingSwap, setPendingSwap] = useState<PendingSwap | null>(null);
   const warnedBlocks = useRef(new Set<string>());
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -159,8 +179,20 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setAvailabilityHistory(schedule.live_availability_history ?? schedule.live_availability ?? []);
       setCompletedBlocks(schedule.completed_blocks ?? []);
       setReturnedPlayers(schedule.live_returned_players ?? []);
+      setPositionOverrides(schedule.live_position_overrides ?? []);
     }
   }, [schedule]);
+
+  useEffect(() => {
+    if (!schedule?.team_id) return undefined;
+    let active = true;
+    getRoster(schedule.team_id).then((payload) => {
+      if (active) setRoster(payload.players.map((player) => createPlayer(player)));
+    }).catch(() => {
+      if (active) setRoster([]);
+    });
+    return () => { active = false; };
+  }, [schedule?.team_id]);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -198,11 +230,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       }, 140);
     }
     if (alert === 'vibrate' || alert === 'flash_and_vibrate') {
-      for (let pulse = 0; pulse < 5; pulse += 1) {
-        setTimeout(() => {
-          triggerVibrationPulse();
-        }, pulse * 300);
-      }
+      triggerVibrationPulse();
     }
   }, [activeBlock, running, schedule, secondHalf, seconds]);
 
@@ -260,13 +288,92 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
 
   async function endGame() {
     if (!schedule) return;
-    const report = buildAfterGameReport(schedule, liveBlocks, availabilityHistory);
+    const report = buildAfterGameReport(schedule, liveBlocks, availabilityHistory, positionOverrides);
     await clearAcceptedSchedule();
     if (onGameEnded) {
       onGameEnded(report);
     } else {
       exitLiveMode();
     }
+  }
+
+  function getPositionGroup(position: string): PositionGroup | null {
+    return POSITION_GROUP_BY_SLOT[position] ?? null;
+  }
+
+  function isLegalPosition(playerName: string, position: string): boolean {
+    const player = roster.find((candidate) => candidate.name === playerName);
+    const group = getPositionGroup(position);
+    return Boolean(player && group && canCoverSlot(player, position, group));
+  }
+
+  function swapPositions(block: ScheduleBlock, firstPosition: string, secondPosition: string): ScheduleBlock {
+    const firstPlayer = block.positions[firstPosition];
+    const secondPlayer = block.positions[secondPosition];
+    const nextBlock = { ...block, positions: { ...block.positions }, bench: [...block.bench] } as ScheduleBlock;
+    nextBlock.positions[firstPosition] = secondPlayer;
+    nextBlock.positions[secondPosition] = firstPlayer;
+    for (const group of ['D', 'M', 'F']) {
+      const players = nextBlock[group];
+      if (Array.isArray(players)) nextBlock[group] = players.filter((player) => player !== firstPlayer && player !== secondPlayer);
+    }
+    const firstGroup = getPositionGroup(firstPosition);
+    const secondGroup = getPositionGroup(secondPosition);
+    if (firstGroup && Array.isArray(nextBlock[firstGroup])) nextBlock[firstGroup].push(secondPlayer);
+    if (secondGroup && Array.isArray(nextBlock[secondGroup])) nextBlock[secondGroup].push(firstPlayer);
+    return nextBlock;
+  }
+
+  function selectPosition(blockIndex: number, position: string) {
+    if (position === 'GK' || completedBlocks.includes(blockIndex) || availabilityMode || selectingUnavailablePlayer) return;
+    const player = liveBlocks[blockIndex]?.positions[position];
+    if (!player || player === 'UNASSIGNED') return;
+    if (!selectedPosition) {
+      setSelectedPosition({ blockIndex, position });
+      return;
+    }
+    if (selectedPosition.blockIndex !== blockIndex) {
+      setSelectedPosition({ blockIndex, position });
+      return;
+    }
+    if (selectedPosition.position === position) {
+      setSelectedPosition(null);
+      return;
+    }
+    const firstPlayer = liveBlocks[blockIndex]?.positions[selectedPosition.position];
+    if (!firstPlayer) return;
+    setPendingSwap({
+      blockIndex,
+      firstPosition: selectedPosition.position,
+      secondPosition: position,
+      firstPlayer,
+      secondPlayer: player,
+      firstLegal: isLegalPosition(firstPlayer, position),
+      secondLegal: isLegalPosition(player, selectedPosition.position),
+    });
+    setSelectedPosition(null);
+  }
+
+  async function confirmPositionSwap(scope: LivePositionOverride['scope']) {
+    if (!schedule || !pendingSwap) return;
+    const { blockIndex, firstPosition, secondPosition, firstPlayer, secondPlayer } = pendingSwap;
+    const nextBlocks = liveBlocks.map((block, index) => {
+      if (index === blockIndex) return swapPositions(block, firstPosition, secondPosition);
+      if (scope === 'rest_of_game' && index > blockIndex
+        && block.positions[firstPosition] === firstPlayer
+        && block.positions[secondPosition] === secondPlayer) {
+        return swapPositions(block, firstPosition, secondPosition);
+      }
+      return block;
+    });
+    const nextOverrides = [...positionOverrides,
+      { blockIndex, player: firstPlayer, fromPosition: firstPosition, toPosition: secondPosition, scope, reason: 'coach_swap' as const, legalBefore: pendingSwap.firstLegal },
+      { blockIndex, player: secondPlayer, fromPosition: secondPosition, toPosition: firstPosition, scope, reason: 'coach_swap' as const, legalBefore: pendingSwap.secondLegal },
+    ];
+    setLiveBlocks(nextBlocks);
+    setPositionOverrides(nextOverrides);
+    setPendingSwap(null);
+    await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, live_returned_players: returnedPlayers });
   }
 
   function openUnavailable(blockIndex: number) {
@@ -290,6 +397,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       blocks: liveBlocks,
       live_availability: availabilityRecords,
       live_availability_history: availabilityHistory,
+      live_position_overrides: positionOverrides,
       completed_blocks: nextCompletedBlocks,
       live_returned_players: returnedPlayers,
     });
@@ -304,6 +412,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       blocks: liveBlocks,
       live_availability: availabilityRecords,
       live_availability_history: availabilityHistory,
+      live_position_overrides: positionOverrides,
       completed_blocks: nextCompletedBlocks,
     });
   }
@@ -413,6 +522,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       blocks: nextBlocks,
       live_availability: nextAvailabilityRecords,
       live_availability_history: nextAvailabilityHistory,
+      live_position_overrides: positionOverrides,
       completed_blocks: completedBlocks,
       live_returned_players: nextReturnedPlayers,
     });
@@ -424,23 +534,26 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.liveScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
               <Pressable onPress={exitLiveMode} style={styles.backButton} accessibilityLabel="Exit live game">
                 <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
               </Pressable>
               <View style={styles.headerCopy}>
                 <Text style={styles.eyebrow}>GAME {schedule.game_number} · LIVE</Text>
-                <Text style={styles.title}>{schedule.team_name ? `${schedule.team_name} Live Game` : 'Live game mode'}</Text>
+                <Text style={styles.title}>{schedule.team_name ?? 'Live game mode'}</Text>
               </View>
               <Text style={styles.halfLabel}>{secondHalf ? '2ND HALF' : '1ST HALF'}</Text>
             </View>
 
             <View style={styles.timerCard}>
               <Text style={styles.timer}>{formatTimer(seconds)}</Text>
-              <Pressable onPress={() => setRunning((current) => !current)} style={styles.timerButton} accessibilityRole="button">
+              <Pressable
+                onPress={() => setRunning((current) => !current)}
+                style={styles.timerButton}
+                accessibilityRole="button"
+                accessibilityLabel={running ? 'Pause timer' : seconds === 0 ? 'Start timer' : 'Resume timer'}>
                 <SymbolView name={{ ios: running ? 'pause.fill' : 'play.fill', android: running ? 'pause' : 'play_arrow', web: running ? 'pause' : 'play_arrow' }} size={17} tintColor={palette.panel} />
-                <Text style={styles.timerButtonText}>{running ? 'Pause timer' : seconds === 0 ? 'Start timer' : 'Resume timer'}</Text>
               </Pressable>
               <Pressable onPress={openTimeEditor} style={styles.setTimeButton} accessibilityRole="button">
                 <SymbolView name={{ ios: 'pencil', android: 'edit', web: 'edit' }} size={15} tintColor={palette.green} />
@@ -451,7 +564,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
             <View style={styles.blockHeading}>
               <View>
                 <Text style={styles.sectionEyebrow}>CURRENT BLOCK</Text>
-                <Text style={styles.blockTitle}>Block {activeBlock + 1}</Text>
+                {!!positionOverrides.some((override) => !override.legalBefore) && <Text style={styles.overrideWarningText}>Manual position override recorded</Text>}
               </View>
               {!isEndOfFirstHalf && !isEndOfGame && <Text style={styles.swipeHint}>Swipe Left for next block.</Text>}
             </View>
@@ -479,7 +592,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                       const header = blockHeader(schedule, blockIndex);
                       return (
                         <View style={styles.blockCardHeader}>
-                          <Text style={styles.blockCardTitle}>{header.title}</Text>
+                          <Text style={[styles.blockCardTitle, header.title === 'Halftime' && styles.halftimeTitle]}>{header.title}</Text>
                           <Text style={styles.blockCardDetail}>{header.detail}</Text>
                         </View>
                       );
@@ -495,11 +608,11 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                               {assignments.map((position) => (
                                 <Pressable
                                   key={`${index}-${position}`}
-                                  style={[styles.assignmentCell, !completedBlocks.includes(blockIndex) && (playerHighlight(liveBlocks, secondHalf ? index + halftimeIndex + 1 : index + 1, position, block.positions[position]) === 'subbedIn' || returnedPlayers.some((item) => item.player === block.positions[position] && item.blockIndex === blockIndex)) && styles.subbedInCell, !completedBlocks.includes(blockIndex) && playerHighlight(liveBlocks, secondHalf ? index + halftimeIndex + 1 : index + 1, position, block.positions[position]) === 'positionChanged' && styles.positionChangedCell]}
-                                  onPress={() => selectingUnavailablePlayer && selectUnavailablePlayer(block.positions[position], blockIndex)}
-                                  disabled={!selectingUnavailablePlayer}
-                                  accessibilityRole={selectingUnavailablePlayer ? 'button' : undefined}
-                                  accessibilityLabel={selectingUnavailablePlayer ? `Mark ${displayPlayerName(block.positions[position])} unavailable` : undefined}>
+                                  style={[styles.assignmentCell, selectedPosition?.blockIndex === blockIndex && selectedPosition.position === position && styles.selectedAssignmentCell, !completedBlocks.includes(blockIndex) && (playerHighlight(liveBlocks, secondHalf ? index + halftimeIndex + 1 : index + 1, position, block.positions[position]) === 'subbedIn' || returnedPlayers.some((item) => item.player === block.positions[position] && item.blockIndex === blockIndex)) && styles.subbedInCell, !completedBlocks.includes(blockIndex) && playerHighlight(liveBlocks, secondHalf ? index + halftimeIndex + 1 : index + 1, position, block.positions[position]) === 'positionChanged' && styles.positionChangedCell]}
+                                  onPress={() => selectingUnavailablePlayer ? selectUnavailablePlayer(block.positions[position], blockIndex) : selectPosition(blockIndex, position)}
+                                  disabled={completedBlocks.includes(blockIndex) && !selectingUnavailablePlayer}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={selectingUnavailablePlayer ? `Mark ${displayPlayerName(block.positions[position])} unavailable` : `Select ${displayPlayerName(block.positions[position])} at ${position}`}>
                                   <Text style={styles.positionLabel}>{position}</Text>
                                   <Text style={styles.assignmentName} numberOfLines={1}>{displayPlayerName(block.positions[position])}</Text>
                                 </Pressable>
@@ -511,7 +624,15 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                     </View>
                     <View style={styles.benchList}>
                       <Text style={styles.benchLabel}>BENCH · {block.bench?.length ?? 0}</Text>
-                      <Text style={styles.benchNames}>{block.bench?.map(displayPlayerName).join(', ') || 'None'}</Text>
+                      <Text style={styles.benchNames}>
+                        {block.bench?.length
+                          ? block.bench.map((player, playerIndex, bench) => (
+                            <Text key={player} style={playerCameOffField(liveBlocks, blockIndex, player) ? styles.benchSubbedOutName : undefined}>
+                              {displayPlayerName(player)}{playerIndex < bench.length - 1 ? ', ' : ''}
+                            </Text>
+                          ))
+                          : 'None'}
+                      </Text>
                       {selectingUnavailablePlayer && blockIndex === activeBlock ? (
                         <View style={styles.selectionPrompt}>
                           <Text style={styles.selectionPromptText}>TAP A FIELD PLAYER TO MARK UNAVAILABLE</Text>
@@ -542,6 +663,8 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
               })}
             </ScrollView>
 
+          </ScrollView>
+          <View style={styles.liveActionFooter}>
             {completedBlocks.includes(activeBlock) ? (
               <Pressable onPress={() => void reopenBlock(activeBlock)} style={styles.completedBlockBadge} accessibilityRole="button" hitSlop={8}>
                 <Text style={styles.completedBlockText}>BLOCK COMPLETED · TAP TO REOPEN</Text>
@@ -564,8 +687,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <SymbolView name={{ ios: 'checkmark', android: 'check', web: 'check' }} size={19} tintColor={palette.panel} />
               </Pressable>
             )}
-            {!isEndOfFirstHalf && !isEndOfGame && currentBlock && <Text style={styles.footerHint}>{secondHalf ? 'Second-half timer is ready. Start when play resumes.' : 'Swipe through the approved blocks as substitutions happen.'}</Text>}
-          </ScrollView>
+          </View>
         </SafeAreaView>
       </View>
       {showWarningFlash && <View pointerEvents="none" style={styles.warningFlash} />}
@@ -658,6 +780,29 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
           </View>
         </View>
       </Modal>
+      <Modal visible={pendingSwap !== null} transparent animationType="fade" onRequestClose={() => setPendingSwap(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <Text style={styles.modalEyebrow}>LIVE POSITION SWITCH</Text>
+            <Text style={styles.modalTitle}>Choose how long this lasts</Text>
+            <Text style={styles.modalDetail}>{pendingSwap && `${displayPlayerName(pendingSwap.firstPlayer)} and ${displayPlayerName(pendingSwap.secondPlayer)} will exchange positions.`}</Text>
+            {pendingSwap && (!pendingSwap.firstLegal || !pendingSwap.secondLegal) && <Text style={styles.overrideNotice}>This creates an eligibility override. It will be visible in the game report.</Text>}
+            <View style={styles.scopeChoices}>
+              <Pressable onPress={() => void confirmPositionSwap('current_block')} style={styles.scopeButton} accessibilityRole="button">
+                <Text style={styles.scopeButtonTitle}>This block only</Text>
+                <Text style={styles.scopeButtonDetail}>Recommended</Text>
+              </Pressable>
+              <Pressable onPress={() => void confirmPositionSwap('rest_of_game')} style={styles.scopeButton} accessibilityRole="button">
+                <Text style={styles.scopeButtonTitle}>Rest of game</Text>
+                <Text style={styles.scopeButtonDetail}>Only while both players remain on field</Text>
+              </Pressable>
+            </View>
+            <Pressable onPress={() => setPendingSwap(null)} style={styles.cancelButton} accessibilityRole="button">
+              <Text style={styles.cancelButtonText}>CANCEL</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -665,19 +810,20 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
-  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
-  header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 },
+  liveScroll: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: BottomTabInset + 16 },
+  liveActionFooter: { backgroundColor: palette.paper, paddingHorizontal: 16, paddingBottom: 8, paddingTop: 6 },
+  header: { alignItems: 'center', flexDirection: 'row', marginBottom: 12 },
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
   headerCopy: { flex: 1, marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 },
-  title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
+  title: { color: palette.ink, fontSize: 24, fontWeight: '800', marginTop: 3 },
   halfLabel: { color: palette.green, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  timerCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, marginBottom: 22, padding: 18 },
+  timerCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, flexDirection: 'row', gap: 12, justifyContent: 'space-evenly', marginBottom: 8, paddingHorizontal: 14, paddingVertical: 8 },
   timerLabel: { color: palette.green, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
-  timer: { color: palette.ink, fontSize: 48, fontWeight: '800', letterSpacing: 1, marginVertical: 5 },
-  timerButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 11, flexDirection: 'row', gap: 7, paddingHorizontal: 14, paddingVertical: 9 },
-  timerButtonText: { color: palette.panel, fontSize: 12, fontWeight: '800' },
-  setTimeButton: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 12, padding: 5 },
+  timer: { color: palette.ink, fontSize: 38, fontWeight: '800', letterSpacing: 1 },
+  timerButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 11, height: 40, justifyContent: 'center', width: 40 },
+  setTimeButton: { alignItems: 'center', flexDirection: 'column', gap: 2, justifyContent: 'center', paddingHorizontal: 4, paddingVertical: 2 },
   setTimeButtonText: { color: palette.green, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   modalOverlay: { alignItems: 'center', backgroundColor: 'rgba(23, 34, 31, 0.55)', flex: 1, justifyContent: 'center', padding: 20 },
   timeModal: { backgroundColor: palette.panel, borderRadius: 20, padding: 20, width: '100%' },
@@ -691,31 +837,32 @@ const styles = StyleSheet.create({
   cancelButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   applyButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 12, flex: 1, paddingVertical: 13 },
   applyButtonText: { color: palette.panel, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-  blockHeading: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 10 },
+  blockHeading: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 6 },
   legendItem: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   legendSwatch: { borderRadius: 4, height: 12, width: 12 },
   legendText: { color: palette.muted, fontSize: 10, fontWeight: '700' },
-  sectionEyebrow: { color: palette.coral, fontSize: 10, fontWeight: '900', letterSpacing: 1.3 },
+  sectionEyebrow: { color: palette.coral, fontSize: 16, fontWeight: '800', letterSpacing: 0 },
   blockTitle: { color: palette.ink, fontSize: 21, fontWeight: '800', marginTop: 3 },
   swipeHint: { color: palette.muted, fontSize: 11 },
   page: { width: 360 },
   blockCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, overflow: 'hidden' },
-  blockCardHeader: { alignItems: 'center', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 13 },
-  blockCardTitle: { color: palette.green, flex: 1, fontSize: 16, fontWeight: '800' },
+  blockCardHeader: { alignItems: 'center', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 10 },
+  blockCardTitle: { color: palette.ink, flex: 1, fontSize: 16, fontWeight: '800' }, halftimeTitle: { color: palette.halftime },
   blockCardDetail: { color: palette.green, fontSize: 10, fontWeight: '800', marginLeft: 12, textAlign: 'right' },
   assignmentList: { padding: 15 },
   positionGroup: { marginBottom: 13 },
   positionGroupLabel: { color: palette.muted, fontSize: 10, fontWeight: '900', letterSpacing: 1, marginBottom: 6, textAlign: 'center' },
   assignmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   assignmentCell: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flex: 1, minWidth: 62, paddingHorizontal: 4, paddingVertical: 8 },
+  selectedAssignmentCell: { backgroundColor: '#f8e5b2', borderColor: '#b4872e', borderWidth: 2 },
   subbedInCell: { backgroundColor: '#dcebe2', borderColor: palette.green },
   positionChangedCell: { backgroundColor: '#f8e5b2', borderColor: '#b4872e' },
   positionLabel: { color: palette.muted, fontSize: 10, fontWeight: '800' },
   assignmentName: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 },
   benchList: { backgroundColor: '#f7f4ed', borderTopColor: palette.line, borderTopWidth: 1, padding: 15 },
   benchLabel: { color: palette.muted, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  benchNames: { color: palette.ink, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  benchNames: { color: palette.ink, fontSize: 12, lineHeight: 18, marginTop: 4 }, benchSubbedOutName: { color: palette.coral },
   availabilityButton: { alignItems: 'center', borderColor: palette.coral, borderRadius: 10, borderWidth: 1, marginTop: 13, paddingVertical: 10 },
   availabilityButtonText: { color: palette.coral, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
   selectionPrompt: { alignItems: 'center', borderTopColor: '#efc8bc', borderTopWidth: 1, marginTop: 13, paddingTop: 12 },
@@ -739,6 +886,12 @@ const styles = StyleSheet.create({
   choiceHint: { color: palette.muted, fontSize: 10 },
   selectedChoice: { color: palette.coral, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   confirmDetail: { backgroundColor: palette.greenSoft, borderRadius: 11, color: palette.green, fontSize: 13, fontWeight: '700', lineHeight: 19, marginTop: 18, padding: 12 },
+  overrideNotice: { backgroundColor: '#f8e5b2', borderRadius: 11, color: '#76591a', fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 14, padding: 12 },
+  scopeChoices: { gap: 9, marginTop: 18 },
+  scopeButton: { backgroundColor: palette.greenSoft, borderColor: palette.green, borderRadius: 11, borderWidth: 1, padding: 13 },
+  scopeButtonTitle: { color: palette.green, fontSize: 13, fontWeight: '900' },
+  scopeButtonDetail: { color: palette.muted, fontSize: 11, marginTop: 3 },
+  overrideWarningText: { color: palette.coral, fontSize: 10, fontWeight: '800', marginTop: 3 },
   halftimeButton: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', marginTop: 18, paddingHorizontal: 17, paddingVertical: 16 },
   halftimeButtonText: { color: palette.panel, fontSize: 14, fontWeight: '800' },
   endGameButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', marginTop: 18, paddingHorizontal: 17, paddingVertical: 16 },

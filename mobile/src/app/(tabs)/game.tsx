@@ -1,13 +1,16 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { createPlayer } from '@/engine/rotation';
+import { positionCapacityWarnings } from '@/engine/quotas';
+import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
-import { getRoster } from '@/services/team-service';
+import { getRoster, getSeasonSettings } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -20,7 +23,7 @@ const palette = {
   coral: '#d96f4c',
 };
 
-type RosterPlayer = { name: string; primary_positions?: string[]; group?: string };
+type RosterPlayer = { name: string; primary_positions?: string[]; general_positions?: string[]; backup_positions?: string[]; excluded_positions?: string[]; group?: string };
 
 function displayPlayerName(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -40,7 +43,22 @@ export default function GameScreen() {
   const [loadingRoster, setLoadingRoster] = useState(true);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
+  const [completedGameCount, setCompletedGameCount] = useState(0);
+  const [gameNumber, setGameNumber] = useState('1');
+  const [showGameNumberConfirmation, setShowGameNumberConfirmation] = useState(false);
+  const [showMaximumLimitConfirmation, setShowMaximumLimitConfirmation] = useState(false);
+  const [disableMaximumLimits, setDisableMaximumLimits] = useState(false);
+  const [playersOnField, setPlayersOnField] = useState(11);
+  const [totalBlocks, setTotalBlocks] = useState(10);
+  const [formation, setFormation] = useState('4-3-3');
+  const [rosterPlayers, setRosterPlayers] = useState<RosterPlayer[]>([]);
+  const [capacityWarnings, setCapacityWarnings] = useState<string[]>([]);
+  const [showCapacityWarning, setShowCapacityWarning] = useState(false);
   const availableCount = playerNames.length - unavailable.size;
+  const enteredGameNumber = Number.parseInt(gameNumber, 10);
+  const gameNumberWarning = Number.isInteger(enteredGameNumber) && enteredGameNumber <= completedGameCount
+    ? `This is not ahead of the ${completedGameCount} completed ${completedGameCount === 1 ? 'game' : 'games'}. Check the number before continuing.`
+    : null;
 
   function loadRoster() {
     setLoadingRoster(true);
@@ -48,17 +66,23 @@ export default function GameScreen() {
       .then((activeTeam) => {
         setTeamId(activeTeam.id);
         setTeamName(activeTeam.name);
-        return getRoster(activeTeam.id);
+        return Promise.all([getRoster(activeTeam.id), getSavedReports(activeTeam.id), getNextGameNumber(activeTeam.id), getSeasonSettings(activeTeam.id)]);
       })
-      .then((payload) => {
+      .then(([payload, reports, nextGameNumber, settings]) => {
+        setCompletedGameCount(reports.length);
+        setGameNumber(String(nextGameNumber));
+        setPlayersOnField(settings.players_on_field ?? 11);
+        setTotalBlocks(settings.total_blocks ?? 10);
+        setFormation(settings.formation ?? '4-3-3');
         const rosterPlayers = payload.players as RosterPlayer[];
+        setRosterPlayers(rosterPlayers);
         const eligibleGoalkeepers = rosterPlayers
           .filter((player) => player.primary_positions?.some((position) => position.toUpperCase() === 'GK') || player.group === 'rotational_gk')
           .map((player) => player.name);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
-        setFirstHalfGK(eligibleGoalkeepers[0] ?? null);
-        setSecondHalfGK(eligibleGoalkeepers[1] ?? eligibleGoalkeepers[0] ?? null);
+        setFirstHalfGK(null);
+        setSecondHalfGK(null);
       })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load roster.'))
       .finally(() => setLoadingRoster(false));
@@ -83,12 +107,57 @@ export default function GameScreen() {
     setError(null);
   }
 
+  function requestScheduleGeneration() {
+    setError(null);
+    setDisableMaximumLimits(false);
+    const warnings = positionCapacityWarnings(formation, rosterPlayers
+      .filter((player) => !unavailable.has(player.name))
+      .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])));
+    if (warnings.length) {
+      setCapacityWarnings(warnings);
+      setShowCapacityWarning(true);
+      return;
+    }
+    continueToGenerationOptions();
+  }
+
+  function continueToGenerationOptions() {
+    const requiredFieldBlocks = totalBlocks * playersOnField;
+    const normalMaximumCapacity = availableCount * Math.max(1, Math.ceil(totalBlocks * 0.8));
+    const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
+    if (maximumCapacityPressure || availableCount <= playersOnField + 3) {
+      setShowMaximumLimitConfirmation(true);
+      return;
+    }
+    requestGameNumberConfirmation();
+  }
+
+  function requestGameNumberConfirmation() {
+    setGameNumber(String(completedGameCount + 1));
+    setShowGameNumberConfirmation(true);
+  }
+
   async function generateSchedule() {
+    const availableGoalkeepers = new Set(goalkeeperNames.filter((name) => !unavailable.has(name)));
+    if (!firstHalfGK || !secondHalfGK) {
+      setError('Choose a goalkeeper for both halves before generating the schedule.');
+      return;
+    }
+    if (!availableGoalkeepers.has(firstHalfGK) || !availableGoalkeepers.has(secondHalfGK)) {
+      setError('Choose available goalkeeper selections for both halves.');
+      return;
+    }
+    const confirmedGameNumber = Number.parseInt(gameNumber, 10);
+    if (!Number.isInteger(confirmedGameNumber) || confirmedGameNumber < 1) {
+      setError('Enter a valid game number greater than zero.');
+      return;
+    }
     setLoading(true);
     setError(null);
+    setShowGameNumberConfirmation(false);
     try {
       const activeTeamId = teamId ?? await getActiveTeamId();
-      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: 1, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK, disableMaximumLimits });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.');
@@ -97,9 +166,76 @@ export default function GameScreen() {
     }
   }
 
+  function continueWithMaximumChoice(disableLimits: boolean) {
+    setDisableMaximumLimits(disableLimits);
+    setShowMaximumLimitConfirmation(false);
+    requestGameNumberConfirmation();
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
+      <Modal visible={showCapacityWarning} transparent animationType="fade" onRequestClose={() => setShowCapacityWarning(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.gameNumberModal}>
+            <Text style={styles.modalEyebrow}>POSITION CAPACITY</Text>
+            <Text style={styles.modalTitle}>Some positions are short</Text>
+            <Text style={styles.modalDetail}>The available roster cannot cover every legal position slot normally:</Text>
+            <View style={styles.capacityWarningList}>{capacityWarnings.map((warning) => <Text key={warning} style={styles.modalWarning}>{warning.replace('Preflight: ', '').replace(/ available ([DMF]) players can cover (\d+) \1 slots\./, (_, position, slots) => ` legal ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'}${Number(slots) === 1 ? '' : 's'} available for ${slots} ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'} slots.`)}</Text>)}</View>
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setShowCapacityWarning(false)} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>BACK</Text></Pressable>
+              <Pressable onPress={() => { setShowCapacityWarning(false); continueToGenerationOptions(); }} style={styles.confirmButton} accessibilityRole="button"><Text style={styles.confirmButtonText}>CONTINUE</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={showMaximumLimitConfirmation} transparent animationType="fade" onRequestClose={() => setShowMaximumLimitConfirmation(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.gameNumberModal}>
+            <Text style={styles.modalEyebrow}>LOW ATTENDANCE</Text>
+            <Text style={styles.modalTitle}>Everyone may need to play</Text>
+            <Text style={styles.modalDetail}>
+              {availableCount} players are available for a {playersOnField}-player formation. Keeping maximum limits may leave some required positions unassigned. Turn off maximum limits for this game so available players can play every block?
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => continueWithMaximumChoice(false)} style={styles.cancelButton} accessibilityRole="button">
+                <Text style={styles.cancelButtonText}>KEEP LIMITS</Text>
+              </Pressable>
+              <Pressable onPress={() => continueWithMaximumChoice(true)} style={styles.confirmButton} accessibilityRole="button">
+                <Text style={styles.confirmButtonText}>TURN OFF MAXIMUMS</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={showGameNumberConfirmation} transparent animationType="fade" onRequestClose={() => setShowGameNumberConfirmation(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.gameNumberModal}>
+            <Text style={styles.modalEyebrow}>CONFIRM GAME NUMBER</Text>
+            <Text style={styles.modalTitle}>Which game is this?</Text>
+            <Text style={styles.modalDetail}>
+              {completedGameCount} completed {completedGameCount === 1 ? 'game' : 'games'} found. This number affects fairness quotas and rotating starters.
+            </Text>
+            <TextInput
+              autoFocus
+              keyboardType="number-pad"
+              onChangeText={setGameNumber}
+              selectTextOnFocus
+              style={styles.gameNumberInput}
+              value={gameNumber}
+            />
+            {gameNumberWarning && <Text style={styles.modalWarning}>{gameNumberWarning}</Text>}
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setShowGameNumberConfirmation(false)} style={styles.cancelButton} accessibilityRole="button">
+                <Text style={styles.cancelButtonText}>BACK</Text>
+              </Pressable>
+              <Pressable onPress={() => void generateSchedule()} style={styles.confirmButton} accessibilityRole="button">
+                <Text style={styles.confirmButtonText}>CONFIRM & GENERATE</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -112,7 +248,7 @@ export default function GameScreen() {
                 />
               </Pressable>
               <View style={styles.headerCopy}>
-                <Text style={styles.eyebrow}>GAME 01 · FALL 2026</Text>
+                <Text style={styles.eyebrow}>GAME {gameNumber.padStart(2, '0')} · FALL 2026</Text>
                 <Text style={styles.title}>{teamName ? `Set availability for ${teamName}` : 'Set availability'}</Text>
               </View>
               <View style={styles.countBadge}>
@@ -205,7 +341,7 @@ export default function GameScreen() {
             </View>}
 
             <Pressable
-              onPress={generateSchedule}
+              onPress={requestScheduleGeneration}
               style={[styles.primaryAction, availableCount < 11 && styles.primaryActionDisabled]}
               disabled={loadingRoster || availableCount < 11 || loading}
               accessibilityRole="button">
@@ -216,11 +352,11 @@ export default function GameScreen() {
                   {availableCount < 11 ? 'At least 11 players are needed' : 'Review this game’s availability'}
                 </Text>
               </View>
-              <SymbolView
+              {loading ? <ActivityIndicator size="small" color={palette.panel} /> : <SymbolView
                 name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
                 size={22}
                 tintColor={palette.panel}
-              />
+              />}
             </Pressable>
 
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -284,4 +420,17 @@ const styles = StyleSheet.create({
   primaryDetail: { color: '#f9ddd2', fontSize: 12, marginTop: 4 },
   errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 14, paddingHorizontal: 4 },
   helperText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  modalOverlay: { alignItems: 'center', backgroundColor: 'rgba(23, 34, 31, 0.55)', flex: 1, justifyContent: 'center', padding: 20 },
+  gameNumberModal: { backgroundColor: palette.panel, borderRadius: 20, padding: 22, width: '100%' },
+  modalEyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+  modalTitle: { color: palette.ink, fontSize: 25, fontWeight: '800', marginTop: 5 },
+  modalDetail: { color: palette.muted, fontSize: 13, lineHeight: 19, marginTop: 8 },
+  modalWarning: { color: palette.coral, fontSize: 12, lineHeight: 17, marginTop: 10 },
+  capacityWarningList: { marginTop: 4 },
+  gameNumberInput: { alignSelf: 'flex-start', borderColor: palette.line, borderRadius: 12, borderWidth: 1, color: palette.ink, fontSize: 24, fontWeight: '800', marginTop: 18, minWidth: 90, paddingHorizontal: 15, paddingVertical: 10, textAlign: 'center' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  cancelButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 13 },
+  cancelButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  confirmButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 12, flex: 1.4, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 13 },
+  confirmButtonText: { color: palette.panel, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
 });

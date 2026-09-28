@@ -1,13 +1,14 @@
 import * as FileSystem from 'expo-file-system/legacy';
 export { buildAfterGameReport, canonicalFieldAssignments } from './report-utils';
-export type { AfterGameReport, AvailabilityHistory, PlayerGameReport, ScheduleBlock } from './report-utils';
-import type { AfterGameReport, AvailabilityHistory, ScheduleBlock } from './report-utils';
+export type { AfterGameReport, AvailabilityHistory, LivePositionOverride, PlayerGameReport, ScheduleBlock } from './report-utils';
+import type { AfterGameReport, AvailabilityHistory, LivePositionOverride, ScheduleBlock } from './report-utils';
 
 export type PositionRow = { label: string; positions: string[] };
 export type LiveSchedule = {
   team_id?: string;
   team_name?: string;
   game_number: number;
+  available_player_names?: string[];
   block_start_minutes?: number[];
   block_lengths_minutes?: number[];
   substitution_alert?: 'none' | 'flash' | 'vibrate' | 'flash_and_vibrate';
@@ -22,6 +23,9 @@ export type LiveSchedule = {
   completed_blocks?: number[];
   live_returned_players?: Array<{ player: string; blockIndex: number }>;
   live_availability_history?: AvailabilityHistory[];
+  live_position_overrides?: LivePositionOverride[];
+  errors?: string[];
+  structural_errors?: string[];
   blocks: ScheduleBlock[];
 };
 

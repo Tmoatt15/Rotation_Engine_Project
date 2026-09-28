@@ -1,6 +1,6 @@
 import type { AvailabilityChange, Game, GameInput, Player, PlayerInput, RotationResult, ScheduleBlock } from './models';
 import { computeBlockTargets } from './quotas';
-import { buildTimeline, replayTimeline } from './timeline';
+import { buildTimeline, calculateMovementMetrics, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus } from './surplus';
 import { eligiblePlayers } from './positional';
 
@@ -23,7 +23,7 @@ export function createPlayer(input: PlayerInput): Player {
 function prepareGame(input: Game | GameInput): Game {
   const game = input as Game;
   return {
-    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? game.gk_assignment ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_positions: game.allow_emergency_positions ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
+    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
 }
 
@@ -37,13 +37,25 @@ function startingPositionCounts(timeline: ScheduleBlock[]): Record<string, Recor
   return starts;
 }
 
+function finalizeResult(game: Game, roster: Player[], timeline: RotationResult): RotationResult {
+  const formation = parseFormation(game.formation);
+  const slots = formationSlots(formation);
+  return {
+    ...timeline,
+    errors: [...new Set([...timeline.errors, ...validateTimeline(roster, timeline.timeline, formation, slots, game.total_blocks)])],
+    warnings: [...new Set([...timeline.warnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])],
+    movement_metrics: calculateMovementMetrics(timeline.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments),
+    starting_position_counts: startingPositionCounts(timeline.timeline),
+  };
+}
+
 export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Player[]): RotationResult {
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput);
   roster.forEach((player) => { if (!player.position_usage) player.position_usage = emptyUsage(); });
   const quota = computeBlockTargets(game, roster);
-  const timeline = buildTimeline(game, roster);
+  const timeline = buildTimeline(game, roster, 1, [], quota.metadata.quota_feasibility);
   const surplus = computeSurplus(game, roster);
-  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: surplus.metadata, movement_metrics: timeline.movement_metrics, starting_position_counts: startingPositionCounts(timeline.timeline) };
+  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
 }
 
 export const generateSchedule = runRotationEngine;
@@ -57,18 +69,18 @@ export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previ
     if (change.action === 'unavailable') {
       if (change.block < 1 || change.block > updatedTimeline.length) throw new Error('Unavailable block must already exist in the timeline.');
       const block = updatedTimeline[change.block - 1];
-      const position = block.GK === player.name ? 'GK' : (['D', 'M', 'F'] as const).find((group) => block[group].includes(player.name));
+      if (block.GK === player.name) throw new Error(`Goalkeeper change in block ${change.block} requires a new coach-selected goalkeeper.`);
+      const position = (['D', 'M', 'F'] as const).find((group) => block[group].includes(player.name));
       if (!position) throw new Error(`${player.name} is not playing in block ${change.block}.`);
       player.available = false; game.quota_exempt_players.add(player.name); game.availability_changes.push(change);
       replayTimeline(roster, updatedTimeline.slice(0, change.block - 1), game);
       computeBlockTargets(game, roster);
       const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]); const bench = new Set(block.bench);
-      const candidates = roster.filter((candidate) => candidate.available && !assigned.has(candidate.name) && (position === 'GK' ? candidate.primary_positions.includes('GK') : eligiblePlayers(roster, position, game.allow_emergency_positions).some((item) => item.name === candidate.name)));
+      const candidates = roster.filter((candidate) => candidate.available && !assigned.has(candidate.name) && eligiblePlayers(roster, position).some((item) => item.name === candidate.name));
       candidates.sort((left, right) => (bench.has(left.name) ? 0 : 1) - (bench.has(right.name) ? 0 : 1) || left.block_count - right.block_count || Math.max(0, left.target_blocks - left.block_count) - Math.max(0, right.target_blocks - right.block_count) || left.name.localeCompare(right.name));
       const replacement = candidates[0];
       if (!replacement) { player.available = true; throw new Error(`No available replacement can cover ${position} in block ${change.block}.`); }
-      if (position === 'GK') block.GK = replacement.name;
-      else { block[position] = block[position].filter((name) => name !== player.name); block[position].push(replacement.name); }
+      block[position] = block[position].filter((name) => name !== player.name); block[position].push(replacement.name);
       block.bench = block.bench.filter((name) => name !== replacement.name); if (!block.bench.includes(player.name)) block.bench.push(player.name);
       if (!game.replacement_credits.some((credit) => credit.player === player.name && credit.block === change.block)) { game.replacement_credits.push({ player: player.name, block: change.block, position, replacement: replacement.name }); game.replacement_bonuses[replacement.name] = (game.replacement_bonuses[replacement.name] ?? 0) + 1; }
       earliest = Math.min(earliest, change.block + 1);
@@ -76,8 +88,8 @@ export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previ
       player.available = true; game.quota_exempt_players.add(player.name); game.availability_changes.push(change); earliest = Math.min(earliest, change.block + 1);
     }
   }
-  const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); computeBlockTargets(game, roster);
-  const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen);
+  const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);
+  const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility);
   const surplus = computeSurplus(game, roster);
-  return { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors], metadata: surplus.metadata, movement_metrics: timeline.movement_metrics, starting_position_counts: startingPositionCounts(timeline.timeline) };
+  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
 }

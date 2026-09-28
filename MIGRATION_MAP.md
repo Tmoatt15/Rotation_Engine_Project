@@ -1,9 +1,39 @@
 # Offline Migration Map
 
 This document records the step-2 boundary between the current Python/FastAPI
-application and the future offline TypeScript/SQLite application. The Python
-implementation remains the behavior oracle until the TypeScript engine passes
-the frozen cases in `tests/fixtures/rotation_oracle_cases.json`.
+application and the offline TypeScript/SQLite application. The TypeScript
+implementation under `mobile/src/engine` is the production scheduling
+authority. The Python implementation is a reference/oracle implementation for
+parity work and must not drive production behavior until the parity fixtures
+are intentionally updated.
+
+## Locked Scheduling Policy
+
+The TypeScript engine applies this scheduling priority, while preserving legal
+positional and goalkeeper coverage at every step:
+
+1. Legal positional and goalkeeper coverage
+2. Hard-minimum deficits
+3. Lowest current field totals
+4. Group urgency
+5. Continuity and rest fairness
+6. Intended targets and soft maximums
+7. Deterministic name tie-breaker
+
+The policy contracts are:
+
+- `hard_maximum_blocks` is an absolute limit unless an explicit override
+  relaxes it.
+- `maximum_blocks` is an intended soft ceiling.
+- Exceeding an intended maximum is allowed only when required for coverage or
+  explicitly overridden.
+- Emergency assignments may exceed intended maximums when necessary and must
+  remain visible in result warnings.
+- Core, Core A, and Core B share one 70% target; there is no A/B target
+  rotation policy.
+- An availability change applies starting with its specified block. Completed
+  blocks remain frozen, and a returning player receives no automatic make-up
+  quota credit.
 
 ## Python Responsibilities
 

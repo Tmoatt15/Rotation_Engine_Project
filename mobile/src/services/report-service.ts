@@ -1,9 +1,16 @@
 import type { AfterGameReport, PlayerTotal } from '@/engine/models';
 import { getDatabase } from '@/storage/database';
 import { deleteReport, listReports, renameReport, saveReport } from '@/storage/reports';
+import { aggregateSeasonFairness, type SeasonFairnessReport } from './season-fairness';
+export { aggregateSeasonFairness, SEASON_FAIRNESS_THRESHOLDS } from './season-fairness';
+export type { SeasonFairnessPlayer, SeasonFairnessReport } from './season-fairness';
 
 export async function saveLocalReport(teamId: string, report: AfterGameReport): Promise<AfterGameReport> { return saveReport(await getDatabase(), teamId, report); }
 export async function getSavedReports(teamId: string): Promise<AfterGameReport[]> { return listReports(await getDatabase(), teamId); }
+export async function getNextGameNumber(teamId: string): Promise<number> {
+  const reports = await getSavedReports(teamId);
+  return reports.length + 1;
+}
 export async function renameSavedReport(id: string, name: string): Promise<void> { return renameReport(await getDatabase(), id, name); }
 export async function deleteSavedReport(id: string): Promise<void> { return deleteReport(await getDatabase(), id); }
 
@@ -31,4 +38,8 @@ export function aggregateSeasonTotals(reports: AfterGameReport[]): PlayerTotal[]
 
 export async function getSeasonTotals(teamId: string): Promise<PlayerTotal[]> {
   return aggregateSeasonTotals(await getSavedReports(teamId));
+}
+
+export async function getSeasonFairness(teamId: string): Promise<SeasonFairnessReport> {
+  return aggregateSeasonFairness(await getSavedReports(teamId));
 }

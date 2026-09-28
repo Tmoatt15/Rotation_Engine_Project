@@ -114,9 +114,12 @@ export interface GameInput {
   season_total_games?: number;
   season_game_number?: number;
   season_seed?: number;
-  allow_emergency_positions?: boolean;
+  allow_emergency_assignments?: boolean;
+  disable_maximum_limits?: boolean;
   season_player_blocks?: Record<string, number>;
   season_position_starts?: Record<string, Record<string, number>>;
+  season_goalkeeper_starts?: Record<string, number>;
+  quota_feasibility?: QuotaFeasibilityMetadata;
 }
 
 export interface Game extends Required<
@@ -127,7 +130,8 @@ export interface Game extends Required<
     | 'season_total_games'
     | 'season_game_number'
     | 'season_seed'
-    | 'allow_emergency_positions'
+    | 'allow_emergency_assignments'
+    | 'disable_maximum_limits'
   >
 > {
   gk_assignment: string | null;
@@ -141,6 +145,7 @@ export interface Game extends Required<
   timeline: ScheduleBlock[];
   season_player_blocks?: Record<string, number>;
   season_position_starts?: Record<string, Record<string, number>>;
+  season_goalkeeper_starts?: Record<string, number>;
 }
 
 export interface GoalkeeperSummary {
@@ -152,7 +157,16 @@ export interface GoalkeeperSummary {
 export interface RotationMetadata {
   formation?: Formation;
   total_blocks?: number;
+  quota_feasibility?: QuotaFeasibilityMetadata;
   [key: string]: unknown;
+}
+
+export interface QuotaFeasibilityMetadata {
+  minimumRequirement: number;
+  legalAvailableCapacity: number;
+  minimumsFeasible: boolean;
+  affectedPlayers: string[];
+  affectedGroups: string[];
 }
 
 export interface MovementHalfMetrics {
@@ -166,6 +180,7 @@ export interface MovementMetrics {
   exact_slot_switches: number;
   group_switches: number;
   primary_assignments: number;
+  general_assignments: number;
   backup_assignments: number;
   emergency_assignments: number;
   by_half: [MovementHalfMetrics, MovementHalfMetrics];
@@ -204,7 +219,12 @@ export interface AfterGameReport {
   game_number: number;
   created_at: string;
   total_blocks: number;
+  attendance?: number;
   block_lengths_minutes?: number[];
+  structural_errors?: string[];
+  core_player_names?: string[];
+  starting_positions?: Record<string, string>;
+  ending_positions?: Record<string, string>;
   players: PlayerGameReport[];
 }
 
@@ -225,12 +245,17 @@ export interface LiveSchedule {
   substitution_alert?: SubstitutionAlert;
   substitution_warning_seconds?: number;
   position_rows?: PositionRow[];
+  available_player_names?: string[];
+  core_player_names?: string[];
   live_availability?: AvailabilityRecord[];
   completed_blocks?: number[];
   live_returned_players?: Array<{ player: string; blockIndex: number }>;
   live_availability_history?: AvailabilityHistory[];
   movement_metrics?: MovementMetrics;
-  review_status?: 'generated' | 'manually_edited';
+  warnings?: string[];
+  errors?: string[];
+  structural_errors?: string[];
+  review_status?: 'generated' | 'generated_with_errors' | 'manually_edited';
   blocks: ScheduleBlock[];
 }
 

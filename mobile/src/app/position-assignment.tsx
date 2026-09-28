@@ -193,24 +193,27 @@ export default function RosterScreen() {
       : positionPicker.positions.length === 0 && positionPicker.group === 'general_positions'
         ? [ANY_POSITION]
         : positionPicker.positions;
-    updatePlayer(player.name, {
+      const changes: Partial<Player> = {
       [positionPicker.group]: positionPicker.group === 'primary_positions' && isGoalkeeperAllowed(player)
         ? [...positions, 'GK']
         : positions,
-    });
+      };
+      const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
+      setPlayers(updatedPlayers);
     setPositionPicker(null);
+      void saveRoster(updatedPlayers, false);
   }
 
-  async function saveRoster() {
+    async function saveRoster(playersToSave = players, returnHome = true) {
     setSaving(true);
     setMessage(null);
     setError(null);
     try {
       const activeTeamId = await getActiveTeamId();
-      const payload = await updateRoster(activeTeamId, players);
+        const payload = await updateRoster(activeTeamId, playersToSave);
       setPlayers(payload.players as Player[]);
       setMessage('Season roster saved.');
-      router.replace('/');
+        if (returnHome) router.replace('/');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to save roster.');
     } finally {
@@ -338,7 +341,7 @@ export default function RosterScreen() {
             </View>}
             {message && <Text style={styles.successText}>{message}</Text>}
             {error && <Text style={styles.errorText}>{error}</Text>}
-            {!loading && <Pressable onPress={saveRoster} disabled={saving} style={[styles.saveButton, saving && styles.disabledButton]}>
+            {!loading && <Pressable onPress={() => void saveRoster()} disabled={saving} style={[styles.saveButton, saving && styles.disabledButton]}>
               <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save and return home'}</Text>
               <SymbolView name={{ ios: 'checkmark', android: 'check', web: 'check' }} size={19} tintColor={palette.panel} />
             </Pressable>}
