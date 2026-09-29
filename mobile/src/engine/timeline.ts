@@ -1391,7 +1391,8 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   for (const half of [0, 1] as const) {
     const halfStart = half === 0 ? Math.max(0, startBlock - 1) : midpoint;
     const halfEnd = half === 0 ? midpoint : game.total_blocks;
-    if (Array.from({ length: Math.max(0, halfEnd - halfStart) }, (_, index) => index + halfStart)
+    const forwardCapacity = roster.filter((player) => player.available && canCoverGroup(game, roster, player.name, 'F')).length;
+    if (forwardCapacity > formation.F && Array.from({ length: Math.max(0, halfEnd - halfStart) }, (_, index) => index + halfStart)
       .some((index) => plans.F[index].length < formation.F)) replanHalfJoint(half);
   }
 

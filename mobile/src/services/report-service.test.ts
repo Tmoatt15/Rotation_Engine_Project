@@ -31,7 +31,17 @@ describe('season fairness acceptance', () => {
       report(3, 12, { ST: 'A' }, [player('A', 10, 70, { ST: 10 }), player('B', 10, 70, { ST: 10 })]),
     ]);
 
-    expect(result.sameRoleDisparities).toEqual([{ position: 'ALL', highPlayer: 'A', lowPlayer: 'B', gap: 3 }]);
+    expect(result.sameRoleDisparities).toEqual([{ position: 'ST', highPlayer: 'A', lowPlayer: 'B', gap: 3 }]);
+  });
+
+  it('does not compare start counts across different positions', () => {
+    const result = aggregateSeasonFairness([
+      report(1, 12, { ST: 'A', CB: 'B' }, [player('A', 10, 70, { ST: 10 }), player('B', 10, 70, { CB: 10 })]),
+      report(2, 12, { ST: 'A', CB: 'B' }, [player('A', 10, 70, { ST: 10 }), player('B', 10, 70, { CB: 10 })]),
+      report(3, 12, { ST: 'A', CB: 'B' }, [player('A', 10, 70, { ST: 10 }), player('B', 10, 70, { CB: 10 })]),
+    ]);
+
+    expect(result.sameRoleDisparities).toEqual([]);
   });
 
   it('reports first and last endpoint misses separately', () => {

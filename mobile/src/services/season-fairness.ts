@@ -67,12 +67,14 @@ export function aggregateSeasonFairness(reports: AfterGameReport[]): SeasonFairn
     .filter((player) => player.appearances >= SEASON_FAIRNESS_THRESHOLDS.minimumAppearancesForZeroStart && player.starts === 0)
     .map((player) => player.player);
   const sameRoleDisparities: SeasonFairnessReport['sameRoleDisparities'] = [];
-  const eligiblePlayers = [...players.values()].filter((player) => player.appearances > 0);
-  if (eligiblePlayers.length >= 2) {
-    const high = [...eligiblePlayers].sort((left, right) => right.starts - left.starts || left.player.localeCompare(right.player))[0];
-    const low = [...eligiblePlayers].sort((left, right) => left.starts - right.starts || left.player.localeCompare(right.player))[0];
-    const gap = high.starts - low.starts;
-    if (gap > SEASON_FAIRNESS_THRESHOLDS.maximumSameRoleStartGap) sameRoleDisparities.push({ position: 'ALL', highPlayer: high.player, lowPlayer: low.player, gap });
+  const positions = new Set([...players.values()].flatMap((player) => Object.keys(player.positionStarts)));
+  for (const position of positions) {
+    const eligiblePlayers = [...players.values()].filter((player) => player.appearances > 0 && ((player.positionStarts[position] ?? 0) > 0 || (player.positionBlocks[position] ?? 0) > 0));
+    if (eligiblePlayers.length < 2) continue;
+    const high = [...eligiblePlayers].sort((left, right) => (right.positionStarts[position] ?? 0) - (left.positionStarts[position] ?? 0) || left.player.localeCompare(right.player))[0];
+    const low = [...eligiblePlayers].sort((left, right) => (left.positionStarts[position] ?? 0) - (right.positionStarts[position] ?? 0) || left.player.localeCompare(right.player))[0];
+    const gap = (high.positionStarts[position] ?? 0) - (low.positionStarts[position] ?? 0);
+    if (gap > SEASON_FAIRNESS_THRESHOLDS.maximumSameRoleStartGap) sameRoleDisparities.push({ position, highPlayer: high.player, lowPlayer: low.player, gap });
   }
 
   const zeroStartSet = new Set(zeroStartPlayers);
