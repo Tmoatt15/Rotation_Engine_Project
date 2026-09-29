@@ -227,6 +227,17 @@ describe('goalkeeper and minimum protection', () => {
     expect(result.timeline[5].GK).toBe('GK1');
   });
 
+  it('allows a goalkeeper to cover every block of a five-block half', () => {
+    const goalkeeper = createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] });
+    computeBlockTargets({ total_blocks: 10, formation: '0-0-0', quota_exempt_players: new Set(), replacement_bonuses: {} }, [goalkeeper]);
+    const timeline: ScheduleBlock[] = Array.from({ length: 10 }, () => ({
+      GK: 'GK', D: [], M: [], F: [], bench: [], positions: { GK: 'GK' },
+    }));
+
+    expect(goalkeeper.max_blocks_per_half).toBe(5);
+    expect(validateTimeline([goalkeeper], timeline, parseFormation('0-0-0'), formationSlots(parseFormation('0-0-0')), 10)).toEqual([]);
+  });
+
   it('uses cumulative total starts before position-specific starts', () => {
     const players = [
       createPlayer({ name: 'D1', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] }),
@@ -278,7 +289,7 @@ describe('goalkeeper and minimum protection', () => {
     const cameron = players.find((player) => player.name === 'Cameron');
     const eitan = players.find((player) => player.name === 'Eitan');
 
-    expect(result.errors.some((error) => error.includes('exceeds'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
     expect(cameron?.gk_blocks).toBe(5);
     expect(cameron?.field_blocks).toBeGreaterThanOrEqual(2);
     expect(cameron?.field_blocks).toBeLessThanOrEqual(3);
@@ -499,6 +510,27 @@ describe('quota fairness and controlled coverage', () => {
     expect(targetBlocksForPercentage(5, 0.5)).toBe(3);
   });
 
+  it('keeps rotational high targets at 60% below the 70% maximum', () => {
+    const players = ['R1', 'R2', 'R3', 'R4'].map((name) => createPlayer({
+      name,
+      group: 'rotational',
+      general_positions: ['D'],
+      primary_positions: ['CB'],
+    }));
+    computeBlockTargets({
+      total_blocks: 10,
+      formation: '2-0',
+      quota_exempt_players: new Set<string>(),
+      replacement_bonuses: {},
+      disable_maximum_limits: false,
+      season_game_number: 1,
+      season_seed: 1,
+    } as Game, players);
+
+    expect(players.map((player) => player.target_blocks).sort()).toEqual([5, 5, 6, 6]);
+    expect(players.every((player) => player.hard_maximum_blocks === 7)).toBe(true);
+  });
+
   it('uses one shared Core target and exposes short-game feasibility metadata', () => {
     const players = [
       createPlayer({ name: 'Core A', group: 'core_a', general_positions: ['D'], primary_positions: ['CB'] }),
@@ -610,7 +642,7 @@ describe('quota fairness and controlled coverage', () => {
     ].map(createPlayer);
     const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'GK', second_half_gk: 'GK', disable_maximum_limits: true }, players);
 
-    expect(result.errors.filter((error) => !error.includes('endpoint'))).toEqual([]);
+    expect(result.errors).toEqual([]);
     const corePlayers = players.filter((player) => player.group === 'core');
     const rotationalPlayers = players.filter((player) => player.group === 'rotational');
     const developingPlayers = players.filter((player) => player.group === 'developing');
@@ -628,7 +660,7 @@ describe('quota fairness and controlled coverage', () => {
     ].map(createPlayer);
     const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK1', second_half_gk: 'GK2' }, players);
 
-    expect(result.errors.some((error) => error.includes('exceeds'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
     for (const player of players.filter((candidate) => candidate.group === 'core')) {
       expect(player.field_blocks).toBeGreaterThanOrEqual(player.minimum_blocks);
       expect(player.blocks_by_half[0]).toBeGreaterThan(0);
@@ -708,7 +740,7 @@ describe('quota fairness and controlled coverage', () => {
 
     expect(players.filter((player) => player.group === 'core').every((player) => player.target_blocks === 7)).toBe(true);
     expect(players.filter((player) => player.group === 'core').every((player) => player.hard_maximum_blocks === 8)).toBe(true);
-    expect(result.errors.some((error) => error.includes('exceeds'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
   });
 
   it('does not rotate Core targets using cumulative season totals', () => {
@@ -755,7 +787,7 @@ describe('quota fairness and controlled coverage', () => {
     ].map(createPlayer);
     const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK1', second_half_gk: 'GK2' }, players);
 
-    expect(result.errors.some((error) => error.includes('exceeds'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
     expect(result.timeline.some((block) => Object.values(block.positions).includes('Versatile'))).toBe(true);
   });
 
@@ -769,7 +801,7 @@ describe('quota fairness and controlled coverage', () => {
     ].map(createPlayer);
     const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK1', second_half_gk: 'GK2' }, players);
 
-    expect(result.errors.some((error) => error.includes('exceeds'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
     expect(players.filter((player) => player.general_positions.includes('D')).every((player) => player.field_blocks >= 5)).toBe(true);
   });
 
@@ -1223,6 +1255,19 @@ describe('ten-game season availability simulation', () => {
   it('completes a ten-block all-flexible roster within the five-second budget', () => {
     const players = [
       ...Array.from({ length: 15 }, (_, index) => ({ name: `Flexible ${index + 1}`, group: 'rotational' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const started = performance.now();
+    const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+  }, 20000);
+
+  it('completes a ten-block all-core flexible roster within the five-second budget', () => {
+    const players = [
+      ...Array.from({ length: 15 }, (_, index) => ({ name: `Core ${index + 1}`, group: 'core' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
       { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
     ].map(createPlayer);
     const started = performance.now();

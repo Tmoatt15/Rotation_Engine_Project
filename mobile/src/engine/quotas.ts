@@ -5,6 +5,7 @@ import { canCoverSlot, formationSlots, parseFormation } from './timeline';
 export const CORE_TARGET = 0.7;
 export const CORE_MIN = 0.7;
 export const ROTATIONAL_MIN = 0.5;
+export const ROTATIONAL_TARGET_HIGH = 0.6;
 export const ROTATIONAL_MAX = 0.7;
 export const DEVELOPMENTAL_MIN = 0.4;
 export const DEVELOPMENTAL_MAX = 0.5;
@@ -178,7 +179,9 @@ export function blocksForPercentage(totalBlocks: number, percentage: number, min
 export function applyBlockLimits(player: Player, totalBlocks: number): void {
   player.hard_minimum_blocks = minimumBlocksForPercentage(totalBlocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
   player.hard_maximum_blocks = maximumFieldBlocksForPlayer(player, totalBlocks);
-  player.max_blocks_per_half = Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
+  player.max_blocks_per_half = isDedicatedGoalkeeper(player)
+    ? Math.max(1, Math.ceil(totalBlocks / 2))
+    : Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
   player.gk_field_minimum_blocks = minimumBlocksForPercentage(totalBlocks, GK_FIELD_MINIMUM);
   player.gk_field_maximum_blocks = Math.max(
     player.gk_field_minimum_blocks,
@@ -242,7 +245,7 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     let target = 0; let minimum = 0; let maximum = 0;
     if (['core', 'core_a', 'core_b'].includes(player.group)) { minimum = minimumBlocksForPercentage(game.total_blocks, CORE_MIN); target = Math.max(minimum, targetBlocksForPercentage(game.total_blocks, CORE_TARGET)); maximum = target; }
     else if (isDedicatedGoalkeeper(player)) { target = targetBlocksForPercentage(game.total_blocks, GK_TARGET); minimum = maximum = target; }
-    else if (player.group === 'rotational') { minimum = minimumBlocksForPercentage(game.total_blocks, ROTATIONAL_MIN); maximum = Math.max(minimum, intendedMaximumBlocksForPercentage(game.total_blocks, ROTATIONAL_MAX)); target = rotationalHigh.has(player.name) ? maximum : minimum; }
+    else if (player.group === 'rotational') { minimum = minimumBlocksForPercentage(game.total_blocks, ROTATIONAL_MIN); maximum = Math.max(minimum, intendedMaximumBlocksForPercentage(game.total_blocks, ROTATIONAL_MAX)); target = rotationalHigh.has(player.name) ? targetBlocksForPercentage(game.total_blocks, ROTATIONAL_TARGET_HIGH) : minimum; }
     else if (['developing', 'developmental'].includes(player.group)) { minimum = minimumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MIN); maximum = Math.max(minimum, intendedMaximumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MAX)); target = developingHigh.has(player.name) ? maximum : minimum; }
     else { result.errors.push(`Unknown group for player ${player.name}`); }
     if (game.quota_exempt_players.has(player.name)) { target = 0; minimum = 0; maximum = game.total_blocks; }
@@ -251,7 +254,11 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     if (game.disable_maximum_limits) applyMaximumOverride(player, game.total_blocks);
     if (game.quota_exempt_players.has(player.name)) { player.hard_minimum_blocks = 0; player.hard_maximum_blocks = game.total_blocks; player.gk_field_minimum_blocks = 0; player.gk_field_maximum_blocks = game.total_blocks; }
     else player.hard_maximum_blocks = Math.min(game.total_blocks, player.hard_maximum_blocks + (game.replacement_bonuses[player.name] ?? 0));
-    player.max_blocks_per_half = game.disable_maximum_limits ? game.total_blocks : Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
+    player.max_blocks_per_half = game.disable_maximum_limits
+      ? game.total_blocks
+      : isDedicatedGoalkeeper(player)
+        ? Math.max(1, Math.ceil(game.total_blocks / 2))
+        : Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
     result.block_counts[player.name] = target;
     if (!isDedicatedGoalkeeper(player) && player.group !== 'rotational_gk') requestedFieldSlots += target;
   }

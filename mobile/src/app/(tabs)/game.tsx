@@ -133,7 +133,7 @@ export default function GameScreen() {
       0,
     );
     const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
-    if (maximumCapacityPressure || availableCount <= playersOnField + 3) {
+    if (maximumCapacityPressure) {
       setShowMaximumLimitConfirmation(true);
       return;
     }
