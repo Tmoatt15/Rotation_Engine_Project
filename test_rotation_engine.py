@@ -1037,13 +1037,19 @@ class RotationEngineTests(unittest.TestCase):
 
         updated = regenerate_schedule(
             game, roster, result.timeline,
-            changes=[("G1", "unavailable", 1)],
+            changes=[
+                ("G1", "unavailable", 1),
+                ("G1", "unavailable", 1),
+            ],
         )
 
         self.assertEqual(updated.timeline[0]["GK"], "G2")
         self.assertEqual(updated.timeline[1]["GK"], "G2")
         self.assertEqual(updated.block_counts["G1"], 1)
         self.assertNotEqual(updated.timeline[1]["GK"], "G1")
+        self.assertEqual(len(game.availability_changes), 1)
+        self.assertEqual(len(game.replacement_credits), 1)
+        self.assertEqual(game.replacement_credits[0]["half_index"], 0)
 
     def test_available_again_returns_at_next_block(self):
         roster = self.make_roster()
