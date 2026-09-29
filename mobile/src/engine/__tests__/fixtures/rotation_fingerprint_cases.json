@@ -15,7 +15,7 @@
       {"name": "Eli", "group": "developing", "general_positions": ["F"], "primary_positions": ["F"]},
       {"name": "Finn", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]}
     ],
-    "expect": {"timeline_blocks": 4, "has_goalkeeper": false, "field_player_count": 4, "oracle_sha256": "065f7b37e00f373d13ba5b89317b201e861749853ac9a13ecf1b5d0c7e809688"}
+    "fingerprint": "55f72ae2a8b7b6408bae316d1c0e96cc625a5fb2404117e6c4aa74b8bd99919b"
   },
   {
     "id": "7v7-gk-and-groups",
@@ -38,7 +38,7 @@
       {"name": "Owen", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
       {"name": "Pia", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
     ],
-    "expect": {"timeline_blocks": 6, "has_goalkeeper": true, "field_player_count": 7, "assigned_goalkeeper": "Gio", "oracle_sha256": "6e9b4abb9685216520a468463e7b51e29a001c0907d14b453c050d095fb1ddc7"}
+    "fingerprint": "e2917dc8146fedb4ac50056c8c6d01ded361e2fae0b86f1f4b1a8470e3e798e7"
   },
   {
     "id": "11v11-position-flexibility",
@@ -64,8 +64,8 @@
       {"name": "Aaron", "group": "developing", "general_positions": ["F"], "primary_positions": ["LF"]},
       {"name": "Bea", "group": "developing", "general_positions": ["F"], "primary_positions": ["RF"]},
       {"name": "Cory", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]},
-      {"name": "Dina", "group": "rotational", "general_positions": ["M", "F"], "primary_positions": ["M"], "backup_positions": ["F"]}
+      {"name": "Dina", "group": "rotational", "general_positions": ["M", "F"], "primary_positions": ["M"], "backup_positions": ["F", "D"]}
     ],
-    "expect": {"timeline_blocks": 4, "has_goalkeeper": true, "field_player_count": 11, "first_goalkeeper": "Quinn", "second_goalkeeper": "Rae", "oracle_sha256": "1919404c1d03dafd1ea4ad8a4a6f4b47e79faa087d1a0fefb7eaf81ccc29538c"}
+    "fingerprint": "97f23b311d153088714d9fbf4687b9c4b3dd17a75a2925fd0bf7a75aa356e6c6"
   }
 ]

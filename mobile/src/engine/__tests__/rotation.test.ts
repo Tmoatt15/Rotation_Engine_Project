@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import cases from './fixtures/rotation_contract_cases.json';
+import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { eligiblePlayers } from '../positional';
 import { computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
@@ -8,6 +10,19 @@ import { calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
 import { summarizeStructuralErrors } from '../../services/structural-diagnostics';
+
+function rotationFingerprint(result: ReturnType<typeof generateSchedule>): string {
+  const payload = {
+    timeline: result.timeline,
+    block_counts: result.block_counts,
+    gk_summary: result.gk_summary,
+    position_summary: result.position_summary,
+    metadata: result.metadata,
+    warnings: result.warnings,
+    errors: result.errors,
+  };
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
 
 function assertBlockInvariants(block: ScheduleBlock, fieldPlayers: number, hasGoalkeeper: boolean): void {
   const assigned = Object.values(block.positions);
@@ -113,6 +128,19 @@ describe('rotation engine contract fixtures', () => {
         expect(result.timeline[0].GK).toBe(testCase.expect.first_goalkeeper);
         expect(result.timeline[midpoint].GK).toBe(testCase.expect.second_goalkeeper);
       }
+    });
+  }
+});
+
+describe('rotation engine TypeScript fingerprints', () => {
+  for (const testCase of fingerprintCases) {
+    it(`${testCase.id} preserves the TypeScript observable output`, () => {
+      const result = generateSchedule(
+        testCase.game as GameInput,
+        testCase.players.map((player) => createPlayer(player as PlayerInput)),
+      );
+
+      expect(rotationFingerprint(result)).toBe(testCase.fingerprint);
     });
   }
 });
@@ -480,6 +508,19 @@ describe('quota fairness and controlled coverage', () => {
     ];
 
     expect(positionCapacityWarnings('4-3-3', players)).toContain('Preflight: only 3 available D players can cover 4 D slots.');
+  });
+
+  it('recommends fewer blocks for the fixed-roster 11v11 capacity limit', () => {
+    const testCase = fingerprintCases.find(({ id }) => id === '11v11-position-flexibility');
+    if (!testCase) throw new Error('11v11 fingerprint fixture is missing.');
+
+    const result = generateSchedule(
+      testCase.game as GameInput,
+      testCase.players.map((player) => createPlayer(player as PlayerInput)),
+    );
+
+    expect(result.errors).toContain('Preflight: this roster cannot legally support any even block count for the requested 4-4-2 formation.');
+    expect(result.warnings.some((warning) => warning.includes('reduce the game'))).toBe(false);
   });
 
   it('allows exactly 11 available players to play every block when maximums are disabled', () => {

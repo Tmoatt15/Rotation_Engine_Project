@@ -15,6 +15,13 @@ export const GK_FIELD_MAXIMUM = 0.3;
 
 const GROUP_HARD_MINIMUM: Record<string, number> = { core: CORE_MIN, core_a: CORE_MIN, core_b: CORE_MIN, rotational: ROTATIONAL_MIN, developing: DEVELOPMENTAL_MIN, developmental: DEVELOPMENTAL_MIN };
 
+type BlockCapacityCheck = {
+  totalCapacity: number;
+  requiredSlots: number;
+  positionCapacity: Record<'D' | 'M' | 'F', number>;
+  positionRequired: Record<'D' | 'M' | 'F', number>;
+};
+
 function isDedicatedGoalkeeper(player: Player): boolean {
   return player.general_positions.some((position) => position.toUpperCase() === 'GK');
 }
@@ -42,6 +49,82 @@ export function positionCapacityWarnings(formationName: string, roster: Player[]
     }
   }
   return warnings;
+}
+
+function blockCapacityCheck(
+  formationCounts: Record<'D' | 'M' | 'F', number>,
+  roster: Player[],
+  totalBlocks: number,
+  quotaExemptPlayers = new Set<string>(),
+): BlockCapacityCheck {
+  const fieldPlayers = roster.filter((player) => player.available && !isDedicatedGoalkeeper(player));
+  const capacityFor = (player: Player): number => {
+    if (quotaExemptPlayers.has(player.name)) return totalBlocks;
+    return Math.min(totalBlocks, Math.max(1, intendedMaximumBlocksForPercentage(totalBlocks, HARD_MAXIMUM)));
+  };
+  const positionCapacity = (['D', 'M', 'F'] as const).reduce((result, position) => {
+    const candidates = new Map([
+      ...eligiblePlayers(roster, position),
+      ...backupEligiblePlayers(roster, position),
+    ].map((player) => [player.name, player] as const));
+    result[position] = [...candidates.values()]
+      .filter((player) => fieldPlayers.some((candidate) => candidate.name === player.name))
+      .reduce((total, player) => total + capacityFor(player), 0);
+    return result;
+  }, {} as Record<'D' | 'M' | 'F', number>);
+  const positionRequired = (['D', 'M', 'F'] as const).reduce((result, position) => {
+    result[position] = formationCounts[position] * totalBlocks;
+    return result;
+  }, {} as Record<'D' | 'M' | 'F', number>);
+  return {
+    totalCapacity: fieldPlayers.reduce((total, player) => total + capacityFor(player), 0),
+    requiredSlots: Object.values(positionRequired).reduce((total, value) => total + value, 0),
+    positionCapacity,
+    positionRequired,
+  };
+}
+
+function addCapacityRecommendations(
+  result: RotationResult,
+  game: Game,
+  roster: Player[],
+  formationCounts: Record<'D' | 'M' | 'F', number>,
+): void {
+  const requested = blockCapacityCheck(formationCounts, roster, game.total_blocks, game.quota_exempt_players);
+  const supports = (check: BlockCapacityCheck): boolean => check.totalCapacity >= check.requiredSlots
+    && (['D', 'M', 'F'] as const).every((position) => check.positionCapacity[position] >= check.positionRequired[position]);
+  const lowerBlockCount = Array.from({ length: Math.max(0, game.total_blocks - 1) }, (_, index) => game.total_blocks - index - 1)
+    .filter((blocks) => blocks % 2 === 0)
+    .find((blocks) => {
+      const check = blockCapacityCheck(formationCounts, roster, blocks, game.quota_exempt_players);
+      return check.totalCapacity >= check.requiredSlots;
+    });
+  const describePositionDeficits = (check: BlockCapacityCheck): void => {
+    for (const position of ['D', 'M', 'F'] as const) {
+      if (!formationCounts[position] || check.positionCapacity[position] >= check.positionRequired[position]) continue;
+      const candidates = new Map([
+        ...eligiblePlayers(roster, position),
+        ...backupEligiblePlayers(roster, position),
+      ].map((player) => [player.name, player] as const));
+      const additionalCandidates = roster.filter((player) => player.available
+        && !isDedicatedGoalkeeper(player)
+        && !candidates.has(player.name)
+        && player.general_positions.some((value) => ['D', 'M', 'F'].includes(value)));
+      if (additionalCandidates.length) {
+        result.warnings.push(`Preflight: assign backup ${position} eligibility to existing field players to cover the ${position} capacity shortfall.`);
+      } else {
+        result.errors.push(`Preflight: the roster cannot legally cover ${position} for ${check.positionRequired[position]} player-blocks at ${check.positionRequired[position] / formationCounts[position]} blocks.`);
+      }
+    }
+  };
+
+  if (supports(requested)) return;
+  if (lowerBlockCount !== undefined) {
+    result.warnings.push(`Preflight: this roster cannot legally support ${game.total_blocks} blocks; reduce the game to ${lowerBlockCount} blocks.`);
+    describePositionDeficits(blockCapacityCheck(formationCounts, roster, lowerBlockCount, game.quota_exempt_players));
+    return;
+  }
+  result.errors.push(`Preflight: this roster cannot legally support any even block count for the requested ${game.formation} formation.`);
 }
 
 export function rotatingHighNames(game: Game, players: Player[], group: string): Set<string> {
@@ -78,7 +161,7 @@ export function blocksForPercentage(totalBlocks: number, percentage: number, min
 export function applyBlockLimits(player: Player, totalBlocks: number): void {
   player.hard_minimum_blocks = minimumBlocksForPercentage(totalBlocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
   player.hard_maximum_blocks = Math.max(
-    player.hard_minimum_blocks,
+    1,
     intendedMaximumBlocksForPercentage(totalBlocks, HARD_MAXIMUM),
   );
   player.max_blocks_per_half = Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
@@ -177,5 +260,6 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
 
   }
   result.warnings.push(...positionCapacityWarnings(game.formation, roster));
+  if (!game.disable_maximum_limits) addCapacityRecommendations(result, game, roster, formationCounts);
   return result;
 }

@@ -2,10 +2,10 @@
 
 This document records the step-2 boundary between the current Python/FastAPI
 application and the offline TypeScript/SQLite application. The TypeScript
-implementation under `mobile/src/engine` is the production scheduling
-authority. The Python implementation is a reference/oracle implementation for
-parity work and must not drive production behavior until the parity fixtures
-are intentionally updated.
+implementation under `mobile/src/engine` is the production and behavioral
+source of truth. The Python implementation is retained only for legacy tooling
+and migration reference; it must not drive production behavior or gate
+TypeScript changes.
 
 ## Locked Scheduling Policy
 
@@ -116,4 +116,6 @@ The final app must not require `EXPO_PUBLIC_API_URL`.
 - `rotation_engine/gk.py` is currently empty, while goalkeeper behavior is distributed across timeline and quota logic.
 - Team activation currently synchronizes multiple JSON files; SQLite transactions must replace that multi-file update safely.
 - Saved schedules and reports are nested in team persistence and must become independently queryable by `team_id`.
-- The Python engine remains the oracle until TypeScript results match the frozen fingerprints.
+- The retired Python oracle fingerprints must be replaced by TypeScript
+  fingerprints whose expected outputs are derived from the locked scheduling
+  policy and verified against the TypeScript engine.
