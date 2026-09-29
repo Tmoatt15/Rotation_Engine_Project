@@ -236,7 +236,7 @@ def compute_block_targets(game, roster):
             player.hard_maximum_blocks = min(
                 total_blocks, player.hard_maximum_blocks + bonus
             )
-        if player.group in {"core", "core_a", "core_b"}:
+        if player.group in {"core", "core_a", "core_b"} and player.name not in game.quota_exempt_players:
             player.hard_maximum_blocks = min(player.hard_maximum_blocks, target)
         player.max_blocks_per_half = max(1, -(-player.hard_maximum_blocks // 2))
         result.block_counts[player.name] = target

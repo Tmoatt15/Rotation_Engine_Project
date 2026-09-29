@@ -1,4 +1,4 @@
-import type { AvailabilityChange, Game, GameInput, Player, PlayerInput, RotationResult, ScheduleBlock } from './models';
+import type { AvailabilityChange, Game, GameInput, Player, PlayerInput, PositionGroup, RotationResult, ScheduleBlock } from './models';
 import { computeBlockTargets } from './quotas';
 import { buildTimeline, calculateMovementMetrics, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus } from './surplus';
@@ -23,7 +23,7 @@ export function createPlayer(input: PlayerInput): Player {
 function prepareGame(input: Game | GameInput): Game {
   const game = input as Game;
   return {
-    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
+    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
 }
 
@@ -63,29 +63,40 @@ export const generateSchedule = runRotationEngine;
 export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[]): RotationResult {
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
   const updatedTimeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
+  const recordAvailabilityChange = (change: AvailabilityChange): void => {
+    if (!game.availability_changes.some((existing) => existing.player === change.player && existing.action === change.action && existing.block === change.block)) {
+      game.availability_changes.push(change);
+    }
+  };
   let earliest = game.total_blocks + 1;
   for (const change of changes) {
     const player = byName.get(change.player); if (!player) continue;
     if (change.action === 'unavailable') {
       if (change.block < 1 || change.block > updatedTimeline.length) throw new Error('Unavailable block must already exist in the timeline.');
       const block = updatedTimeline[change.block - 1];
-      if (block.GK === player.name) throw new Error(`Goalkeeper change in block ${change.block} requires a new coach-selected goalkeeper.`);
-      const position = (['D', 'M', 'F'] as const).find((group) => block[group].includes(player.name));
+      const position: PositionGroup | undefined = block.GK === player.name ? 'GK' : (['D', 'M', 'F'] as const).find((group) => block[group].includes(player.name));
       if (!position) throw new Error(`${player.name} is not playing in block ${change.block}.`);
-      player.available = false; game.quota_exempt_players.add(player.name); game.availability_changes.push(change);
+      player.available = false; game.quota_exempt_players.add(player.name); recordAvailabilityChange(change);
       replayTimeline(roster, updatedTimeline.slice(0, change.block - 1), game);
       computeBlockTargets(game, roster);
       const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]); const bench = new Set(block.bench);
-      const candidates = roster.filter((candidate) => candidate.available && !assigned.has(candidate.name) && eligiblePlayers(roster, position).some((item) => item.name === candidate.name));
+      const candidates = roster.filter((candidate) => candidate.available && !assigned.has(candidate.name) && (position === 'GK'
+        ? candidate.primary_positions.some((value) => value.toUpperCase() === 'GK')
+        : eligiblePlayers(roster, position).some((item) => item.name === candidate.name)));
       candidates.sort((left, right) => (bench.has(left.name) ? 0 : 1) - (bench.has(right.name) ? 0 : 1) || left.block_count - right.block_count || Math.max(0, left.target_blocks - left.block_count) - Math.max(0, right.target_blocks - right.block_count) || left.name.localeCompare(right.name));
       const replacement = candidates[0];
       if (!replacement) { player.available = true; throw new Error(`No available replacement can cover ${position} in block ${change.block}.`); }
-      block[position] = block[position].filter((name) => name !== player.name); block[position].push(replacement.name);
+      if (position === 'GK') {
+        block.GK = replacement.name;
+        block.positions.GK = replacement.name;
+      } else {
+        block[position] = block[position].filter((name) => name !== player.name); block[position].push(replacement.name);
+      }
       block.bench = block.bench.filter((name) => name !== replacement.name); if (!block.bench.includes(player.name)) block.bench.push(player.name);
-      if (!game.replacement_credits.some((credit) => credit.player === player.name && credit.block === change.block)) { game.replacement_credits.push({ player: player.name, block: change.block, position, replacement: replacement.name }); game.replacement_bonuses[replacement.name] = (game.replacement_bonuses[replacement.name] ?? 0) + 1; }
+      if (!game.replacement_credits.some((credit) => credit.player === player.name && credit.block === change.block)) { game.replacement_credits.push({ player: player.name, block: change.block, position, half_index: change.block <= Math.ceil(game.total_blocks / 2) ? 0 : 1, replacement: replacement.name }); game.replacement_bonuses[replacement.name] = (game.replacement_bonuses[replacement.name] ?? 0) + 1; }
       earliest = Math.min(earliest, change.block + 1);
     } else {
-      player.available = true; game.quota_exempt_players.add(player.name); game.availability_changes.push(change); earliest = Math.min(earliest, change.block + 1);
+      player.available = true; game.quota_exempt_players.add(player.name); recordAvailabilityChange(change); earliest = Math.min(earliest, change.block + 1);
     }
   }
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);

@@ -92,6 +92,7 @@ export interface ReplacementCredit {
   player: string;
   block: number;
   position: PositionCode;
+  half_index?: 0 | 1;
   replacement?: string;
 }
 
@@ -115,6 +116,7 @@ export interface GameInput {
   season_game_number?: number;
   season_seed?: number;
   allow_emergency_assignments?: boolean;
+  allow_emergency_positions?: boolean;
   disable_maximum_limits?: boolean;
   season_player_blocks?: Record<string, number>;
   season_position_starts?: Record<string, Record<string, number>>;
@@ -146,6 +148,7 @@ export interface Game extends Required<
   season_player_blocks?: Record<string, number>;
   season_position_starts?: Record<string, Record<string, number>>;
   season_goalkeeper_starts?: Record<string, number>;
+  allow_emergency_positions?: boolean;
 }
 
 export interface GoalkeeperSummary {

@@ -38,7 +38,7 @@
       {"name": "Owen", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
       {"name": "Pia", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
     ],
-    "expect": {"timeline_blocks": 6, "has_goalkeeper": true, "field_player_count": 7, "assigned_goalkeeper": "Gio", "oracle_sha256": "00d004cca7ff500497acd7b06a69875368c307d9efce21017827519448f11e50"}
+    "expect": {"timeline_blocks": 6, "has_goalkeeper": true, "field_player_count": 7, "assigned_goalkeeper": "Gio", "oracle_sha256": "6e9b4abb9685216520a468463e7b51e29a001c0907d14b453c050d095fb1ddc7"}
   },
   {
     "id": "11v11-position-flexibility",

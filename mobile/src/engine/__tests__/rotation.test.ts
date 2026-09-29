@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import cases from './fixtures/rotation_contract_cases.json';
-import { createPlayer, generateSchedule } from '../rotation';
+import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { eligiblePlayers } from '../positional';
 import { computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
 import { calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
@@ -118,6 +118,50 @@ describe('rotation engine contract fixtures', () => {
 });
 
 describe('goalkeeper and minimum protection', () => {
+  it('uses the legacy single goalkeeper assignment for both halves', () => {
+    const players = [
+      createPlayer({ name: 'Gio', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'D', group: 'rotational', general_positions: ['D'], primary_positions: ['D'] }),
+      createPlayer({ name: 'D2', group: 'rotational', general_positions: ['D'], primary_positions: ['D'] }),
+      createPlayer({ name: 'M', group: 'rotational', general_positions: ['M'], primary_positions: ['M'] }),
+      createPlayer({ name: 'M2', group: 'rotational', general_positions: ['M'], primary_positions: ['M'] }),
+      createPlayer({ name: 'F', group: 'rotational', general_positions: ['F'], primary_positions: ['F'] }),
+      createPlayer({ name: 'F2', group: 'rotational', general_positions: ['F'], primary_positions: ['F'] }),
+    ];
+    const result = generateSchedule({ total_blocks: 4, formation: '1-1-1', gk_assignment: 'Gio' }, players);
+
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.every((block) => block.GK === 'Gio')).toBe(true);
+  });
+
+  it('accepts the legacy emergency-position option name', () => {
+    const players = [
+      createPlayer({ name: 'Gio', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'D1', group: 'rotational', general_positions: ['D'], primary_positions: ['D'] }),
+      createPlayer({ name: 'D2', group: 'rotational', general_positions: ['D'], primary_positions: ['D'] }),
+    ];
+    const legacy = generateSchedule({ total_blocks: 1, formation: '1-1-0', gk_assignment: 'Gio', allow_emergency_positions: true }, players);
+    const current = generateSchedule({ total_blocks: 1, formation: '1-1-0', gk_assignment: 'Gio', allow_emergency_assignments: true }, players);
+
+    expect(legacy.errors).toEqual(current.errors);
+    expect(legacy.timeline).toEqual(current.timeline);
+  });
+
+  it('replaces an unavailable goalkeeper during regeneration', () => {
+    const players = [
+      createPlayer({ name: 'G1', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'G2', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'D1', group: 'rotational', general_positions: ['D'], primary_positions: ['D'] }),
+      createPlayer({ name: 'F1', group: 'rotational', general_positions: ['F'], primary_positions: ['F'] }),
+    ];
+    const game = { total_blocks: 2, formation: '1-0-1', first_half_gk: 'G1', second_half_gk: 'G2' };
+    const initial = generateSchedule(game, players);
+    const updated = regenerateSchedule(game as Game, players, initial.timeline, [{ player: 'G1', action: 'unavailable', block: 1 }]);
+
+    expect(updated.timeline[0].GK).toBe('G2');
+    expect(updated.timeline[0].positions.GK).toBe('G2');
+  });
+
   it('does not auto-select a goalkeeper when the coach selection is missing or stale', () => {
     const players = [
       createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
@@ -1040,6 +1084,32 @@ describe('ten-game season availability simulation', () => {
     const investigatedScenario = scenarioSummaries.find((scenario) => scenario.seed === 20261001);
     expect(investigatedScenario?.games.filter((summary) => [5, 6].includes(summary.game)).flatMap((summary) => summary.structuralErrors)).toEqual([]);
   }, 60000);
+
+  it('keeps bounded planning deterministic for flexible and constrained rosters', () => {
+    const makeRoster = (count: number, constrained: boolean): PlayerInput[] => [
+      { name: 'Stress Keeper', group: 'rotational', general_positions: ['M'], primary_positions: ['GK', 'ANY'] },
+      ...Array.from({ length: count - 1 }, (_, index) => {
+        const group = ['D', 'M', 'F'][index % 3];
+        return {
+          name: `Stress ${index + 1}`,
+          group: 'rotational' as const,
+          general_positions: [group],
+          primary_positions: constrained ? [group] : ['ANY'],
+        };
+      }),
+    ];
+    const game: GameInput = { total_blocks: 8, formation: '3-2-2', first_half_gk: 'Stress Keeper', second_half_gk: 'Stress Keeper' };
+
+    for (const [count, constrained] of [[15, false], [15, true], [21, false]] as const) {
+      const roster = makeRoster(count, constrained).map(createPlayer);
+      const started = performance.now();
+      const first = generateSchedule(game, roster);
+      const second = generateSchedule(game, roster.map((player) => createPlayer(player)));
+      expect(performance.now() - started).toBeLessThan(5000);
+      expect(first.timeline.map((block) => block.positions)).toEqual(second.timeline.map((block) => block.positions));
+      expect(first.timeline).toHaveLength(game.total_blocks);
+    }
+  }, 20000);
 
   it('covers strict mode and production emergency field fallback separately', () => {
     const players = [
