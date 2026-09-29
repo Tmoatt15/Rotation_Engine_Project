@@ -62,6 +62,16 @@ class RotationEngineTests(unittest.TestCase):
                     case["expect"]["field_players"],
                     case["expect"]["has_goalkeeper"],
                 )
+                if "first_goalkeeper" in case["expect"]:
+                    midpoint = len(result.timeline) // 2
+                    self.assertEqual(
+                        result.timeline[0].get("GK"),
+                        case["expect"]["first_goalkeeper"],
+                    )
+                    self.assertEqual(
+                        result.timeline[midpoint].get("GK"),
+                        case["expect"]["second_goalkeeper"],
+                    )
 
     def test_goalkeeper_field_minimum_is_protected_before_core_donor(self):
         result = run_rotation_engine(self.make_game(), self.make_roster())
