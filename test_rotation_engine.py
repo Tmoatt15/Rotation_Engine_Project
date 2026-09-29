@@ -1020,6 +1020,31 @@ class RotationEngineTests(unittest.TestCase):
             self.assertNotIn(pulled_player, block["F"])
             self.assertNotEqual(block["GK"], pulled_player)
 
+    def test_unavailable_goalkeeper_is_replaced_for_remaining_blocks(self):
+        roster = [
+            Player("G1", "rotational_gk", "GK"),
+            Player("G2", "rotational_gk", "GK"),
+            Player("D1", "core", "D"),
+            Player("F1", "core", "F"),
+        ]
+        game = Game(
+            total_blocks=2,
+            formation="1-0-1",
+            first_half_gk="G1",
+            second_half_gk="G2",
+        )
+        result = run_rotation_engine(game, roster)
+
+        updated = regenerate_schedule(
+            game, roster, result.timeline,
+            changes=[("G1", "unavailable", 1)],
+        )
+
+        self.assertEqual(updated.timeline[0]["GK"], "G2")
+        self.assertEqual(updated.timeline[1]["GK"], "G2")
+        self.assertEqual(updated.block_counts["G1"], 1)
+        self.assertNotEqual(updated.timeline[1]["GK"], "G1")
+
     def test_available_again_returns_at_next_block(self):
         roster = self.make_roster()
         game = self.make_game()
