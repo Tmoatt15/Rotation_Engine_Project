@@ -5,7 +5,7 @@ import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { eligiblePlayers } from '../positional';
-import { computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
+import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
 import { calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
@@ -338,7 +338,7 @@ describe('goalkeeper and minimum protection', () => {
       { name: 'Sid', group: 'core' as const, general_positions: ['D'], primary_positions: ['ANY'] },
       { name: 'Yash', group: 'rotational' as const, general_positions: ['D'], primary_positions: ['ANY'] },
     ].map(createPlayer);
-    const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan' }, players);
+    const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', disable_maximum_limits: true }, players);
 
     expect(result.timeline.every((block) => block.F.length === 3)).toBe(true);
     expect(result.warnings.some((warning) => warning.includes('more Forward'))).toBe(false);
@@ -423,12 +423,12 @@ describe('quota fairness and controlled coverage', () => {
     expect(fieldPlayers.every((player) => player.field_blocks <= player.maximum_blocks)).toBe(true);
   });
 
-  it('allows unavoidable intended-band overflow without crossing hard maximums', () => {
+  it('enforces group maximums before considering coverage failures', () => {
     const players = singleGroupRoster(['D1', 'D2', 'D3']).map(createPlayer);
     const result = generateSchedule({ ...singleGroupGame(10), formation: '2-0' }, players);
     const fieldPlayers = players.filter((player) => player.name !== 'GK');
 
-    expect(fieldPlayers.some((player) => player.field_blocks > player.maximum_blocks)).toBe(true);
+    expect(fieldPlayers.every((player) => player.field_blocks <= player.maximum_blocks)).toBe(true);
     expect(fieldPlayers.every((player) => player.field_blocks <= player.hard_maximum_blocks)).toBe(true);
     expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
   });
@@ -441,6 +441,47 @@ describe('quota fairness and controlled coverage', () => {
     expect(defender?.field_blocks).toBeLessThanOrEqual(defender?.hard_maximum_blocks ?? 0);
     expect(result.errors.some((error) => error.includes('unassigned'))).toBe(true);
     expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
+  });
+
+  it('preflights per-level maximum capacity for an all-developing roster', () => {
+    const players = Array.from({ length: 15 }, (_, index) => createPlayer({
+      name: `Developing ${index + 1}`,
+      group: 'developing',
+      general_positions: ['D', 'M', 'F'],
+      primary_positions: ['ANY'],
+    }));
+    players.push(createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }));
+
+    const result = computeBlockTargets({
+      total_blocks: 10,
+      formation: '4-3-3',
+      quota_exempt_players: new Set<string>(),
+      replacement_bonuses: {},
+      disable_maximum_limits: false,
+      season_game_number: 1,
+      season_seed: 1,
+    } as Game, players);
+
+    expect(result.errors.some((error) => error.startsWith('Preflight:'))).toBe(true);
+  });
+
+  it('does not report independent position minimum deficits for flexible players', () => {
+    const players = Array.from({ length: 15 }, (_, index) => createPlayer({
+      name: `Flexible ${index + 1}`,
+      group: 'rotational',
+      general_positions: ['D', 'M', 'F'],
+      primary_positions: ['ANY'],
+    }));
+    players.push(createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }));
+
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'GK',
+      second_half_gk: 'GK',
+    }, players);
+
+    expect(result.warnings.filter((warning) => /[DMF] minimums require/.test(warning))).toEqual([]);
   });
 
   it('allows intended-band and hard-limit overflow only with maximum limits disabled', () => {
@@ -510,7 +551,7 @@ describe('quota fairness and controlled coverage', () => {
     expect(positionCapacityWarnings('4-3-3', players)).toContain('Preflight: only 3 available D players can cover 4 D slots.');
   });
 
-  it('recommends fewer blocks for the fixed-roster 11v11 capacity limit', () => {
+  it('reports infeasible fixed-roster 11v11 capacity', () => {
     const testCase = fingerprintCases.find(({ id }) => id === '11v11-position-flexibility');
     if (!testCase) throw new Error('11v11 fingerprint fixture is missing.');
 
@@ -558,6 +599,25 @@ describe('quota fairness and controlled coverage', () => {
     const values = [...counts.values()];
     expect(Math.min(...values), `${JSON.stringify([...counts])}`).toBeGreaterThanOrEqual(8);
     expect(Math.max(...values), `${JSON.stringify([...counts])}`).toBeLessThanOrEqual(10);
+  }, 20_000);
+
+  it('uses phased core-first filling in maximum override mode', () => {
+    const players = [
+      ...['Core 1', 'Core 2', 'Core 3', 'Core 4'].map((name) => ({ name, group: 'core' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      ...['Rot 1', 'Rot 2', 'Rot 3', 'Rot 4'].map((name) => ({ name, group: 'rotational' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      ...['Dev 1', 'Dev 2', 'Dev 3', 'Dev 4'].map((name) => ({ name, group: 'developing' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'GK', second_half_gk: 'GK', disable_maximum_limits: true }, players);
+
+    expect(result.errors.filter((error) => !error.includes('endpoint'))).toEqual([]);
+    const corePlayers = players.filter((player) => player.group === 'core');
+    const rotationalPlayers = players.filter((player) => player.group === 'rotational');
+    const developingPlayers = players.filter((player) => player.group === 'developing');
+    const average = (group: typeof corePlayers): number => group.reduce((total, player) => total + player.field_blocks, 0) / group.length;
+    expect(corePlayers.filter((player) => player.field_blocks >= 9)).toHaveLength(3);
+    expect(average(rotationalPlayers)).toBeGreaterThan(average(developingPlayers));
+    expect(Math.max(...developingPlayers.map((player) => player.field_blocks))).toBe(8);
   }, 20_000);
 
   it('plans core blocks across both halves before filling remaining positions', () => {
@@ -978,7 +1038,17 @@ describe('ten-game season availability simulation', () => {
       const firstHalfGoalkeeper = availableGoalkeepers.find((player) => player.name === 'Cameron')?.name ?? availableGoalkeepers[0]?.name;
       const secondHalfGoalkeeper = availableGoalkeepers.find((player) => player.name === 'Eitan')?.name ?? firstHalfGoalkeeper;
       const availableCount = availablePlayerNames.length;
-      const maximumOverride = availableCount * Math.ceil(10 * 0.8) < 10 * 11 || availableCount <= 11 + 3;
+      const fieldCapacity = players
+        .filter((player) => !player.general_positions.includes('GK'))
+        .reduce((total, player) => {
+          const maximum = player.group === 'rotational'
+            ? ROTATIONAL_MAX
+            : ['developing', 'developmental'].includes(player.group)
+              ? DEVELOPMENTAL_MAX
+              : HARD_MAXIMUM;
+          return total + Math.max(1, Math.floor(10 * maximum));
+        }, 0);
+      const maximumOverride = fieldCapacity < 10 * 11 || availableCount <= 11 + 4;
       const result = generateSchedule({
         total_blocks: 10,
         formation: '4-3-3',
@@ -1008,10 +1078,7 @@ describe('ten-game season availability simulation', () => {
       }
       const quotaErrors = result.errors.filter((error) => error.includes('exceeds') || error.includes('under target') || error.includes('under minimum'));
       const minimumWarnings = result.warnings.filter((warning) => warning.includes('under minimum') || warning.includes('under target'));
-      const capacityExemptGroups = new Set([...result.warnings].flatMap((warning) => {
-        const match = warning.match(/^([DMF]) minimums require/);
-        return match ? [match[1]] : [];
-      }));
+      const capacityExemptGroups = new Set(result.metadata.quota_feasibility?.affectedGroups ?? []);
       const goalkeeperStarts: Record<string, number> = {};
       [result.timeline[0]?.GK, result.timeline[Math.ceil(result.timeline.length / 2)]?.GK].forEach((goalkeeper) => {
         if (goalkeeper && goalkeeper !== 'NO GK AVAILABLE') goalkeeperStarts[goalkeeper] = (goalkeeperStarts[goalkeeper] ?? 0) + 1;
@@ -1038,9 +1105,10 @@ describe('ten-game season availability simulation', () => {
         const goalkeeperBlocks = result.timeline.filter((block) => block.GK === player.name).length;
         current.expectedMinimum += goalkeeperBlocks > 0 ? player.gk_field_minimum_blocks : player.minimum_blocks;
         current.actualFieldBlocks += actualBlocks.get(player.name) ?? 0;
-        current.capacityExempt ||= player.general_positions.includes('ANY')
-          ? capacityExemptGroups.size > 0
-          : player.general_positions.some((position) => capacityExemptGroups.has(position));
+        current.capacityExempt ||= result.metadata.quota_feasibility?.minimumsFeasible === false
+          || (player.general_positions.includes('ANY')
+            ? capacityExemptGroups.size > 0
+            : player.general_positions.some((position) => capacityExemptGroups.has(position)));
         seasonMinimums.set(player.name, current);
       });
       const lastBlockPlayers = new Set([
@@ -1112,7 +1180,7 @@ describe('ten-game season availability simulation', () => {
     }
     scenarioSummaries.forEach((scenario) => {
       expect(scenario.games.map((summary) => summary.available)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 11]);
-      expect(scenario.games.filter((summary) => summary.maximumOverride).map((summary) => summary.game)).toEqual([1, 2, 3, 4, 10]);
+      expect(scenario.games.filter((summary) => summary.maximumOverride).map((summary) => summary.game)).toEqual([1, 2, 3, 4, 5, 10]);
       expect(scenario.games.filter((summary) => summary.maximumOverride).every((summary) => summary.quotaErrors.length === 0)).toBe(true);
       const unexpectedStructuralErrors = scenario.games.flatMap((summary) => summary.structuralErrors)
         .filter((error) => !error.includes('core player') || !error.includes('endpoint'));
@@ -1150,6 +1218,19 @@ describe('ten-game season availability simulation', () => {
       expect(first.timeline.map((block) => block.positions)).toEqual(second.timeline.map((block) => block.positions));
       expect(first.timeline).toHaveLength(game.total_blocks);
     }
+  }, 20000);
+
+  it('completes a ten-block all-flexible roster within the five-second budget', () => {
+    const players = [
+      ...Array.from({ length: 15 }, (_, index) => ({ name: `Flexible ${index + 1}`, group: 'rotational' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const started = performance.now();
+    const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
   }, 20000);
 
   it('covers strict mode and production emergency field fallback separately', () => {

@@ -15,7 +15,7 @@
       {"name": "Eli", "group": "developing", "general_positions": ["F"], "primary_positions": ["F"]},
       {"name": "Finn", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]}
     ],
-    "fingerprint": "55f72ae2a8b7b6408bae316d1c0e96cc625a5fb2404117e6c4aa74b8bd99919b"
+    "fingerprint": "8f0de75aeb534aef25e7277522577d46929076e76a8b4227601a094074f3b317"
   },
   {
     "id": "7v7-gk-and-groups",
@@ -38,7 +38,7 @@
       {"name": "Owen", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
       {"name": "Pia", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
     ],
-    "fingerprint": "e2917dc8146fedb4ac50056c8c6d01ded361e2fae0b86f1f4b1a8470e3e798e7"
+    "fingerprint": "af17bbc63d5d8fc1f039552dcc54bab5669270b29de5f0f17e6f432184256ae0"
   },
   {
     "id": "11v11-position-flexibility",
@@ -66,6 +66,6 @@
       {"name": "Cory", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]},
       {"name": "Dina", "group": "rotational", "general_positions": ["M", "F"], "primary_positions": ["M"], "backup_positions": ["F", "D"]}
     ],
-    "fingerprint": "97f23b311d153088714d9fbf4687b9c4b3dd17a75a2925fd0bf7a75aa356e6c6"
+    "fingerprint": "c56aaaf433ce7aeef20e2d61e0b7018c0f3d5be48e34a7db48277156d16998ec"
   }
 ]

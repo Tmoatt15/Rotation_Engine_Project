@@ -9,6 +9,7 @@ import { getSavedReports } from '@/services/report-service';
 import { getActiveTeamId } from '@/team-api';
 import { getLocalTeam, getRoster, getSeasonSettings } from './team-service';
 import { summarizeStructuralErrors } from './structural-diagnostics';
+import { assertCompleteSchedule } from './schedule-validation';
 
 function positionRows(formation: string) {
   const slots = formationSlots(parseFormation(formation));
@@ -49,6 +50,7 @@ export async function generateLocalSchedule(input: { teamId: string; gameNumber:
   const result = generateSchedule({ total_blocks: setup.total_blocks, formation: setup.formation, first_half_gk: input.firstHalfGk, second_half_gk: input.secondHalfGk, season_total_games: setup.total_games, season_game_number: input.gameNumber, season_seed: 2026, season_player_blocks: history.playerBlocks, season_position_starts: history.positionStarts, season_goalkeeper_starts: history.goalkeeperStarts, allow_emergency_assignments: true, disable_maximum_limits: input.disableMaximumLimits ?? false }, roster.map(createPlayer));
   const goalkeeperErrors = result.errors.filter((error) => error.toLowerCase().includes('goalkeeper'));
   if (goalkeeperErrors.length) throw new Error(goalkeeperErrors.join(' '));
+  assertCompleteSchedule(result.errors);
   const blockLengths = setup.block_lengths_minutes;
   const blockStarts = blockLengths.reduce<number[]>((starts, length) => [...starts, (starts[starts.length - 1] ?? 0) + (starts.length ? length : 0)], []);
   const structuralErrors = summarizeStructuralErrors(input.gameNumber, result.errors.filter((error) => !error.includes('exceeds') && !error.includes('under target') && !error.includes('under minimum')));

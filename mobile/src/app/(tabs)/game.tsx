@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/team-api';
 import { createPlayer } from '@/engine/rotation';
-import { positionCapacityWarnings } from '@/engine/quotas';
+import { maximumFieldBlocksForPlayer, positionCapacityWarnings } from '@/engine/quotas';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
@@ -123,7 +123,15 @@ export default function GameScreen() {
 
   function continueToGenerationOptions() {
     const requiredFieldBlocks = totalBlocks * playersOnField;
-    const normalMaximumCapacity = availableCount * Math.max(1, Math.ceil(totalBlocks * 0.8));
+    const availableFieldPlayers = playerNames
+      .filter((name) => !unavailable.has(name) && !goalkeeperNames.includes(name))
+      .map((name) => rosterPlayers.find((player) => player.name === name))
+      .filter((player): player is RosterPlayer => player !== undefined)
+      .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
+    const normalMaximumCapacity = availableFieldPlayers.reduce(
+      (total, player) => total + maximumFieldBlocksForPlayer(player, totalBlocks),
+      0,
+    );
     const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
     if (maximumCapacityPressure || availableCount <= playersOnField + 3) {
       setShowMaximumLimitConfirmation(true);

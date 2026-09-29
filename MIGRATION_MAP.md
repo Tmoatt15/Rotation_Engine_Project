@@ -17,16 +17,21 @@ positional and goalkeeper coverage at every step:
 3. Lowest current field totals
 4. Group urgency
 5. Continuity and rest fairness
-6. Intended targets and soft maximums
+6. Enforced group maximums and intended targets
 7. Deterministic name tie-breaker
 
 The policy contracts are:
 
-- `hard_maximum_blocks` is an absolute limit unless an explicit override
-  relaxes it.
-- `maximum_blocks` is an intended soft ceiling.
-- Exceeding an intended maximum is allowed only when required for coverage or
-  explicitly overridden.
+- In normal mode, `hard_maximum_blocks` enforces the group maximum: core 80%,
+  rotational 70%, and developing 50%.
+- `maximum_blocks` mirrors the enforced group maximum in normal mode.
+- An explicit maximum override uses phased fill order: everyone to 70%, everyone
+  to 80%, core to 90%, rotational to 90%, developing to 90%, then everyone to
+  100%.
+- Incomplete schedules with required unassigned slots are blocking errors at the
+  local service boundary and cannot be opened as playable schedules.
+- Fully flexible candidate sets use capacity-only future checks to avoid
+  recursive combinatorial search; constrained rosters retain exact-slot search.
 - Emergency assignments may exceed intended maximums when necessary and must
   remain visible in result warnings.
 - Core, Core A, and Core B share one 70% target; there is no A/B target

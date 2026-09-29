@@ -776,8 +776,16 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const urgency = player.group === 'developing' || player.group === 'developmental' ? 0.5 : 1;
     const fieldMinimumPriority = assignedGoalkeepers.has(player.name) && deficit > 0 ? 0 : 1;
     const manualOverrideCount = game.disable_maximum_limits ? fieldCounts.get(player.name) ?? 0 : 0;
+    const overridePhase = !game.disable_maximum_limits
+      ? 0
+      : (manualOverrideCount < Math.floor(game.total_blocks * 0.7) ? 0
+        : manualOverrideCount < Math.floor(game.total_blocks * 0.8) ? 1
+          : CORE_GROUPS.has(player.group) && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 2
+            : player.group === 'rotational' && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 3
+              : ['developing', 'developmental'].includes(player.group) && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 4
+                : manualOverrideCount < game.total_blocks ? 5 : 6);
     return game.disable_maximum_limits
-      ? [manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, -(deficit || targetDeficit * urgency), intendedBandPriority, player.name]
+      ? [overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, player.name]
       : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, player.name];
   };
   const comparePlayerKeys = (left: Player, right: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): number => {
@@ -845,6 +853,20 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       search(0);
       return choices;
     };
+    const postChoice = updateState({ raw: initialRaw, field: initialField, half: initialHalf }, chosen, blockIndex);
+    if (slots.every((slot) => candidates.every((player) => canCoverSlot(player, slot, position)))) {
+      for (const half of [0, 1] as const) {
+        const futureIndices = Array.from({ length: game.total_blocks }, (_, index) => index)
+          .filter((index) => index > blockIndex && blockHalf(index, game.total_blocks) === half);
+        const capacity = candidates.reduce((total, player) => {
+          const remainingHalf = Math.max(0, player.max_blocks_per_half - (postChoice.half.get(player.name)?.[half] ?? 0));
+          const remainingTotal = Math.max(0, player.hard_maximum_blocks - (postChoice.raw.get(player.name) ?? 0));
+          return total + Math.min(futureIndices.length, remainingHalf, remainingTotal);
+        }, 0);
+        if (capacity < formation[position] * futureIndices.length) return false;
+      }
+      return true;
+    }
     const stateKey = (index: number, state: { raw: Map<string, number>; field: Map<string, number>; half: Map<string, [number, number]> }) => [
       index,
       candidates.map((player) => `${player.name}:${state.raw.get(player.name) ?? 0}:${state.field.get(player.name) ?? 0}:${(state.half.get(player.name) ?? [0, 0]).join(',')}`).join('|'),
@@ -901,7 +923,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       failed.add(key);
       return false;
     };
-    return search(blockIndex + 1, updateState({ raw: initialRaw, field: initialField, half: initialHalf }, chosen, blockIndex));
+    return search(blockIndex + 1, postChoice);
   };
 
   // Reserve declared backups before the normal groups consume them. This is
@@ -2027,22 +2049,48 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
     const fieldNames = roster.filter((player) => player.available && !goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)).map((player) => player.name);
+    const overridePhase = (player: Player, count: number): number => count < Math.floor(game.total_blocks * 0.7) ? 0
+      : count < Math.floor(game.total_blocks * 0.8) ? 1
+        : CORE_GROUPS.has(player.group) && count < Math.floor(game.total_blocks * 0.9) ? 2
+          : player.group === 'rotational' && count < Math.floor(game.total_blocks * 0.9) ? 3
+            : ['developing', 'developmental'].includes(player.group) && count < Math.floor(game.total_blocks * 0.9) ? 4
+              : count < game.total_blocks ? 5 : 6;
     let changed = true;
-    while (changed) {
+    let swapBudget = fieldNames.length * game.total_blocks * 4;
+    while (changed && swapBudget > 0) {
       changed = false;
-      const lowPlayers = fieldNames.filter((name) => plannedCount(name) < 8).sort((left, right) => plannedCount(left) - plannedCount(right) || left.localeCompare(right));
-      const highPlayers = fieldNames.filter((name) => plannedCount(name) >= 9).sort((left, right) => plannedCount(right) - plannedCount(left) || left.localeCompare(right));
+      const lowPlayers = fieldNames.filter((name) => plannedCount(name) < game.total_blocks).sort((left, right) => {
+        const leftPlayer = roster.find((player) => player.name === left);
+        const rightPlayer = roster.find((player) => player.name === right);
+        return overridePhase(leftPlayer!, plannedCount(left)) - overridePhase(rightPlayer!, plannedCount(right))
+          || plannedCount(left) - plannedCount(right) || left.localeCompare(right);
+      });
+      const highPlayers = fieldNames.filter((name) => plannedCount(name) > 0).sort((left, right) => {
+        const leftPlayer = roster.find((player) => player.name === left);
+        const rightPlayer = roster.find((player) => player.name === right);
+        return overridePhase(rightPlayer!, plannedCount(right)) - overridePhase(leftPlayer!, plannedCount(left))
+          || plannedCount(right) - plannedCount(left) || left.localeCompare(right);
+      });
       for (const lowName of lowPlayers) {
         for (const highName of highPlayers) {
+          const lowPlayer = roster.find((player) => player.name === lowName);
+          const highPlayer = roster.find((player) => player.name === highName);
+          if (!lowPlayer || !highPlayer || (overridePhase(lowPlayer, plannedCount(lowName)) >= overridePhase(highPlayer, plannedCount(highName))
+            && plannedCount(lowName) >= plannedCount(highName))) continue;
           for (const group of FIELD_GROUPS) {
             if (!canCoverGroup(game, roster, lowName, group)) continue;
             for (let blockIndex = 0; blockIndex < game.total_blocks; blockIndex += 1) {
+              const lowPlayer = roster.find((player) => player.name === lowName);
+              const highPlayer = roster.find((player) => player.name === highName);
+              const isEndpoint = blockIndex === 0 || blockIndex === game.total_blocks - 1;
+              if (isEndpoint && (!lowPlayer || !highPlayer || !CORE_GROUPS.has(lowPlayer.group) || CORE_GROUPS.has(highPlayer.group))) continue;
               const current = planned[group][blockIndex];
               const blockAssigned = new Set(FIELD_GROUPS.flatMap((candidateGroup) => planned[candidateGroup][blockIndex]));
               if (!current.includes(highName) || blockAssigned.has(lowName)) continue;
               const replacement = current.map((name) => name === highName ? lowName : name);
               if (!completeExactAssignmentExists(roster, replacement, formationSlots(formation)[group], group)) continue;
               planned[group][blockIndex] = replacement;
+              swapBudget -= 1;
               changed = true;
               break;
             }
@@ -2130,43 +2178,62 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
   optimizeExactSlotSwitches(game, roster, result.timeline, slots, firstBlockLocked ? 2 : startBlock);
   if (firstBlockLocked) result.timeline[0] = firstBlockLocked;
   if (game.disable_maximum_limits) {
-    const fieldNames = roster.filter((player) => player.available && !goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)).map((player) => player.name);
-    const fieldCount = (name: string): number => result.timeline.reduce((total, block) => total + (Object.entries(block.positions).some(([position, player]) => position !== 'GK' && player === name) ? 1 : 0), 0);
-    for (const tier of [8, 9]) {
-      let changed = true;
-      while (changed) {
-        changed = false;
-        const lowPlayers = fieldNames.filter((name) => fieldCount(name) < tier).sort((left, right) => fieldCount(left) - fieldCount(right) || left.localeCompare(right));
-        const highPlayers = fieldNames.filter((name) => fieldCount(name) >= tier + 1).sort((left, right) => fieldCount(right) - fieldCount(left) || left.localeCompare(right));
-        for (const lowName of lowPlayers) {
-          for (const highName of highPlayers) {
-            for (let blockIndex = 0; blockIndex < result.timeline.length; blockIndex += 1) {
+    const fieldNames = roster
+      .filter((player) => player.available && !goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name))
+      .map((player) => player.name);
+    const fieldCount = (name: string): number => result.timeline.reduce((total, block) => total
+      + (FIELD_GROUPS.some((group) => block[group].includes(name)) ? 1 : 0), 0);
+    const overridePhase = (player: Player, count: number): number => count < Math.floor(game.total_blocks * 0.7) ? 0
+      : count < Math.floor(game.total_blocks * 0.8) ? 1
+        : CORE_GROUPS.has(player.group) && count < Math.floor(game.total_blocks * 0.9) ? 2
+          : player.group === 'rotational' && count < Math.floor(game.total_blocks * 0.9) ? 3
+            : ['developing', 'developmental'].includes(player.group) && count < Math.floor(game.total_blocks * 0.9) ? 4
+              : count < game.total_blocks ? 5 : 6;
+    let changed = true;
+    let swapBudget = fieldNames.length * game.total_blocks * 4;
+    while (changed && swapBudget > 0) {
+      changed = false;
+      const orderedPlayers = fieldNames
+        .map((name) => roster.find((player) => player.name === name))
+        .filter((player): player is Player => player !== undefined)
+        .sort((left, right) => overridePhase(left, fieldCount(left.name)) - overridePhase(right, fieldCount(right.name))
+          || fieldCount(left.name) - fieldCount(right.name)
+          || left.name.localeCompare(right.name));
+      for (const low of orderedPlayers) {
+        const lowCount = fieldCount(low.name);
+        const donors = [...orderedPlayers].reverse().filter((high) => {
+          const highCount = fieldCount(high.name);
+          return high.name !== low.name
+            && (overridePhase(low, lowCount) < overridePhase(high, highCount)
+              || (overridePhase(low, lowCount) === overridePhase(high, highCount) && lowCount < highCount));
+        });
+        for (const high of donors) {
+          for (let blockIndex = 0; blockIndex < result.timeline.length; blockIndex += 1) {
             const block = result.timeline[blockIndex];
             const fieldAssigned = new Set(FIELD_GROUPS.flatMap((group) => block[group]));
-            if (fieldAssigned.has(lowName)) continue;
-            const group = FIELD_GROUPS.find((candidateGroup) => block[candidateGroup].includes(highName));
-            if (!group || !canCoverGroup(game, roster, lowName, group)) continue;
-            const slot = slots[group].find((slotName) => block.positions[slotName] === highName);
+            if (fieldAssigned.has(low.name)) continue;
+            const group = FIELD_GROUPS.find((candidateGroup) => block[candidateGroup].includes(high.name));
+            if (!group || !canCoverGroup(game, roster, low.name, group)) continue;
+            const isEndpoint = blockIndex === 0 || blockIndex === result.timeline.length - 1;
+            if (isEndpoint && (!CORE_GROUPS.has(low.group) || CORE_GROUPS.has(high.group))) continue;
+            const slot = slots[group].find((slotName) => block.positions[slotName] === high.name);
             if (!slot) continue;
-            const replacement = block[group].map((name) => name === highName ? lowName : name);
+            const replacement = block[group].map((name) => name === high.name ? low.name : name);
+            if (!completeExactAssignmentExists(roster, replacement, slots[group], group)) continue;
             block[group] = replacement;
-            block.positions[slot] = lowName;
-            block.bench = block.bench.filter((name) => name !== lowName);
-            if (!block.bench.includes(highName)) block.bench.push(highName);
+            block.positions[slot] = low.name;
+            block.bench = block.bench.filter((name) => name !== low.name);
+            if (!block.bench.includes(high.name)) block.bench.push(high.name);
             const half = blockHalf(blockIndex, game.total_blocks);
-            const high = roster.find((player) => player.name === highName);
-            const low = roster.find((player) => player.name === lowName);
-            if (high && low) {
-              high.block_count -= 1; high.field_blocks -= 1; high.blocks_by_half[half] -= 1; high.position_usage[group] -= 1;
-              low.block_count += 1; low.field_blocks += 1; low.blocks_by_half[half] += 1; low.position_usage[group] += 1;
-            }
+            high.block_count -= 1; high.field_blocks -= 1; high.blocks_by_half[half] -= 1; high.position_usage[group] -= 1;
+            low.block_count += 1; low.field_blocks += 1; low.blocks_by_half[half] += 1; low.position_usage[group] += 1;
+            swapBudget -= 1;
             changed = true;
             break;
-            }
-            if (changed) break;
           }
           if (changed) break;
         }
+        if (changed) break;
       }
     }
   }
