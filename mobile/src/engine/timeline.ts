@@ -719,9 +719,6 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const midpoint = halfLength(game.total_blocks);
   const coreGroups = CORE_GROUPS;
   const shortageMode = Boolean(game.quota_feasibility && !game.quota_feasibility.minimumsFeasible);
-  const allAvailableFieldPlayersCore = roster
-    .filter((player) => player.available && !assignedGoalkeepers.has(player.name))
-    .every((player) => coreGroups.has(player.group));
   const coreReservations = game.disable_maximum_limits
     ? {
       byBlock: Array.from({ length: game.total_blocks }, () => new Set<string>()),
@@ -821,27 +818,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     };
     const assignableChoices = (available: Player[], requiredNames: Set<string>, limit: number): Player[][] => {
       if (available.length < formation[position]) return [];
-      if (requiredNames.size > formation[position]) return [];
       if ([...requiredNames].some((name) => !available.some((player) => player.name === name))) return [];
-      if (slots.every((slot) => available.every((player) => canCoverSlot(player, slot, position)))) {
-        const required = available.filter((player) => requiredNames.has(player.name));
-        const optional = available.filter((player) => !requiredNames.has(player.name));
-        const choices: Player[][] = [];
-        const neededOptional = formation[position] - required.length;
-        const choose = (start: number, selected: Player[]): void => {
-          if (choices.length >= limit) return;
-          if (selected.length === neededOptional) {
-            choices.push([...required, ...selected]);
-            return;
-          }
-          for (let index = start; index <= optional.length - (neededOptional - selected.length); index += 1) {
-            choose(index + 1, [...selected, optional[index]]);
-            if (choices.length >= limit) return;
-          }
-        };
-        choose(0, []);
-        return choices;
-      }
       const candidatesBySlot = new Map(slots.map((slot) => [slot, available
         .filter((player) => eligibleNamesBySlot.get(slot)?.has(player.name))
         .sort((left, right) => {
@@ -1067,14 +1044,47 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     }
   }
 
-  const fullySymmetricShortage = shortageMode
-    && positions.every((position) => {
-      const slots = formationSlots(formation)[position];
-      const candidates = eligiblePlayers(roster, position).filter((player) => player.available);
-      return plans[position].every((players) => players.length >= formation[position])
-        && slots.every((slot) => candidates.length >= formation[position] && candidates.every((player) => canCoverSlot(player, slot, position)));
-    });
-  if (fullySymmetricShortage && allAvailableFieldPlayersCore) return plans;
+  const fieldCandidates = roster.filter((player) => player.available && !assignedGoalkeepers.has(player.name));
+  const allAvailableFieldPlayersCore = fieldCandidates.every((player) => coreGroups.has(player.group));
+  const mixedQuotaGroups = new Set(fieldCandidates.map((player) => player.group));
+  const allFieldPlayersFlexible = fieldCandidates.every((player) =>
+    ['D', 'M', 'F'].every((position) => player.general_positions.includes(position))
+    && player.primary_positions.includes('ANY'));
+  const plansComplete = positions.every((position) => plans[position].every((players) => players.length >= formation[position]));
+  const symmetricShortageCandidates = shortageMode && positions.every((position) => {
+    const slots = formationSlots(formation)[position];
+    const candidates = eligiblePlayers(roster, position).filter((player) => player.available);
+    return slots.every((slot) => candidates.length >= formation[position] && candidates.every((player) => canCoverSlot(player, slot, position)));
+  });
+  if (symmetricShortageCandidates && plansComplete && allAvailableFieldPlayersCore) return plans;
+  if (symmetricShortageCandidates && allFieldPlayersFlexible
+    && mixedQuotaGroups.has('core') && mixedQuotaGroups.has('rotational') && mixedQuotaGroups.has('developing')) {
+    const candidates = fieldCandidates;
+    const counts = new Map(candidates.map((player) => [player.name, 0]));
+    const halfCounts = new Map(candidates.map((player) => [player.name, [0, 0] as [number, number]]));
+    for (let blockIndex = 0; blockIndex < game.total_blocks; blockIndex += 1) {
+      const half = blockHalf(blockIndex, game.total_blocks);
+      const used = new Set<string>();
+      for (const position of positions) {
+        const chosen = [...candidates]
+          .filter((player) => !used.has(player.name)
+            && (counts.get(player.name) ?? 0) < player.hard_maximum_blocks
+            && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half)
+          .sort((left, right) => (halfCounts.get(left.name)?.[half] ?? 0) - (halfCounts.get(right.name)?.[half] ?? 0)
+            || (counts.get(left.name) ?? 0) - (counts.get(right.name) ?? 0)
+            || left.name.localeCompare(right.name))
+          .slice(0, formation[position]);
+        plans[position][blockIndex] = chosen.map((player) => player.name);
+        for (const player of chosen) {
+          used.add(player.name);
+          counts.set(player.name, (counts.get(player.name) ?? 0) + 1);
+          const playerHalfCounts = halfCounts.get(player.name)!;
+          playerHalfCounts[half] += 1;
+        }
+      }
+    }
+    return plans;
+  }
 
   const repairCoreReservations = (start: number, end: number): void => {
     for (let blockIndex = start; blockIndex < end; blockIndex += 1) {
@@ -1446,7 +1456,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const halfStart = half === 0 ? Math.max(0, startBlock - 1) : midpoint;
     const halfEnd = half === 0 ? midpoint : game.total_blocks;
     const forwardCapacity = roster.filter((player) => player.available && canCoverGroup(game, roster, player.name, 'F')).length;
-    if ((!shortageMode || !allAvailableFieldPlayersCore) && forwardCapacity > formation.F && Array.from({ length: Math.max(0, halfEnd - halfStart) }, (_, index) => index + halfStart)
+    if (!shortageMode && forwardCapacity > formation.F && Array.from({ length: Math.max(0, halfEnd - halfStart) }, (_, index) => index + halfStart)
       .some((index) => plans.F[index].length < formation.F)) replanHalfJoint(half);
   }
 
@@ -2191,6 +2201,12 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       ...result.timeline[blockIndex].M,
       ...result.timeline[blockIndex].F,
     ]);
+    const endpointFieldCapacity = formation.D + formation.M + formation.F;
+    const endpointCorePlayers = roster.filter((player) => player.available
+      && CORE_GROUPS.has(player.group)
+      && player.name !== goalkeepers[blockIndex]?.name
+      && player.general_positions.some((position) => ['ANY', 'D', 'M', 'F'].includes(position)));
+    if (endpointCorePlayers.length > endpointFieldCapacity) continue;
     roster
       .filter((player) => player.available && CORE_GROUPS.has(player.group)
         && player.name !== goalkeepers[blockIndex]?.name

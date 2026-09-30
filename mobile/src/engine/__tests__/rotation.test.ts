@@ -385,7 +385,7 @@ describe('goalkeeper and minimum protection', () => {
     expect(result.errors).not.toContain(expect.stringContaining('Jonathan exceeds hard maximum'));
   });
 
-  it('reports a core endpoint miss when core demand exceeds field capacity', () => {
+  it('does not block a schedule when core endpoint demand exceeds field capacity', () => {
     const players = [
       { name: 'Core Defender 1', group: 'core' as const, general_positions: ['D'], primary_positions: ['ANY'] },
       { name: 'Core Defender 2', group: 'core' as const, general_positions: ['D'], primary_positions: ['ANY'] },
@@ -395,8 +395,18 @@ describe('goalkeeper and minimum protection', () => {
 
     expect(result.timeline[0].D).toHaveLength(1);
     expect(result.timeline[1].D).toHaveLength(1);
-    expect(result.errors.some((error) => error.includes('core player Core Defender 2'))).toBe(true);
-    expect(result.errors.some((error) => error.includes('first block endpoint') || error.includes('last block endpoint'))).toBe(true);
+    expect(result.errors.filter((error) => error.includes('endpoint'))).toEqual([]);
+  });
+
+  it('keeps feasible-capacity but illegal core endpoint misses blocking', () => {
+    const players = [
+      { name: 'Core Midfielder', group: 'core' as const, general_positions: ['M'], primary_positions: ['ANY'] },
+      { name: 'Defender', group: 'rotational' as const, general_positions: ['D'], primary_positions: ['CB'] },
+      { name: 'Keeper', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const result = generateSchedule({ total_blocks: 2, formation: '1-0', first_half_gk: 'Keeper', second_half_gk: 'Keeper' }, players);
+
+    expect(result.errors.filter((error) => error.includes('Core Midfielder') && error.includes('endpoint'))).toHaveLength(2);
   });
 });
 
@@ -714,7 +724,7 @@ describe('quota fairness and controlled coverage', () => {
     }
   });
 
-  it('reports when endpoint core starts are mathematically impossible', () => {
+  it('does not report endpoint misses when core demand exceeds endpoint capacity', () => {
     const players = [
       { name: 'Core D1', group: 'core' as const, general_positions: ['D'], primary_positions: ['CB'] },
       { name: 'Core D2', group: 'core' as const, general_positions: ['D'], primary_positions: ['CB'] },
@@ -728,7 +738,7 @@ describe('quota fairness and controlled coverage', () => {
       disable_maximum_limits: true,
     }, players);
 
-    expect(result.errors.filter((error) => error.includes('core player') && error.includes('endpoint'))).toHaveLength(2);
+    expect(result.errors.filter((error) => error.includes('core player') && error.includes('endpoint'))).toHaveLength(0);
   });
 
   it('keeps seven blocks as the core target while allowing an eighth legal block', () => {
@@ -1274,6 +1284,21 @@ describe('ten-game season availability simulation', () => {
     const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
 
     expect(performance.now() - started).toBeLessThan(5000);
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+  }, 20000);
+
+  it('completes a mixed flexible roster without late-block holes', () => {
+    const players = [
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Core ${index + 1}`, group: 'core' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Rotational ${index + 1}`, group: 'rotational' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Developing ${index + 1}`, group: 'developing' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] })),
+      { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const started = performance.now();
+    const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(performance.now() - started).toBeLessThan(15000);
     expect(result.timeline).toHaveLength(10);
     expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
   }, 20000);
