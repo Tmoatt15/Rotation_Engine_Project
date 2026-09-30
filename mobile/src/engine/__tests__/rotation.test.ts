@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 
 import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
+import teams from '../../../../teams.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { eligiblePlayers } from '../positional';
 import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
@@ -146,6 +147,22 @@ describe('rotation engine TypeScript fingerprints', () => {
 });
 
 describe('goalkeeper and minimum protection', () => {
+  it('allows the Real Folsom 19-player roster with Cameron and Eitan as goalkeepers', () => {
+    const team = teams.find((candidate) => candidate.name === 'Real Folsom');
+    if (!team) throw new Error('Real Folsom fixture is missing.');
+    const players = team.season_roster.map((player) => createPlayer(player));
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '3-4-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      allow_emergency_assignments: true,
+    }, players);
+
+    expect(result.errors.filter((error) => error.includes('half maximum'))).toEqual([]);
+    expect(result.timeline).toHaveLength(10);
+  });
+
   it('uses the legacy single goalkeeper assignment for both halves', () => {
     const players = [
       createPlayer({ name: 'Gio', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
@@ -290,6 +307,7 @@ describe('goalkeeper and minimum protection', () => {
     const eitan = players.find((player) => player.name === 'Eitan');
 
     expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
+    expect(result.errors.filter((error) => error.includes('half maximum'))).toEqual([]);
     expect(cameron?.gk_blocks).toBe(5);
     expect(cameron?.field_blocks).toBeGreaterThanOrEqual(2);
     expect(cameron?.field_blocks).toBeLessThanOrEqual(3);

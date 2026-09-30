@@ -364,7 +364,7 @@ export function optimizeExactSlotSwitches(game: Game, roster: Player[], timeline
 export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], formation: FormationCounts, slots: Record<'D' | 'M' | 'F', string[]>, totalBlocks = timeline.length): string[] {
   const errors: string[] = [];
   const totals = new Map<string, number>();
-  const halfTotals = new Map<string, [number, number]>();
+  const fieldHalfTotals = new Map<string, [number, number]>();
   for (const [index, block] of timeline.entries()) {
     const blockNumber = index + 1;
     const expectedSlots = ['GK', ...FIELD_GROUPS.flatMap((group) => slots[group])];
@@ -375,9 +375,12 @@ export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], fo
     for (const name of assigned) {
       if (name === 'UNASSIGNED' || name === 'NO GK AVAILABLE') continue;
       totals.set(name, (totals.get(name) ?? 0) + 1);
-      const counts = halfTotals.get(name) ?? [0, 0];
+    }
+    for (const name of [...block.D, ...block.M, ...block.F]) {
+      if (name === 'UNASSIGNED' || name === 'NO GK AVAILABLE') continue;
+      const counts = fieldHalfTotals.get(name) ?? [0, 0];
       counts[blockHalf(index, totalBlocks)] += 1;
-      halfTotals.set(name, counts);
+      fieldHalfTotals.set(name, counts);
     }
     for (const group of FIELD_GROUPS) {
       if (block[group].length !== formation[group]) errors.push(`Block ${blockNumber}: ${group} requires ${formation[group]} players but has ${block[group].length}.`);
@@ -387,7 +390,7 @@ export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], fo
   }
   for (const player of roster) {
     const total = totals.get(player.name) ?? 0;
-    const halves = halfTotals.get(player.name) ?? [0, 0];
+    const halves = fieldHalfTotals.get(player.name) ?? [0, 0];
     const availableGoalkeepers = roster.filter((candidate) => candidate.available && candidate.primary_positions.includes('GK'));
     const soleGoalkeeper = player.primary_positions.includes('GK') && availableGoalkeepers.length === 1;
     if (!soleGoalkeeper && total > player.hard_maximum_blocks) errors.push(`${player.name} exceeds hard maximum by ${total - player.hard_maximum_blocks} blocks.`);
