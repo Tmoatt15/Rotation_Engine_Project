@@ -102,6 +102,39 @@ function blockCapacityCheck(
   };
 }
 
+export function calculateQuotaFeasibility(
+  formation: Record<'D' | 'M' | 'F', number>,
+  roster: Player[],
+  totalBlocks: number,
+): QuotaFeasibilityMetadata {
+  const fieldSlots = totalBlocks * (formation.D + formation.M + formation.F);
+  const minimumFor = (player: Player) => ['core', 'core_a', 'core_b'].includes(player.group)
+    ? minimumBlocksForPercentage(totalBlocks, CORE_MIN)
+    : minimumBlocksForPercentage(totalBlocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
+  const groupMinimums = (['D', 'M', 'F'] as const).map((position) => {
+    const minimum = roster.filter((player) => !isDedicatedGoalkeeper(player)
+      && player.general_positions.includes(position)
+      && !player.general_positions.includes('ANY'))
+      .reduce((total, player) => total + minimumFor(player), 0);
+    return { position, minimum, capacity: formation[position] * totalBlocks };
+  });
+  const flexibleMinimum = roster.filter((player) => !isDedicatedGoalkeeper(player) && player.general_positions.includes('ANY'))
+    .reduce((total, player) => total + minimumFor(player), 0);
+  const remainingCapacity = groupMinimums.reduce((total, item) => total + Math.max(0, item.capacity - item.minimum), 0);
+  const minimumsFeasible = groupMinimums.every(({ minimum, capacity }) => minimum <= capacity)
+    && flexibleMinimum <= remainingCapacity
+    && groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum <= fieldSlots;
+  const totalMinimumRequirement = groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum;
+  const affectedGroups = groupMinimums.filter(({ minimum, capacity }) => minimum > capacity).map(({ position }) => position);
+  return {
+    minimumRequirement: totalMinimumRequirement,
+    legalAvailableCapacity: fieldSlots,
+    minimumsFeasible,
+    affectedPlayers: roster.filter((player) => player.general_positions.some((position) => affectedGroups.includes(position as 'D' | 'M' | 'F'))).map((player) => player.name).sort((left, right) => left.localeCompare(right)),
+    affectedGroups: [...new Set(affectedGroups)],
+  };
+}
+
 function addCapacityRecommendations(
   result: RotationResult,
   game: Game,
@@ -197,11 +230,9 @@ function applyMaximumOverride(player: Player, totalBlocks: number): void {
 
 export function computeBlockTargets(game: Game, roster: Player[]): RotationResult {
   const result: RotationResult = { timeline: [], block_counts: {}, gk_summary: {}, position_summary: {}, warnings: [], errors: [], metadata: { total_blocks: game.total_blocks, method: 'percentage-based quotas' } };
-  const core = roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group));
   const rotationalHigh = rotatingHighNames(game, roster.filter((player) => player.group === 'rotational' && !isDedicatedGoalkeeper(player)), 'rotational');
   const developingHigh = rotatingHighNames(game, roster.filter((player) => ['developing', 'developmental'].includes(player.group)), 'developing');
   const formation = game.formation.split('-').map(Number);
-  const fieldSlots = formation.every(Number.isFinite) ? game.total_blocks * formation.reduce((sum, value) => sum + value, 0) : 0;
   const formationCounts: Record<'D' | 'M' | 'F', number> = game.formation === '2-1-2-1'
     ? { D: 2, M: 3, F: 1 }
     : game.formation === '4-2-3-1'
@@ -209,23 +240,10 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
       : formation.length === 2
         ? { D: formation[0] ?? 0, M: 0, F: formation[1] ?? 0 }
         : { D: formation[0] ?? 0, M: formation[1] ?? 0, F: formation[2] ?? 0 };
+  const quotaFeasibility = calculateQuotaFeasibility(formationCounts, roster, game.total_blocks);
   const minimumFor = (player: Player) => ['core', 'core_a', 'core_b'].includes(player.group)
     ? minimumBlocksForPercentage(game.total_blocks, CORE_MIN)
     : minimumBlocksForPercentage(game.total_blocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
-  const groupMinimums = (['D', 'M', 'F'] as const).map((position) => {
-    const minimum = roster.filter((player) => !isDedicatedGoalkeeper(player)
-      && player.general_positions.includes(position)
-      && !player.general_positions.includes('ANY'))
-      .reduce((total, player) => total + minimumFor(player), 0);
-    return { position, minimum, capacity: formationCounts[position] * game.total_blocks };
-  });
-  const flexibleMinimum = roster.filter((player) => !isDedicatedGoalkeeper(player) && player.general_positions.includes('ANY'))
-    .reduce((total, player) => total + minimumFor(player), 0);
-  const remainingCapacity = groupMinimums.reduce((total, item) => total + Math.max(0, item.capacity - item.minimum), 0);
-  const minimumsFeasible = groupMinimums.every(({ minimum, capacity }) => minimum <= capacity)
-    && flexibleMinimum <= remainingCapacity
-    && groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum <= fieldSlots;
-  const totalMinimumRequirement = groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum;
   const warningMinimums = (['D', 'M', 'F'] as const).map((position) => {
     const minimum = roster
       .filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name))
@@ -262,21 +280,8 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     result.block_counts[player.name] = target;
     if (!isDedicatedGoalkeeper(player) && player.group !== 'rotational_gk') requestedFieldSlots += target;
   }
-  const affectedGroups = groupMinimums.filter(({ minimum, capacity }) => minimum > capacity).map(({ position }) => position);
-  const affectedPlayers = roster
-    .filter((player) => {
-      return player.general_positions.some((position) => affectedGroups.includes(position));
-    })
-    .map((player) => player.name)
-    .sort((left, right) => left.localeCompare(right));
-  const quotaFeasibility: QuotaFeasibilityMetadata = {
-    minimumRequirement: totalMinimumRequirement,
-    legalAvailableCapacity: fieldSlots,
-    minimumsFeasible,
-    affectedPlayers,
-    affectedGroups: [...new Set(affectedGroups)],
-  };
   result.metadata.quota_feasibility = quotaFeasibility;
+  const fieldSlots = quotaFeasibility.legalAvailableCapacity;
   if (requestedFieldSlots > fieldSlots) result.warnings.push(`Requested field targets require ${requestedFieldSlots} slots, but the formation provides ${fieldSlots}; targets cannot all be met.`);
   for (const position of ['D', 'M', 'F'] as const) {
     const slots = formationCounts[position] * game.total_blocks;

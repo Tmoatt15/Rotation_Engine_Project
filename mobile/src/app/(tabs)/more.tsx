@@ -12,6 +12,10 @@ const options = [
   { icon: 'person.3', label: 'Player Positions', detail: 'Assign and Edit Player Positions', route: '/position-assignment' },
   { icon: 'chart.bar', label: 'Position Analytics', detail: 'View position depth information', route: '/coverage' },
   { icon: 'folder', label: 'Saved Teams', detail: 'Edit or delete saved team rosters', route: '/saved-teams' },
+  { icon: 'calendar.badge.clock', label: 'Saved Schedules', detail: 'Open saved game schedules', route: '/saved-schedules' },
+  { icon: 'doc.text', label: 'After-Game Reports', detail: 'Review completed game reports', route: '/saved-after-game-reports' },
+  { icon: 'chart.line.uptrend.xyaxis', label: 'Season Fairness', detail: 'Review season playing-time balance', route: '/season-fairness' },
+  { icon: 'chart.bar.xaxis', label: 'Season Totals', detail: 'Review season player totals', route: '/season-totals' },
   { icon: 'plus.circle', label: 'Create New Team', detail: undefined, route: '/team-create' },
 ] as const;
 

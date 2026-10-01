@@ -15,7 +15,8 @@
       {"name": "Eli", "group": "developing", "general_positions": ["F"], "primary_positions": ["F"]},
       {"name": "Finn", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]}
     ],
-    "fingerprint": "8f0de75aeb534aef25e7277522577d46929076e76a8b4227601a094074f3b317"
+    "fingerprint": "8f0de75aeb534aef25e7277522577d46929076e76a8b4227601a094074f3b317",
+    "spec_verified": false
   },
   {
     "id": "7v7-gk-and-groups",
@@ -38,7 +39,8 @@
       {"name": "Owen", "group": "rotational", "general_positions": ["M"], "primary_positions": ["M"]},
       {"name": "Pia", "group": "rotational", "general_positions": ["F"], "primary_positions": ["F"]}
     ],
-    "fingerprint": "3a9c121953851973c578fc3f37cd6f579be8ca2314fda496234d746223a5e294"
+    "fingerprint": "3a9c121953851973c578fc3f37cd6f579be8ca2314fda496234d746223a5e294",
+    "spec_verified": false
   },
   {
     "id": "11v11-position-flexibility",
@@ -66,6 +68,95 @@
       {"name": "Cory", "group": "rotational", "general_positions": ["D", "M"], "primary_positions": ["D"], "backup_positions": ["M"]},
       {"name": "Dina", "group": "rotational", "general_positions": ["M", "F"], "primary_positions": ["M"], "backup_positions": ["F", "D"]}
     ],
-    "fingerprint": "c56aaaf433ce7aeef20e2d61e0b7018c0f3d5be48e34a7db48277156d16998ec"
+    "fingerprint": "c56aaaf433ce7aeef20e2d61e0b7018c0f3d5be48e34a7db48277156d16998ec",
+    "spec_verified": false
+  },
+  {
+    "id": "15-player-balanced-happy-path",
+    "game": {
+      "total_blocks": 10,
+      "formation": "4-4-2",
+      "first_half_gk": "GK",
+      "second_half_gk": "GK"
+    },
+    "players": [
+      {"name": "Core 1", "group": "core", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Core 2", "group": "core", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Core 3", "group": "core", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Core 4", "group": "core", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Core 5", "group": "core", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Rotational 1", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Rotational 2", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Rotational 3", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Rotational 4", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Rotational 5", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Developing 1", "group": "developing", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Developing 2", "group": "developing", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Developing 3", "group": "developing", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Developing 4", "group": "developing", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Developing 5", "group": "developing", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "GK", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]}
+    ],
+    "fingerprint": "0a14112cbe10dfbea46522694a076c638be50ba24e3ee8b6a6922adb26b00215",
+    "spec_verified": false,
+    "happy_path": true,
+    "expected_goalkeeper_blocks": {"GK": 10}
+  },
+  {
+    "id": "7v7-flexible-happy-path",
+    "game": {
+      "total_blocks": 6,
+      "formation": "2-3-1",
+      "first_half_gk": "GK",
+      "second_half_gk": "GK"
+    },
+    "players": [
+      {"name": "Field 1", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 2", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 3", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 4", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 5", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 6", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 7", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 8", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 9", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "GK", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]}
+    ],
+    "fingerprint": "5d3a8b1b56c029d5fc7c55a9ed8fce6d27937befce9222343a6b5b01d588ca9c",
+    "spec_verified": false,
+    "happy_path": true,
+    "expected_goalkeeper_blocks": {"GK": 6}
+  },
+  {
+    "id": "two-half-goalkeepers-happy-path",
+    "game": {
+      "total_blocks": 10,
+      "formation": "4-4-2",
+      "first_half_gk": "GK 1",
+      "second_half_gk": "GK 2"
+    },
+    "players": [
+      {"name": "Field 1", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 2", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 3", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 4", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 5", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 6", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 7", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 8", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 9", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 10", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 11", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 12", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 13", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 14", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "Field 15", "group": "rotational", "general_positions": ["D", "M", "F"], "primary_positions": ["ANY"]},
+      {"name": "GK 1", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]},
+      {"name": "GK 2", "group": "rotational_gk", "general_positions": ["GK"], "primary_positions": ["GK"]}
+    ],
+    "fingerprint": "c2402ca26b32fda86c9ac1eb73ff80bee0c8ff6d01d7b571746c7caa799ac109",
+    "spec_verified": false,
+    "happy_path": true,
+    "expected_goalkeeper_blocks": {"GK 1": 5, "GK 2": 5}
   }
 ]

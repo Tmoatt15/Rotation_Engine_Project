@@ -146,6 +146,37 @@ describe('rotation engine TypeScript fingerprints', () => {
   }
 });
 
+describe('rotation engine happy-path fingerprint contracts', () => {
+  for (const testCase of fingerprintCases.filter((candidate) => candidate.happy_path)) {
+    it(`${testCase.id} satisfies policy bands and coverage`, () => {
+      const result = generateSchedule(
+        testCase.game as GameInput,
+        testCase.players.map((player) => createPlayer(player as PlayerInput)),
+      );
+      expect(result.errors).toEqual([]);
+      expect(result.warnings.filter((warning) => warning.toLowerCase().includes('infeas'))).toEqual([]);
+      expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+      expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('NO GK AVAILABLE');
+
+      for (const [goalkeeper, expectedBlocks] of Object.entries(testCase.expected_goalkeeper_blocks ?? {})) {
+        expect(result.timeline.filter((block) => block.GK === goalkeeper)).toHaveLength(expectedBlocks);
+      }
+      for (const player of testCase.players) {
+        if (player.primary_positions.includes('GK')) continue;
+        const fieldBlocks = result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(player.name)).length;
+        const percentage = fieldBlocks / testCase.game.total_blocks;
+        const band = player.group === 'core'
+          ? [0.7, 0.8]
+          : player.group === 'developing'
+            ? [0.4, 0.5]
+            : [0.5, 0.7];
+        expect(percentage, `${testCase.id} ${player.name}`).toBeGreaterThanOrEqual(band[0]);
+        expect(percentage, `${testCase.id} ${player.name}`).toBeLessThanOrEqual(band[1]);
+      }
+    });
+  }
+});
+
 describe('goalkeeper and minimum protection', () => {
   it('allows the Real Folsom 19-player roster with Cameron and Eitan as goalkeepers', () => {
     const team = teams.find((candidate) => candidate.name === 'Real Folsom');
@@ -1319,6 +1350,22 @@ describe('ten-game season availability simulation', () => {
     expect(performance.now() - started).toBeLessThan(15000);
     expect(result.timeline).toHaveLength(10);
     expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+  }, 20000);
+
+  it('completes a mixed flexible roster with D/M/F primary positions', () => {
+    const players = [
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Core primary ${index + 1}`, group: 'core' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['D', 'M', 'F'] })),
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Rotational primary ${index + 1}`, group: 'rotational' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['D', 'M', 'F'] })),
+      ...Array.from({ length: 5 }, (_, index) => ({ name: `Developing primary ${index + 1}`, group: 'developing' as const, general_positions: ['D', 'M', 'F'], primary_positions: ['D', 'M', 'F'] })),
+      { name: 'GK primary', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const started = performance.now();
+    const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK primary', second_half_gk: 'GK primary' }, players);
+
+    expect(performance.now() - started).toBeLessThan(15000);
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+    expect(result.errors).toEqual([]);
   }, 20000);
 
   it('covers strict mode and production emergency field fallback separately', () => {

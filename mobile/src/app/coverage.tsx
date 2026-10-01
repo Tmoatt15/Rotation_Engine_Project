@@ -9,6 +9,9 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/team-api';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
 import { calculateGroupCoverage } from '@/coverage-utils';
+import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';
+import { GAME_FORMATS } from '@/engine/season';
+import type { GameFormat } from '@/engine/models';
 
 const palette = {
   ink: '#17221f',
@@ -84,6 +87,9 @@ export default function CoverageScreen() {
   const router = useRouter();
   const [players, setPlayers] = useState<Player[]>([]);
   const [formation, setFormation] = useState<string | null>(null);
+  const [totalBlocks, setTotalBlocks] = useState(10);
+  const [gameFormat, setGameFormat] = useState<GameFormat>('11v11');
+  const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +116,11 @@ export default function CoverageScreen() {
     getActiveTeamId()
       .then((activeTeamId) => getSeasonSettings(activeTeamId))
       .then((payload) => {
-        if (active && typeof payload.formation === 'string') setFormation(payload.formation);
+        if (!active) return;
+        if (typeof payload.formation === 'string') setFormation(payload.formation);
+        setTotalBlocks(payload.total_blocks);
+        setGameFormat(payload.game_format);
+        setHasGoalkeeper(payload.has_goalkeeper ?? GAME_FORMATS[payload.game_format].has_goalkeeper);
       })
       .catch((requestError) => {
         if (active && !error) setError(requestError instanceof Error ? requestError.message : 'Unable to load season settings.');
@@ -121,6 +131,12 @@ export default function CoverageScreen() {
   }, []));
 
   const coverage = useMemo(() => formation ? calculateGroupCoverage(formation, players) : [], [formation, players]);
+  const notices = useMemo(() => formation ? calculatePlayingTimeNotices({
+    formation,
+    total_blocks: totalBlocks,
+    game_format: gameFormat,
+    has_goalkeeper: hasGoalkeeper,
+  }, players) : { playingTimeNotice: false, positionCoverageNotice: false }, [formation, gameFormat, hasGoalkeeper, players, totalBlocks]);
   const depth = useMemo(() => positionLabels.map((position) => {
     const group = coverage.find((item) => item.group === position);
     return {
@@ -175,6 +191,11 @@ export default function CoverageScreen() {
               </View>
             </View>
 
+            {(notices.playingTimeNotice || notices.positionCoverageNotice) && <View style={styles.noticeList}>
+              {notices.playingTimeNotice && <Text style={styles.noticeText}>{PLAYING_TIME_NOTICE}</Text>}
+              {notices.positionCoverageNotice && <Text style={styles.noticeText}>{POSITION_COVERAGE_NOTICE}</Text>}
+            </View>}
+
             <Text style={styles.sectionTitle}>Position depth</Text>
             <View style={styles.depthList}>
               {depth.map((item) => (
@@ -218,6 +239,20 @@ export default function CoverageScreen() {
                 ))}
               </View>
             )}
+            <View>
+              <Text style={styles.sectionTitle}>Player groups</Text>
+              <View style={styles.helpCard}>
+                <Text style={styles.helpHeading}>Rotational</Text>
+                <Text style={styles.helpText}>The normal group for most teams. Players in this group usually play roughly 50-60% of each game, and up to 70% when the roster is tight.</Text>
+                <Text style={styles.helpHeading}>Core</Text>
+                <Text style={styles.helpText}>Players who are noticeably stronger or more experienced, usually playing roughly 70-80% of each game.</Text>
+                <Text style={styles.helpHeading}>Developing</Text>
+                <Text style={styles.helpText}>New or still-learning players, usually playing roughly 40-50% of each game.</Text>
+                <Text style={styles.helpImportant}>Important: Groups describe the players on the team; they are not required team percentages. The app does not expect any particular number per group.</Text>
+                <Text style={styles.helpText}>As players improve over the season, you can move them between groups. These assignments are current, honest assessments, not permanent labels.</Text>
+                <Text style={styles.helpText}>Position Analytics may show a playing-time notice when the current assignments may make those normal targets difficult to reach.</Text>
+              </View>
+            </View>
           </ScrollView>
         </SafeAreaView>
       </View>
@@ -233,12 +268,18 @@ const styles = StyleSheet.create({
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
   headerCopy: { flex: 1, marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 },
+    helpCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, padding: 15 },
+    helpHeading: { color: palette.green, fontSize: 13, fontWeight: '900', marginTop: 8 },
+    helpText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+    helpImportant: { color: palette.ink, fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 14 },
   title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
   summaryCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, padding: 17 },
   summaryEyebrow: { color: palette.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
   summaryTitle: { color: palette.ink, fontSize: 20, fontWeight: '800', marginTop: 4 },
   summaryDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 4, maxWidth: 245 },
   summaryIcon: { alignItems: 'center', backgroundColor: palette.panel, borderRadius: 14, height: 50, justifyContent: 'center', width: 50 },
+  noticeList: { backgroundColor: '#fff4d8', borderColor: palette.yellow, borderRadius: 14, borderWidth: 1, gap: 8, marginBottom: 24, padding: 14 },
+  noticeText: { color: palette.ink, fontSize: 12, lineHeight: 18 },
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800', marginBottom: 10 },
   depthList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 24, padding: 15 },
   depthRow: { marginBottom: 18 },

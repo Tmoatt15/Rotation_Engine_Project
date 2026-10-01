@@ -1051,8 +1051,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const allAvailableFieldPlayersCore = fieldCandidates.every((player) => coreGroups.has(player.group));
   const mixedQuotaGroups = new Set(fieldCandidates.map((player) => player.group));
   const allFieldPlayersFlexible = fieldCandidates.every((player) =>
-    ['D', 'M', 'F'].every((position) => player.general_positions.includes(position))
-    && player.primary_positions.includes('ANY'));
+    ['D', 'M', 'F'].every((position) => player.general_positions.includes(position)));
   const plansComplete = positions.every((position) => plans[position].every((players) => players.length >= formation[position]));
   const symmetricShortageCandidates = shortageMode && positions.every((position) => {
     const slots = formationSlots(formation)[position];

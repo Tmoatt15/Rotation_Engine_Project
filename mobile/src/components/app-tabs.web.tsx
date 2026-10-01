@@ -6,7 +6,7 @@ import {
   TabTriggerSlotProps,
   TabListProps,
 } from 'expo-router/ui';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
 
 import { ExternalLink } from './external-link';
@@ -22,10 +22,16 @@ export default function AppTabs() {
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href={'/' as never} asChild>
-            <TabButton>Home</TabButton>
+            <TabButton icon={{ ios: 'house.fill', web: 'home' }}>Home</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>Explore</TabButton>
+          <TabTrigger name="game" href="/game" asChild>
+            <TabButton icon={{ ios: 'sportscourt.fill', web: 'sports_soccer' }}>Game</TabButton>
+          </TabTrigger>
+          <TabTrigger name="roster" href="/roster" asChild>
+            <TabButton icon={{ ios: 'person.3.fill', web: 'groups' }}>Roster</TabButton>
+          </TabTrigger>
+          <TabTrigger name="more" href="/more" asChild>
+            <TabButton icon={{ ios: 'ellipsis.circle.fill', web: 'more_horiz' }}>More</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -33,12 +39,13 @@ export default function AppTabs() {
   );
 }
 
-export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps) {
+export function TabButton({ children, icon, isFocused, ...props }: TabTriggerSlotProps & { icon: SymbolViewProps['name'] }) {
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
       <ThemedView
         type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
         style={styles.tabButtonView}>
+        <SymbolView name={icon} size={16} />
         <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
           {children}
         </ThemedText>

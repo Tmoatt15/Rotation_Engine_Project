@@ -12,6 +12,8 @@ export default function RootLayout() {
       <AnimatedSplashOverlay />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="team-create" options={{ headerShown: false }} />
         <Stack.Screen name="saved-teams" options={{ headerShown: false }} />
         <Stack.Screen name="team-edit" options={{ headerShown: false }} />
         <Stack.Screen name="position-assignment" options={{ headerShown: false }} />
@@ -21,6 +23,7 @@ export default function RootLayout() {
         <Stack.Screen name="after-game" options={{ headerShown: false }} />
         <Stack.Screen name="after-game-report" options={{ headerShown: false }} />
         <Stack.Screen name="saved-after-game-reports" options={{ headerShown: false }} />
+        <Stack.Screen name="season-fairness" options={{ headerShown: false }} />
         <Stack.Screen name="season-totals" options={{ headerShown: false }} />
       </Stack>
     </ThemeProvider>

@@ -1,7 +1,6 @@
-import { Stack, useFocusEffect, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
@@ -17,7 +16,6 @@ function playerInitials(name: string): string {
 }
 
 export default function RosterListScreen() {
-  const router = useRouter();
   const [teamName, setTeamName] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,10 +50,7 @@ export default function RosterListScreen() {
         <SafeAreaView style={styles.safeArea}>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
-              <Pressable onPress={() => router.navigate('/' as never)} style={styles.backButton} accessibilityLabel="Go home">
-                <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
-              </Pressable>
-              <View style={styles.headerCopy}><Text style={styles.eyebrow}>ACTIVE ROSTER</Text><Text style={styles.title}>{teamName ? `${teamName} Roster` : 'Roster'}</Text></View>
+              <View style={styles.headerCopy}><Text style={styles.eyebrow}>ACTIVE ROSTER</Text><Text style={styles.title}>{teamName ? `${teamName} Roster` : 'Roster'}</Text><Text style={styles.subtitle}>Players currently available for this team</Text></View>
               <View style={styles.countBadge}><Text style={styles.countValue}>{players.length}</Text><Text style={styles.countLabel}>players</Text></View>
             </View>
             {loading ? <Text style={styles.helperText}>Loading roster...</Text> : error ? <Text style={styles.errorText}>{error}</Text> : players.length === 0 ? <Text style={styles.helperText}>No players on this roster.</Text> : (
@@ -71,5 +66,5 @@ export default function RosterListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.paper }, safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' }, content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 }, header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 }, backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 }, headerCopy: { flex: 1, marginLeft: 13 }, eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 }, countBadge: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 13, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 }, countValue: { color: palette.green, fontSize: 17, fontWeight: '900' }, countLabel: { color: palette.green, fontSize: 9, fontWeight: '800', marginTop: 1 }, helperText: { color: palette.muted, fontSize: 13, lineHeight: 19, marginTop: 10 }, errorText: { color: palette.coral, fontSize: 13, lineHeight: 19, marginTop: 10 }, rosterCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, paddingHorizontal: 15 }, playerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', gap: 12, minHeight: 66 }, lastRow: { borderBottomWidth: 0 }, avatar: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, height: 36, justifyContent: 'center', width: 36 }, avatarText: { color: palette.green, fontSize: 13, fontWeight: '900' }, playerName: { color: palette.ink, flex: 1, fontSize: 15, fontWeight: '800' },
+  container: { flex: 1, backgroundColor: palette.paper }, safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' }, content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 }, header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 }, headerCopy: { flex: 1 }, eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 }, subtitle: { color: palette.muted, fontSize: 12, marginTop: 4 }, countBadge: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 13, minWidth: 54, paddingHorizontal: 9, paddingVertical: 7 }, countValue: { color: palette.green, fontSize: 17, fontWeight: '900' }, countLabel: { color: palette.green, fontSize: 9, fontWeight: '800', marginTop: 1 }, helperText: { color: palette.muted, fontSize: 13, lineHeight: 19, marginTop: 10 }, errorText: { color: palette.coral, fontSize: 13, lineHeight: 19, marginTop: 10 }, rosterCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, paddingHorizontal: 15 }, playerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', gap: 12, minHeight: 66 }, lastRow: { borderBottomWidth: 0 }, avatar: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, height: 36, justifyContent: 'center', width: 36 }, avatarText: { color: palette.green, fontSize: 13, fontWeight: '900' }, playerName: { color: palette.ink, flex: 1, fontSize: 15, fontWeight: '800' },
 });
