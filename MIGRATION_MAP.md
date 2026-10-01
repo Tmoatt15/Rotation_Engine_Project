@@ -40,6 +40,12 @@ The policy contracts are:
   blocks remain frozen, and a returning player receives no automatic make-up
   quota credit.
 
+## Assignment Quality Decisions
+
+- Coverage notices remain assignment-scoped. Block-capacity and maximum-limit failures remain in the schedule-generation override flow.
+- Primary-zone placement outranks continuity when the two goals conflict. Continuity is optimized after valid primary placement is preserved.
+- Developing-player wide placement is a soft preference only. It must never override legality, availability, quota bands, primary-zone placement, or backup/emergency rules.
+
 ## Python Responsibilities
 
 | Current module | Responsibility | Future TypeScript owner |

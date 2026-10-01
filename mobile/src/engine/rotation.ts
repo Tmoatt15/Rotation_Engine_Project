@@ -3,6 +3,7 @@ import { computeBlockTargets } from './quotas';
 import { buildTimeline, calculateMovementMetrics, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus } from './surplus';
 import { eligiblePlayers } from './positional';
+import { GAME_FORMATS } from './season';
 
 const emptyUsage = () => ({ GK: 0, D: 0, M: 0, F: 0 });
 
@@ -22,8 +23,14 @@ export function createPlayer(input: PlayerInput): Player {
 
 function prepareGame(input: Game | GameInput): Game {
   const game = input as Game;
+  const formatGoalkeeperSetting = game.game_format === undefined ? undefined : GAME_FORMATS[game.game_format]?.has_goalkeeper;
+  if (game.game_format !== undefined && formatGoalkeeperSetting === undefined) throw new Error(`Unknown game format: ${game.game_format}.`);
+  if (formatGoalkeeperSetting !== undefined && game.has_goalkeeper !== undefined && formatGoalkeeperSetting !== game.has_goalkeeper) {
+    throw new Error(`has_goalkeeper conflicts with game_format ${game.game_format}.`);
+  }
+  const hasGoalkeeper = game.has_goalkeeper ?? formatGoalkeeperSetting ?? true;
   return {
-    ...game, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
+    ...game, game_format: game.game_format, has_goalkeeper: hasGoalkeeper, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
 }
 

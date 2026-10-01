@@ -52,6 +52,7 @@ export function chooseGk(game: Game, roster: Player[], blockNumber: number): Pla
 }
 
 function goalkeeperSelectionErrors(game: Game, roster: Player[]): string[] {
+  if (game.has_goalkeeper === false) return [];
   return ([['first half', game.first_half_gk ?? game.gk_assignment], ['second half', game.second_half_gk ?? game.gk_assignment]] as const).flatMap(([half, name]) => {
     if (!name?.trim()) return [`Coach must select a goalkeeper for the ${half}.`];
     const player = roster.find((candidate) => candidate.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -367,7 +368,7 @@ export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], fo
   const fieldHalfTotals = new Map<string, [number, number]>();
   for (const [index, block] of timeline.entries()) {
     const blockNumber = index + 1;
-    const expectedSlots = ['GK', ...FIELD_GROUPS.flatMap((group) => slots[group])];
+    const expectedSlots = (block.GK ? ['GK'] : []).concat(FIELD_GROUPS.flatMap((group) => slots[group]));
     const assigned = expectedSlots.map((slot) => block.positions?.[slot] ?? '').filter(Boolean);
     const duplicateCheck = assigned.filter((name) => name !== 'UNASSIGNED' && name !== 'NO GK AVAILABLE');
     if (new Set(duplicateCheck).size !== duplicateCheck.length) errors.push(`Block ${blockNumber}: duplicate players are assigned on the field.`);
@@ -2060,7 +2061,9 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
   result.errors.push(...goalkeeperSelectionErrors(game, roster));
   const formation = parseFormation(game.formation); const slots = formationSlots(formation); const goalkeepers: Array<Player | null> = [];
   for (let block = 1; block <= game.total_blocks; block++) {
-    const goalkeeper = block < startBlock ? roster.find((player) => player.name === frozenTimeline[block - 1]?.GK) ?? null : chooseGk(game, roster, block);
+    const goalkeeper = game.has_goalkeeper === false
+      ? null
+      : block < startBlock ? roster.find((player) => player.name === frozenTimeline[block - 1]?.GK) ?? null : chooseGk(game, roster, block);
     goalkeepers.push(goalkeeper);
   }
   const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock);
@@ -2153,7 +2156,8 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
   let previousPositions: Record<string, string> = startBlock > 1 ? { ...(frozenTimeline[startBlock - 2]?.positions ?? {}) } : {};
   for (let block = startBlock; block <= game.total_blocks; block++) {
     const half: 0 | 1 = block <= Math.ceil(game.total_blocks / 2) ? 0 : 1; const gk = goalkeepers[block - 1]; const used = new Set(gk ? [gk.name] : []);
-    const assignment = { GK: gk?.name ?? 'NO GK AVAILABLE', D: [] as string[], M: [] as string[], F: [] as string[], bench: [] as string[], positions: { GK: gk?.name ?? 'NO GK AVAILABLE' } };
+    const missingGoalkeeper = game.has_goalkeeper === false ? '' : 'NO GK AVAILABLE';
+    const assignment = { GK: gk?.name ?? missingGoalkeeper, D: [] as string[], M: [] as string[], F: [] as string[], bench: [] as string[], positions: (gk ? { GK: gk.name } : game.has_goalkeeper === false ? {} : { GK: missingGoalkeeper }) as Record<string, string> };
     for (const group of ['D', 'M', 'F'] as const) {
       let chosen = planned[group][block - 1]
         .map((name) => roster.find((player) => player.name === name))
@@ -2194,7 +2198,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     }
     for (const player of roster) if (!used.has(player.name)) assignment.bench.push(player.name);
     previousPositions = { ...assignment.positions };
-    applyBlockToStats(roster, assignment, half); if (!gk) result.errors.push(`Block ${block}: no goalkeeper was assigned.`);
+    applyBlockToStats(roster, assignment, half); if (game.has_goalkeeper !== false && !gk) result.errors.push(`Block ${block}: no goalkeeper was assigned.`);
     result.timeline.push(assignment);
   }
   for (const blockIndex of new Set([0, game.total_blocks - 1])) {

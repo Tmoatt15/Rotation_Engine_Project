@@ -47,7 +47,7 @@ export async function generateLocalSchedule(input: { teamId: string; gameNumber:
   const roster = (await getRoster(input.teamId)).players.map(rosterInput).filter((player) => input.availablePlayerNames.includes(player.name));
   const setup = new SeasonSetup({ ...settings, block_length_minutes: undefined });
   const history = seasonHistory(await getSavedReports(input.teamId), input.gameNumber);
-  const result = generateSchedule({ total_blocks: setup.total_blocks, formation: setup.formation, first_half_gk: input.firstHalfGk, second_half_gk: input.secondHalfGk, season_total_games: setup.total_games, season_game_number: input.gameNumber, season_seed: 2026, season_player_blocks: history.playerBlocks, season_position_starts: history.positionStarts, season_goalkeeper_starts: history.goalkeeperStarts, allow_emergency_assignments: true, disable_maximum_limits: input.disableMaximumLimits ?? false }, roster.map(createPlayer));
+  const result = generateSchedule({ game_format: setup.game_format, has_goalkeeper: setup.has_goalkeeper, total_blocks: setup.total_blocks, formation: setup.formation, first_half_gk: input.firstHalfGk, second_half_gk: input.secondHalfGk, season_total_games: setup.total_games, season_game_number: input.gameNumber, season_seed: 2026, season_player_blocks: history.playerBlocks, season_position_starts: history.positionStarts, season_goalkeeper_starts: history.goalkeeperStarts, allow_emergency_assignments: true, disable_maximum_limits: input.disableMaximumLimits ?? false }, roster.map(createPlayer));
   const goalkeeperErrors = result.errors.filter((error) => error.toLowerCase().includes('goalkeeper'));
   if (goalkeeperErrors.length) throw new Error(goalkeeperErrors.join(' '));
   assertCompleteSchedule(result.errors);

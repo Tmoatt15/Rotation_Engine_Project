@@ -109,6 +109,8 @@ export interface ScheduleBlock {
 export interface GameInput {
   total_blocks: number;
   formation: Formation;
+  game_format?: GameFormat;
+  has_goalkeeper?: boolean;
   gk_assignment?: string | null;
   first_half_gk?: string | null;
   second_half_gk?: string | null;
@@ -136,6 +138,8 @@ export interface Game extends Required<
     | 'disable_maximum_limits'
   >
 > {
+  game_format?: GameFormat;
+  has_goalkeeper?: boolean;
   gk_assignment: string | null;
   first_half_gk: string | null;
   second_half_gk: string | null;

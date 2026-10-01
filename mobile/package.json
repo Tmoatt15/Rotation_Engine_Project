@@ -35,6 +35,7 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "tsx": "^4.19.3",
     "typescript": "~6.0.3",
     "vitest": "^5.0.1"
   },
@@ -46,7 +47,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test:engine": "vitest run src/engine src/live-schedule.test.ts src/coverage.test.ts"
+    "test:engine": "vitest run src/engine src/live-schedule.test.ts src/coverage.test.ts",
+    "fingerprints:update": "tsx scripts/update-fingerprints.ts"
   },
   "private": true
 }

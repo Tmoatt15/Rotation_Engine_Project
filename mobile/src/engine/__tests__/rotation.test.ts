@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 
 import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
-import teams from '../../../../teams.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { eligiblePlayers } from '../positional';
 import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
@@ -58,6 +57,18 @@ function seasonSimulationRoster(): PlayerInput[] {
     { name: 'Sid', group: 'core', general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['F'] },
     { name: 'Thanish', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'] },
     { name: 'Yash', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] },
+  ];
+}
+
+function dualRoleGoalkeeperRoster(): PlayerInput[] {
+  return [
+    { name: 'Cameron', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY', 'GK'] },
+    { name: 'Eitan', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY', 'GK'] },
+    ...Array.from({ length: 5 }, (_, index) => ({ name: `Defender ${index + 1}`, group: 'rotational' as const, general_positions: ['D'], primary_positions: ['D'] })),
+    ...Array.from({ length: 5 }, (_, index) => ({ name: `Midfielder ${index + 1}`, group: 'rotational' as const, general_positions: ['M'], primary_positions: ['M'] })),
+    ...Array.from({ length: 5 }, (_, index) => ({ name: `Forward ${index + 1}`, group: 'rotational' as const, general_positions: ['F'], primary_positions: ['F'] })),
+    { name: 'Flexible 1', group: 'rotational', general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] },
+    { name: 'Flexible 2', group: 'rotational', general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] },
   ];
 }
 
@@ -144,6 +155,12 @@ describe('rotation engine TypeScript fingerprints', () => {
       expect(rotationFingerprint(result)).toBe(testCase.fingerprint);
     });
   }
+
+  it('reports fingerprint cases that still need spec verification', () => {
+    const unverified = fingerprintCases.filter((testCase) => testCase.spec_verified === false).map((testCase) => testCase.id);
+    if (unverified.length) console.warn(`Fingerprint cases awaiting spec verification: ${unverified.join(', ')}`);
+    expect(unverified).toBeDefined();
+  });
 });
 
 describe('rotation engine happy-path fingerprint contracts', () => {
@@ -177,11 +194,42 @@ describe('rotation engine happy-path fingerprint contracts', () => {
   }
 });
 
+describe('format and goalkeeper contracts', () => {
+  it('generates the approved 4v4 field-player-only shape', () => {
+    const testCase = fingerprintCases.find(({ id }) => id === '4v4-basic');
+    if (!testCase) throw new Error('4v4-basic fixture missing');
+    const result = generateSchedule(testCase.game as GameInput, testCase.players.map((player) => createPlayer(player as PlayerInput)));
+
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.timeline.every((block) => block.GK === '' && block.positions.GK === undefined)).toBe(true);
+    expect(result.gk_summary).toEqual({});
+    expect(result.block_counts).toEqual(testCase.expected?.player_blocks);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+  });
+
+  it('rejects conflicting game format and goalkeeper settings', () => {
+    expect(() => generateSchedule({ total_blocks: 1, formation: '1-1-1', game_format: '4v4', has_goalkeeper: true }, [])).toThrow('has_goalkeeper conflicts with game_format 4v4');
+  });
+
+  it('keeps dual-role goalkeeper field time outside the goalkeeper half', () => {
+    const testCase = fingerprintCases.find(({ id }) => id === 'new-dual-role-goalkeeper');
+    if (!testCase) throw new Error('new-dual-role-goalkeeper fixture missing');
+    const result = generateSchedule(testCase.game as GameInput, testCase.players.map((player) => createPlayer(player as PlayerInput)));
+    const dualRoleFieldBlocks = result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes('Dual GK'));
+
+    expect(result.errors).toEqual([]);
+    expect(result.gk_summary).toEqual(testCase.expected_goalkeeper_summaries);
+    expect(result.timeline.filter((block) => block.GK === 'Dual GK')).toHaveLength(5);
+    expect(dualRoleFieldBlocks).toHaveLength(2);
+    expect(dualRoleFieldBlocks.every((block) => block.GK !== 'Dual GK')).toBe(true);
+    expect(result.block_counts['Dual GK']).toBe(7);
+  });
+});
+
 describe('goalkeeper and minimum protection', () => {
-  it('allows the Real Folsom 19-player roster with Cameron and Eitan as goalkeepers', () => {
-    const team = teams.find((candidate) => candidate.name === 'Real Folsom');
-    if (!team) throw new Error('Real Folsom fixture is missing.');
-    const players = team.season_roster.map((player) => createPlayer(player));
+  it('allows a 19-player dual-role goalkeeper roster with Cameron and Eitan', () => {
+    const players = dualRoleGoalkeeperRoster().map((player) => createPlayer(player));
     const result = generateSchedule({
       total_blocks: 10,
       formation: '3-4-3',
@@ -434,7 +482,7 @@ describe('goalkeeper and minimum protection', () => {
     expect(result.errors).not.toContain(expect.stringContaining('Jonathan exceeds hard maximum'));
   });
 
-  it('does not block a schedule when core endpoint demand exceeds field capacity', () => {
+  it('N9-1 does not block a schedule when core endpoint demand exceeds field capacity', () => {
     const players = [
       { name: 'Core Defender 1', group: 'core' as const, general_positions: ['D'], primary_positions: ['ANY'] },
       { name: 'Core Defender 2', group: 'core' as const, general_positions: ['D'], primary_positions: ['ANY'] },
@@ -444,6 +492,8 @@ describe('goalkeeper and minimum protection', () => {
 
     expect(result.timeline[0].D).toHaveLength(1);
     expect(result.timeline[1].D).toHaveLength(1);
+    expect(result.timeline[0].D[0]).toBeTruthy();
+    expect(result.timeline[1].D[0]).toBeTruthy();
     expect(result.errors.filter((error) => error.includes('endpoint'))).toEqual([]);
   });
 
