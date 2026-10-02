@@ -8,7 +8,7 @@ import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { backupEligiblePlayers, eligiblePlayers, exclusionBlocksSlot, positionalPriority } from '../positional';
 import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
-import { calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
+import { assignExactSlots, calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
 import { summarizeStructuralErrors } from '../../services/structural-diagnostics';
@@ -926,6 +926,63 @@ describe('quota fairness and controlled coverage', () => {
     }
   });
 
+  it('spreads core rests through the middle window and staggers substitutions', () => {
+    const players = [
+      ...Array.from({ length: 8 }, (_, index) => createPlayer({
+        name: `Core ${index + 1}`,
+        group: 'core',
+        general_positions: ['D', 'M', 'F'],
+        primary_positions: [index < 4 ? 'D' : index < 6 ? 'M' : 'F'],
+      })),
+      ...Array.from({ length: 4 }, (_, index) => createPlayer({
+        name: `Rot D${index + 1}`,
+        group: 'rotational',
+        general_positions: ['D'],
+        primary_positions: ['D'],
+      })),
+      ...Array.from({ length: 3 }, (_, index) => createPlayer({
+        name: `Rot M${index + 1}`,
+        group: 'rotational',
+        general_positions: ['M'],
+        primary_positions: ['M'],
+      })),
+      ...Array.from({ length: 2 }, (_, index) => createPlayer({
+        name: `Rot F${index + 1}`,
+        group: 'rotational',
+        general_positions: ['F'],
+        primary_positions: ['F'],
+      })),
+      createPlayer({ name: 'GK1', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'GK2', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+    ];
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'GK1',
+      second_half_gk: 'GK2',
+      season_total_games: 1,
+      season_game_number: 1,
+    }, players);
+    const coreNames = players.filter((player) => player.group === 'core').map((player) => player.name);
+    const coreBenchCounts = result.timeline.map((block) => coreNames.filter((name) => block.bench.includes(name)).length);
+    const middleBenchBlocks = coreBenchCounts.slice(1, -1);
+    const restWindowBenchBlocks = coreBenchCounts.slice(3, 7);
+    const totalCoreBenchBlocks = middleBenchBlocks.reduce((sum, count) => sum + count, 0);
+    const windowCoreBenchBlocks = restWindowBenchBlocks.reduce((sum, count) => sum + count, 0);
+
+    expect(result.errors).toEqual([]);
+    for (const block of [result.timeline[0], result.timeline[9]]) {
+      const fieldPlayers = new Set([...block.D, ...block.M, ...block.F]);
+      coreNames.forEach((name) => expect(fieldPlayers).toContain(name));
+    }
+    expect(totalCoreBenchBlocks).toBeGreaterThan(0);
+    expect(windowCoreBenchBlocks / totalCoreBenchBlocks).toBeGreaterThanOrEqual(0.8);
+    expect(Math.max(...middleBenchBlocks)).toBeLessThanOrEqual(Math.ceil(totalCoreBenchBlocks / 4));
+    expect(result.movement_metrics?.max_turnovers_per_boundary).toBeLessThanOrEqual(6);
+    expect(result.timeline.filter((block) => block.GK === 'GK1')).toHaveLength(5);
+    expect(result.timeline.filter((block) => block.GK === 'GK2')).toHaveLength(5);
+  });
+
   it('does not report endpoint misses when core demand exceeds endpoint capacity', () => {
     const players = [
       { name: 'Core D1', group: 'core' as const, general_positions: ['D'], primary_positions: ['CB'] },
@@ -1108,6 +1165,27 @@ describe('quota fairness and controlled coverage', () => {
     expect(metrics.general_assignments).toBe(0);
   });
 
+  it('places a CM-primary midfielder in a central 4-4-2 slot', () => {
+    const players = [
+      createPlayer({ name: 'CM Primary', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'] }),
+      ...['General 1', 'General 2', 'General 3'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'] })),
+    ];
+    const assignment = assignExactSlots(players, players.map((player) => player.name), formationSlots(parseFormation('4-4-2')).M, 'M', {});
+    const primarySlot = Object.entries(assignment).find(([, name]) => name === 'CM Primary')?.[0];
+
+    expect(['LCM', 'RCM']).toContain(primarySlot);
+  });
+
+  it.each(['CDM', 'CAM'])('treats %s as a central-midfield primary zone', (primaryPosition) => {
+    const players = [
+      createPlayer({ name: 'Zone Primary', group: 'rotational', general_positions: ['M'], primary_positions: [primaryPosition] }),
+      ...['General 1', 'General 2'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'] })),
+    ];
+    const assignment = assignExactSlots(players, players.map((player) => player.name), ['LM', 'CM', 'RM'], 'M', {});
+
+    expect(assignment.CM).toBe('Zone Primary');
+  });
+
   it('surfaces slot-only backups to their position group without widening slot assignment', () => {
     const slotBackup = createPlayer({ name: 'Right Back Backup', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['RB'] });
 
@@ -1272,6 +1350,34 @@ describe('quota fairness and controlled coverage', () => {
 });
 
 describe('ten-game season availability simulation', () => {
+  it('balances identical rotational midfield profiles within one block', () => {
+    const identicalNames = new Set(['Artur', 'Mahaswin', 'Prerith', 'Thanish']);
+    const players = seasonSimulationRoster().map((player) => identicalNames.has(player.name)
+      ? createPlayer({ ...player, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] })
+      : createPlayer(player));
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      allow_emergency_assignments: true,
+    }, players);
+    const repeat = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      allow_emergency_assignments: true,
+    }, seasonSimulationRoster().map((player) => identicalNames.has(player.name)
+      ? createPlayer({ ...player, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] })
+      : createPlayer(player)));
+    const names = ['Artur', 'Mahaswin', 'Prerith', 'Thanish'];
+    const counts = names.map((name) => result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length);
+
+    expect(Math.max(...counts) - Math.min(...counts), JSON.stringify(Object.fromEntries(names.map((name, index) => [name, counts[index]])))).toBeLessThanOrEqual(1);
+    expect(repeat.timeline).toEqual(result.timeline);
+  });
+
   it('keeps the Test 4.0 16-player game within hard maximums', () => {
     const availableNames = ['Alvin', 'Artur', 'Blake', 'Brad', 'Cameron', 'Eitan', 'Everett', 'Frank', 'Jonathan', 'Mahaswin', 'Max', 'Prerith', 'Ryan', 'Sawyer', 'Sid', 'Yash'];
     const players = seasonSimulationRoster().filter((player) => availableNames.includes(player.name)).map(createPlayer);

@@ -17,16 +17,26 @@ export const CENTRAL_MIDFIELD_ZONE = new Set(['LCM', 'CM', 'RCM', 'CDM', 'CAM'])
 export const CENTRAL_DEFENSE_ZONE = new Set(['LCB', 'CB', 'RCB']);
 export const STRIKER_ZONE = new Set(['ST', 'CF']);
 
-export function exclusionBlocksSlot(forbiddenPositions: string[], slot: string): boolean {
-  const forbidden = forbiddenPositions.map((entry) => entry.trim().toUpperCase());
-  const target = slot.trim().toUpperCase();
-  if (forbidden.includes(target)) return true;
-  const group = POSITION_GROUP_BY_SLOT[target] ?? target;
-  if (forbidden.includes(group)) return true;
-  for (const zone of [CENTRAL_MIDFIELD_ZONE, CENTRAL_DEFENSE_ZONE, STRIKER_ZONE]) {
-    if (zone.has(target) && [...zone].some((zoned) => forbidden.includes(zoned))) return true;
+const blockedSlotsCache = new WeakMap<readonly string[], Set<string>>();
+
+function blockedSlotsFor(forbiddenPositions: readonly string[]): Set<string> {
+  const cached = blockedSlotsCache.get(forbiddenPositions);
+  if (cached) return cached;
+  const forbidden = new Set(forbiddenPositions.map((entry) => entry.trim().toUpperCase()));
+  const blocked = new Set(forbidden);
+  for (const [slot, group] of Object.entries(POSITION_GROUP_BY_SLOT)) {
+    if (forbidden.has(group)) blocked.add(slot);
   }
-  return false;
+  for (const zone of [CENTRAL_MIDFIELD_ZONE, CENTRAL_DEFENSE_ZONE, STRIKER_ZONE]) {
+    if ([...zone].some((slot) => forbidden.has(slot))) zone.forEach((slot) => blocked.add(slot));
+  }
+  blockedSlotsCache.set(forbiddenPositions, blocked);
+  return blocked;
+}
+
+export function exclusionBlocksSlot(forbiddenPositions: string[], slot: string): boolean {
+  const target = slot.trim().toUpperCase();
+  return blockedSlotsFor(forbiddenPositions).has(target);
 }
 
 export function generalPositionAllowsGroup(player: Pick<Player, 'general_positions'>, group: PositionGroup): boolean {

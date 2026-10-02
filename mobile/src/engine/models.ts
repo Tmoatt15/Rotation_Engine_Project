@@ -184,6 +184,7 @@ export interface MovementHalfMetrics {
 
 export interface MovementMetrics {
   turnovers: number;
+  max_turnovers_per_boundary: number;
   exact_slot_switches: number;
   group_switches: number;
   primary_assignments: number;

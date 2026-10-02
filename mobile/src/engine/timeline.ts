@@ -145,7 +145,7 @@ export function assignExactSlots(roster: Player[], names: string[], slots: strin
       const player = players.find((candidate) => candidate.name === assignment[slot]);
       if (!player) continue;
       if (previous[player.name] === slot) stayed += 1;
-      if (player.primary_positions.includes(slot)) primary += 1;
+      if (primaryCoversSlot(player, slot)) primary += 1;
       else if (generalPositionAllowsGroup(player, group)) general += 1;
       historicalStarts += seasonStarts[player.name]?.[slot] ?? 0;
     }
@@ -192,8 +192,8 @@ export function canCoverSlot(player: Player, slot: string, group: PositionGroup)
   );
 }
 
-function movementMetricScore(metrics: MovementMetrics): [number, number, number, number, number] {
-  return [-metrics.primary_assignments, metrics.exact_slot_switches, metrics.turnovers, metrics.backup_assignments, metrics.emergency_assignments];
+function movementMetricScore(metrics: MovementMetrics): [number, number, number, number, number, number] {
+  return [-metrics.primary_assignments, metrics.max_turnovers_per_boundary, metrics.exact_slot_switches, metrics.turnovers, metrics.backup_assignments, metrics.emergency_assignments];
 }
 
 function compareMetricScores(left: MovementMetrics, right: MovementMetrics): number {
@@ -207,14 +207,19 @@ function compareMetricScores(left: MovementMetrics, right: MovementMetrics): num
 
 type AssignmentQuality = 'primary' | 'general' | 'backup' | 'emergency';
 
-function assignmentQuality(player: Player | undefined, slot: string, emergencyActive: boolean): AssignmentQuality | null {
-  if (!player || player.name === 'UNASSIGNED') return null;
+function primaryCoversSlot(player: Player, slot: string): boolean {
   const normalizedSlot = slot.trim().toUpperCase();
-  if (player.primary_positions.some((position) => position.trim().toUpperCase() === normalizedSlot)) return 'primary';
+  if (player.primary_positions.some((position) => position.trim().toUpperCase() === normalizedSlot)) return true;
   const primaryZone = normalizedSlot === 'GK'
     ? undefined
     : [CENTRAL_MIDFIELD_ZONE, CENTRAL_DEFENSE_ZONE, STRIKER_ZONE].find((zone) => zone.has(normalizedSlot));
-  if (primaryZone && player.primary_positions.some((position) => primaryZone.has(position.trim().toUpperCase()))) return 'primary';
+  return Boolean(primaryZone?.size && player.primary_positions.some((position) => primaryZone.has(position.trim().toUpperCase())));
+}
+
+function assignmentQuality(player: Player | undefined, slot: string, emergencyActive: boolean): AssignmentQuality | null {
+  if (!player || player.name === 'UNASSIGNED') return null;
+  const normalizedSlot = slot.trim().toUpperCase();
+  if (primaryCoversSlot(player, normalizedSlot)) return 'primary';
   const group = POSITION_GROUP_BY_SLOT[normalizedSlot];
   if (group && generalPositionAllowsGroup(player, group)) return 'general';
   if (backupCoversPosition(player, slot)) return 'backup';
@@ -235,6 +240,7 @@ export function calculateMovementMetrics(
   ]);
   const metrics: MovementMetrics = {
     turnovers: 0,
+    max_turnovers_per_boundary: 0,
     exact_slot_switches: 0,
     group_switches: 0,
     primary_assignments: 0,
@@ -264,6 +270,10 @@ export function calculateMovementMetrics(
     const allSlots = new Set([...Object.keys(previous), ...Object.keys(current)]);
     let turnovers = 0;
     for (const slot of allSlots) if (previous[slot] !== current[slot]) turnovers += 1;
+    const boundaryTurnovers = [...allSlots]
+      .filter((slot) => slot !== 'GK' || sameHalf)
+      .filter((slot) => previous[slot] !== current[slot]).length;
+    metrics.max_turnovers_per_boundary = Math.max(metrics.max_turnovers_per_boundary, boundaryTurnovers);
     metrics.turnovers += turnovers;
     metrics.by_half[transitionHalf].turnovers += turnovers;
     const previousSlots = new Map<string, string>();
@@ -561,12 +571,14 @@ function reserveCoreBlocks(
   };
   const fieldCounts = new Map<string, number>();
   const halfCounts = new Map<string, [number, number]>();
+  const coreBenchCounts = new Map<string, number>();
   const midpoint = halfLength(totalBlocks);
   const corePlayers = roster.filter((player) => player.available && CORE_GROUPS.has(player.group));
 
   for (const player of corePlayers) {
     fieldCounts.set(player.name, 0);
     halfCounts.set(player.name, [0, 0]);
+    coreBenchCounts.set(player.name, 0);
   }
   for (const [blockIndex, goalkeeperName] of goalkeeperNames.entries()) {
     const goalkeeper = roster.find((player) => player.name === goalkeeperName);
@@ -580,6 +592,9 @@ function reserveCoreBlocks(
   const blockOrder = totalBlocks === 1
     ? [0]
     : [0, totalBlocks - 1, ...Array.from({ length: totalBlocks - 2 }, (_, index) => index + 1)];
+  const restWindowStart = Math.max(1, Math.min(totalBlocks - 2, midpoint - 2));
+  const restWindowEnd = Math.min(totalBlocks - 2, midpoint + 1);
+  const isRestWindow = (blockIndex: number): boolean => blockIndex >= restWindowStart && blockIndex <= restWindowEnd;
   for (const blockIndex of blockOrder) {
     const half = blockIndex < midpoint ? 0 : 1;
     const remainingBlocksInHalf = (half === 0 ? midpoint : totalBlocks) - blockIndex - 1;
@@ -614,9 +629,15 @@ function reserveCoreBlocks(
           const rightHalfRemaining = Math.max(0, Math.ceil(rightTarget / 2) - (halfCounts.get(right.name)?.[half] ?? 0));
           const leftMustPlay = leftTotalRemaining > remainingBlocksInHalf;
           const rightMustPlay = rightTotalRemaining > remainingBlocksInHalf;
+          const leftBenches = coreBenchCounts.get(left.name) ?? 0;
+          const rightBenches = coreBenchCounts.get(right.name) ?? 0;
+          const restBalance = isRestWindow(blockIndex)
+            ? leftBenches - rightBenches
+            : rightBenches - leftBenches;
           return Number(rightMustPlay) - Number(leftMustPlay)
             || rightHalfRemaining - leftHalfRemaining
             || rightTotalRemaining - leftTotalRemaining
+            || restBalance
             || left.name.localeCompare(right.name);
         });
 
@@ -628,6 +649,11 @@ function reserveCoreBlocks(
         const counts = halfCounts.get(player.name) ?? [0, 0];
         counts[half] += 1;
         halfCounts.set(player.name, counts);
+      }
+    }
+    for (const player of corePlayers) {
+      if (player.name !== goalkeeperNames[blockIndex] && !used.has(player.name)) {
+        coreBenchCounts.set(player.name, (coreBenchCounts.get(player.name) ?? 0) + 1);
       }
     }
   }
@@ -804,7 +830,27 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       (game.disable_maximum_limits || ((rawCounts.get(player.name) ?? 0) < player.hard_maximum_blocks && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half && (!assignedGoalkeepers.has(player.name) || (fieldCounts.get(player.name) ?? 0) < player.gk_field_maximum_blocks))) &&
       (ignorePositionRestrictions || !player.forbidden_positions.includes(position));
   };
-  const playerKey = (player: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): [number, number, number, number, number, number, number, string] => {
+  const fairnessProfileKey = (player: Player): string => JSON.stringify([
+    player.group,
+    player.general_positions,
+    player.primary_positions,
+    player.backup_positions,
+    player.forbidden_positions,
+  ]);
+  const fairnessOrderByProfile = new Map<string, string[]>();
+  roster.forEach((player) => {
+    const key = fairnessProfileKey(player);
+    const names = fairnessOrderByProfile.get(key) ?? [];
+    names.push(player.name);
+    fairnessOrderByProfile.set(key, names);
+  });
+  fairnessOrderByProfile.forEach((names) => names.sort((left, right) => left.localeCompare(right)));
+  const fairnessRank = (player: Player, blockIndex: number): number => {
+    const names = fairnessOrderByProfile.get(fairnessProfileKey(player)) ?? [player.name];
+    const index = names.indexOf(player.name);
+    return (index - blockIndex + names.length) % names.length;
+  };
+  const playerKey = (player: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): [number, number, number, number, number, number, number, number] => {
     const half = blockHalf(blockIndex, game.total_blocks);
     const totalStarts = Object.values(game.season_position_starts?.[player.name] ?? {}).reduce((sum, count) => sum + count, 0);
     const positionStarts = game.season_position_starts?.[player.name]?.[position] ?? 0;
@@ -830,8 +876,8 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
               : ['developing', 'developmental'].includes(player.group) && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 4
                 : manualOverrideCount < game.total_blocks ? 5 : 6);
     return game.disable_maximum_limits
-      ? [overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, player.name]
-      : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, player.name];
+      ? [overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)]
+      : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fairnessRank(player, blockIndex)];
   };
   const comparePlayerKeys = (left: Player, right: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): number => {
     const leftKey = playerKey(left, position, blockIndex, previous);
@@ -839,7 +885,10 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     for (let index = 0; index < leftKey.length - 1; index += 1) {
       if (leftKey[index] !== rightKey[index]) return (leftKey[index] as number) - (rightKey[index] as number);
     }
-    return String(leftKey[leftKey.length - 1]).localeCompare(String(rightKey[rightKey.length - 1]));
+    if (fairnessProfileKey(left) === fairnessProfileKey(right)) {
+      return leftKey[leftKey.length - 1] - rightKey[rightKey.length - 1];
+    }
+    return left.name.localeCompare(right.name);
   };
   const leavesFutureCoverage = (position: 'D' | 'M' | 'F', blockIndex: number, chosen: Player[], candidates: Player[]): boolean => {
     const initialRaw = new Map(rawCounts);
@@ -2059,6 +2108,69 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         }
       }
     }
+  }
+  // Move avoidable core rests from outside the middle window into the window.
+  // Swaps stay within a position group so exact-slot legality remains local.
+  const restWindowStart = Math.max(1, Math.min(game.total_blocks - 2, midpoint - 2));
+  const restWindowEnd = Math.min(game.total_blocks - 2, midpoint + 1);
+  const restWindow = Array.from({ length: Math.max(0, restWindowEnd - restWindowStart + 1) }, (_, index) => restWindowStart + index);
+  const outsideRestWindow = middleBlocks.filter((blockIndex) => !restWindow.includes(blockIndex));
+  const coreBenchCount = (blockIndex: number): number => roster.filter((player) => CORE_GROUPS.has(player.group)
+    && goalkeeperNames[blockIndex] !== player.name
+    && !positions.some((position) => plans[position][blockIndex].includes(player.name))).length;
+  const plannedHalfCount = (name: string, half: 0 | 1): number => positions.reduce((total, position) => total
+    + plans[position].filter((plan, index) => blockHalf(index, game.total_blocks) === half && plan.includes(name)).length, 0);
+  let restMoves = game.total_blocks * roster.length;
+  while (restMoves > 0 && outsideRestWindow.length && restWindow.length) {
+    restMoves -= 1;
+    let moved = false;
+    const sourceBlocks = [...outsideRestWindow].sort((left, right) => coreBenchCount(right) - coreBenchCount(left) || left - right);
+    const targetBlocks = [...restWindow].sort((left, right) => coreBenchCount(left) - coreBenchCount(right) || left - right);
+    for (const sourceBlock of sourceBlocks) {
+      if (moved) break;
+      for (const targetBlock of targetBlocks) {
+        if (moved) break;
+        for (const position of positions) {
+          const sourcePlan = plans[position][sourceBlock];
+          const targetPlan = plans[position][targetBlock];
+          for (const sourceIndex of sourcePlan.keys()) {
+            const sourcePlayer = playersByName.get(sourcePlan[sourceIndex]);
+            if (!sourcePlayer || CORE_GROUPS.has(sourcePlayer.group)) continue;
+            for (const targetIndex of targetPlan.keys()) {
+              const targetPlayer = playersByName.get(targetPlan[targetIndex]);
+              if (!targetPlayer || !CORE_GROUPS.has(targetPlayer.group)) continue;
+              const sourceHasTargetElsewhere = positions.some((candidatePosition) => candidatePosition !== position
+                && plans[candidatePosition][sourceBlock].includes(targetPlayer.name));
+              const targetHasSourceElsewhere = positions.some((candidatePosition) => candidatePosition !== position
+                && plans[candidatePosition][targetBlock].includes(sourcePlayer.name));
+              if (sourceHasTargetElsewhere || targetHasSourceElsewhere) continue;
+              const sourceReplacement = [...sourcePlan]; sourceReplacement[sourceIndex] = targetPlayer.name;
+              const targetReplacement = [...targetPlan]; targetReplacement[targetIndex] = sourcePlayer.name;
+              if (!canCoverGroup(game, roster, targetPlayer.name, position) || !canCoverGroup(game, roster, sourcePlayer.name, position)
+                || !completeExactAssignmentExists(roster, sourceReplacement, formationSlots(formation)[position], position)
+                || !completeExactAssignmentExists(roster, targetReplacement, formationSlots(formation)[position], position)) continue;
+              const sourceHalf = blockHalf(sourceBlock, game.total_blocks);
+              const targetHalf = blockHalf(targetBlock, game.total_blocks);
+              const sourcePlayerHalfCount = plannedHalfCount(sourcePlayer.name, sourceHalf) - 1 + Number(sourceHalf === targetHalf);
+              const targetPlayerHalfCount = plannedHalfCount(targetPlayer.name, targetHalf) - 1 + Number(sourceHalf === targetHalf);
+              const sourcePlayerTargetHalfCount = plannedHalfCount(sourcePlayer.name, targetHalf) + Number(sourceHalf !== targetHalf);
+              const targetPlayerSourceHalfCount = plannedHalfCount(targetPlayer.name, sourceHalf) + Number(sourceHalf !== targetHalf);
+              if (!game.disable_maximum_limits && (sourcePlayerHalfCount > sourcePlayer.max_blocks_per_half
+                || targetPlayerHalfCount > targetPlayer.max_blocks_per_half
+                || sourcePlayerTargetHalfCount > sourcePlayer.max_blocks_per_half
+                || targetPlayerSourceHalfCount > targetPlayer.max_blocks_per_half)) continue;
+              sourcePlan[sourceIndex] = targetPlayer.name;
+              targetPlan[targetIndex] = sourcePlayer.name;
+              moved = true;
+              break;
+            }
+            if (moved) break;
+          }
+          if (moved) break;
+        }
+      }
+    }
+    if (!moved) break;
   }
   const acceptedFieldCounts = new Map<string, number>();
   const acceptedHalfCounts = new Map<string, [number, number]>();

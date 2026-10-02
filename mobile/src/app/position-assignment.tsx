@@ -86,7 +86,7 @@ function withoutGoalkeeper(positionList: string[]): string[] {
   return positionList.filter((position) => position.toUpperCase() !== 'GK');
 }
 
-export default function RosterScreen() {
+export default function RosterScreen({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const [players, setPlayers] = useState<Player[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -230,14 +230,16 @@ export default function RosterScreen() {
         <SafeAreaView style={styles.safeArea}>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
-              <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back">
-                <SymbolView
-                  name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-                  size={20}
-                  tintColor={palette.ink}
-                />
-              </Pressable>
-              <View style={styles.headerCopy}>
+              {!embedded && (
+                <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back">
+                  <SymbolView
+                    name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
+                    size={20}
+                    tintColor={palette.ink}
+                  />
+                </Pressable>
+              )}
+              <View style={[styles.headerCopy, !embedded && styles.headerCopyWithBack]}>
                 <Text style={styles.eyebrow}>FALL 2026</Text>
                 <Text style={styles.title}>{teamName ? `Player Positions for ${teamName}` : 'Player Positions'}</Text>
               </View>
@@ -341,10 +343,11 @@ export default function RosterScreen() {
             </View>}
             {message && <Text style={styles.successText}>{message}</Text>}
             {error && <Text style={styles.errorText}>{error}</Text>}
-            {!loading && <Pressable onPress={() => void saveRoster()} disabled={saving} style={[styles.saveButton, saving && styles.disabledButton]}>
+            {!embedded && !loading && (
+              <Pressable onPress={() => void saveRoster()} disabled={saving} style={[styles.saveButton, saving && styles.disabledButton]}>
               <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save and return home'}</Text>
               <SymbolView name={{ ios: 'checkmark', android: 'check', web: 'check' }} size={19} tintColor={palette.panel} />
-            </Pressable>}
+            </Pressable>)}
           </ScrollView>
         </SafeAreaView>
       </View>
@@ -472,7 +475,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42,
   },
-  headerCopy: { flex: 1, marginLeft: 13 },
+  headerCopy: { flex: 1 },
+  headerCopyWithBack: { marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 },
   title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
   countBadge: { alignItems: 'flex-end' },
