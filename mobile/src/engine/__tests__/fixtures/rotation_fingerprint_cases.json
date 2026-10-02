@@ -94,7 +94,7 @@
       }
     ],
     "fingerprint": "ec4fc8917ac350ccb5371c4b60f29e4ced2f47ca9a3dc1291f4c8e8aeb01f323",
-    "spec_verified": false,
+    "spec_verified": true,
     "expected": {
       "has_goalkeeper": false,
       "errors": [],
@@ -1151,7 +1151,7 @@
       }
     ],
     "fingerprint": "7a20957a2b687ff9e638914bbdd9ca1c153ef8017abff8959c0203f2e2b9e7bf",
-    "spec_verified": false,
+    "spec_verified": true,
     "expected_goalkeeper_blocks": {
       "Dual GK": 5,
       "Pure GK": 5

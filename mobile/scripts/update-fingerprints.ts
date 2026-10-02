@@ -46,7 +46,7 @@ const selectedIds = new Set(selectedCases.map((testCase) => testCase.id));
 const updatedCases = cases.map((testCase) => {
   if (!selectedIds.has(testCase.id)) return testCase;
   const result = generateSchedule(testCase.game, testCase.players.map((player) => createPlayer(player)));
-  return { ...testCase, fingerprint: fingerprint(result) };
+  return { ...testCase, fingerprint: fingerprint(result), ...(reviewedByTim ? { spec_verified: true } : {}) };
 });
 
 for (const testCase of updatedCases) {
