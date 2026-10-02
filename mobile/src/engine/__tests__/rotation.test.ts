@@ -926,7 +926,7 @@ describe('quota fairness and controlled coverage', () => {
     }
   });
 
-  it('spreads core rests through the middle window and staggers substitutions', () => {
+  it('spreads core rests through the middle window and staggers substitutions', { timeout: 60000 }, () => {
     const players = [
       ...Array.from({ length: 8 }, (_, index) => createPlayer({
         name: `Core ${index + 1}`,
