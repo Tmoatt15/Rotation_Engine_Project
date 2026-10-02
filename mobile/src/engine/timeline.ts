@@ -95,8 +95,12 @@ export function replayTimeline(roster: Player[], prefix: ScheduleBlock[], game: 
   }
 }
 
+const rosterPlayerMaps = new WeakMap<Player[], Map<string, Player>>();
+
 function completeExactAssignmentExists(roster: Player[], names: string[], slots: string[], group: PositionGroup): boolean {
-  const players = names.map((name) => roster.find((player) => player.name === name)).filter((player): player is Player => Boolean(player));
+  const playerByName = rosterPlayerMaps.get(roster) ?? new Map(roster.map((player) => [player.name, player]));
+  rosterPlayerMaps.set(roster, playerByName);
+  const players = names.map((name) => playerByName.get(name)).filter((player): player is Player => Boolean(player));
   if (players.length !== slots.length) return false;
   const candidatesBySlot = new Map(slots.map((slot) => [slot, players
     .filter((player) => canCoverSlot(player, slot, group))
@@ -625,11 +629,23 @@ function reserveCoreBlocks(
   return { byBlock, byGroupAndBlock };
 }
 
+const coverGroupCache = new WeakMap<Player[], Map<PositionGroup, Set<string>>>();
+
 function canCoverGroup(game: Game, roster: Player[], name: string, position: PositionGroup): boolean {
-  return [
-    ...eligiblePlayers(roster, position),
-    ...backupEligiblePlayers(roster, position),
-  ].some((player) => player.name === name);
+  let rosterCache = coverGroupCache.get(roster);
+  if (!rosterCache) {
+    rosterCache = new Map<PositionGroup, Set<string>>();
+    coverGroupCache.set(roster, rosterCache);
+  }
+  let coveredNames = rosterCache.get(position);
+  if (!coveredNames) {
+    coveredNames = new Set([
+      ...eligiblePlayers(roster, position),
+      ...backupEligiblePlayers(roster, position),
+    ].map((player) => player.name));
+    rosterCache.set(position, coveredNames);
+  }
+  return coveredNames.has(name);
 }
 
 function groupSwitchCount(plans: PlannedGroups, fromBlock: number, toBlock: number): number {
@@ -700,6 +716,25 @@ function combinations<T>(items: T[], size: number, limit = Number.POSITIVE_INFIN
     }
   }
   return result;
+}
+
+function findCombination<T>(items: T[], size: number, isValid: (choice: T[]) => boolean, limit = Number.POSITIVE_INFINITY): T[] | undefined {
+  let examined = 0;
+  const search = (start: number, remaining: number, choice: T[]): T[] | undefined => {
+    if (examined >= limit) return undefined;
+    if (remaining === 0) {
+      examined += 1;
+      return isValid(choice) ? [...choice] : undefined;
+    }
+    for (let index = start; index <= items.length - remaining; index += 1) {
+      choice.push(items[index]);
+      const result = search(index + 1, remaining - 1, choice);
+      choice.pop();
+      if (result) return result;
+    }
+    return undefined;
+  };
+  return search(0, size, []);
 }
 
 function planPositionGroups(game: Game, roster: Player[], formation: FormationCounts, goalkeeperNames: string[], startBlock: number): PlannedGroups {
@@ -2182,12 +2217,17 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             && (!goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
               || result.timeline.reduce((total, block) => total + (block.D.includes(player.name) || block.M.includes(player.name) || block.F.includes(player.name) ? 1 : 0), 0) < player.gk_field_maximum_blocks)));
         const candidatePools = game.disable_maximum_limits ? [candidates] : [quotaCandidates];
+        const validChoice = emergency ? undefined : candidatePools
+          .map((pool) => findCombination(
+            pool,
+            formation[group] - chosen.length,
+            (choice) => completeExactAssignmentExists(roster, [...chosen, ...choice].map((player) => player.name), slotsForGroup, group),
+            4096,
+          ))
+          .find((choice) => choice !== undefined);
         const additional = emergency
           ? [...chosen, ...(candidatePools[0] ?? []).slice(0, formation[group] - chosen.length)]
-          : candidatePools.map((pool) => combinations(pool, formation[group] - chosen.length, 4096)
-            .map((choice) => [...chosen, ...choice])
-            .find((choice) => completeExactAssignmentExists(roster, choice.map((player) => player.name), slotsForGroup, group)))
-            .find((choice) => choice !== undefined);
+          : validChoice ? [...chosen, ...validChoice] : undefined;
         if (additional) chosen = additional;
       }
       assignment[group] = chosen.map((player) => player.name); chosen.forEach((player) => used.add(player.name));
