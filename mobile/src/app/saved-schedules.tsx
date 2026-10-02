@@ -5,7 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam } from '@/team-api';
+import { getActiveTeam } from '@/services/team-service';
 import { deleteSavedSchedule, getSavedSchedules, renameSavedSchedule as renameScheduleInStorage } from '@/services/schedule-service';
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',

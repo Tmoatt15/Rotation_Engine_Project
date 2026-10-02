@@ -5,9 +5,9 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, Text
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
 import { createPlayer } from '@/engine/rotation';
-import { maximumFieldBlocksForPlayer, positionCapacityWarnings } from '@/engine/quotas';
+import { maximumFieldBlocksForPlayer, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
@@ -29,6 +29,10 @@ function displayPlayerName(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length < 2) return name;
   return `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
+}
+
+function capacityPositionWords(position: PositionCapacityDeficit['position']): [string, string] {
+  return position === 'D' ? ['defender', 'defense'] : position === 'M' ? ['midfielder', 'midfield'] : ['forward', 'attack'];
 }
 
 export default function GameScreen() {
@@ -53,6 +57,7 @@ export default function GameScreen() {
   const [formation, setFormation] = useState('4-3-3');
   const [rosterPlayers, setRosterPlayers] = useState<RosterPlayer[]>([]);
   const [capacityWarnings, setCapacityWarnings] = useState<string[]>([]);
+  const [capacityDeficits, setCapacityDeficits] = useState<PositionCapacityDeficit[]>([]);
   const [showCapacityWarning, setShowCapacityWarning] = useState(false);
   const availableCount = playerNames.length - unavailable.size;
   const enteredGameNumber = Number.parseInt(gameNumber, 10);
@@ -110,11 +115,14 @@ export default function GameScreen() {
   function requestScheduleGeneration() {
     setError(null);
     setDisableMaximumLimits(false);
-    const warnings = positionCapacityWarnings(formation, rosterPlayers
+    const availableRoster = rosterPlayers
       .filter((player) => !unavailable.has(player.name))
-      .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])));
-    if (warnings.length) {
+      .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
+    const warnings = positionCapacityWarnings(formation, availableRoster);
+    const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks);
+    if (warnings.length || deficits.length) {
       setCapacityWarnings(warnings);
+      setCapacityDeficits(deficits);
       setShowCapacityWarning(true);
       return;
     }
@@ -180,6 +188,12 @@ export default function GameScreen() {
     requestGameNumberConfirmation();
   }
 
+  function continueWithCapacityOverride() {
+    setDisableMaximumLimits(true);
+    setShowCapacityWarning(false);
+    requestGameNumberConfirmation();
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -189,10 +203,16 @@ export default function GameScreen() {
             <Text style={styles.modalEyebrow}>POSITION CAPACITY</Text>
             <Text style={styles.modalTitle}>Some positions are short</Text>
             <Text style={styles.modalDetail}>The available roster cannot cover every legal position slot normally:</Text>
-            <View style={styles.capacityWarningList}>{capacityWarnings.map((warning) => <Text key={warning} style={styles.modalWarning}>{warning.replace('Preflight: ', '').replace(/ available ([DMF]) players can cover (\d+) \1 slots\./, (_, position, slots) => ` legal ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'}${Number(slots) === 1 ? '' : 's'} available for ${slots} ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'} slots.`)}</Text>)}</View>
+            <View style={styles.capacityWarningList}>
+              {capacityWarnings.map((warning) => <Text key={warning} style={styles.modalWarning}>{warning.replace('Preflight: ', '').replace(/ available ([DMF]) players can cover (\d+) \1 slots\./, (_, position, slots) => ` legal ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'}${Number(slots) === 1 ? '' : 's'} available for ${slots} ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'} slots.`)}</Text>)}
+              {capacityDeficits.map((deficit) => {
+                const [noun, destination] = capacityPositionWords(deficit.position);
+                return <Text key={`deficit-${deficit.position}`} style={styles.modalWarning}>The available roster cannot cover every {noun} position slot for this game.{deficit.candidates.length ? ` Consider making one of these players eligible for ${destination}: ${deficit.candidates.join(', ')}.` : ''}</Text>;
+              })}
+            </View>
             <View style={styles.modalActions}>
-              <Pressable onPress={() => setShowCapacityWarning(false)} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>BACK</Text></Pressable>
-              <Pressable onPress={() => { setShowCapacityWarning(false); continueToGenerationOptions(); }} style={styles.confirmButton} accessibilityRole="button"><Text style={styles.confirmButtonText}>CONTINUE</Text></Pressable>
+              <Pressable onPress={() => { setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
+              <Pressable onPress={continueWithCapacityOverride} style={styles.confirmButton} accessibilityRole="button"><Text style={styles.confirmButtonText}>TURN OFF LIMITS</Text></Pressable>
             </View>
           </View>
         </View>

@@ -6,7 +6,7 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/team-api';
+import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/services/team-service';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
 

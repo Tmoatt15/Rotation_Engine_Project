@@ -6,7 +6,7 @@ import type { AfterGameReport, LiveSchedule, SavedSchedule, SeasonRosterPlayer }
 import { getDatabase } from '@/storage/database';
 import { deleteSchedule, listSchedules, renameSchedule, saveSchedule } from '@/storage/schedules';
 import { getSavedReports } from '@/services/report-service';
-import { getActiveTeamId } from '@/team-api';
+import { getActiveTeamId } from '@/services/team-service';
 import { getLocalTeam, getRoster, getSeasonSettings } from './team-service';
 import { summarizeStructuralErrors } from './structural-diagnostics';
 import { assertCompleteSchedule } from './schedule-validation';

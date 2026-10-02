@@ -5,6 +5,17 @@ import { createTeam, deleteTeam, getTeam, listTeams, renameTeam, replaceRoster, 
 
 export type TeamPayload = { teams: Team[] };
 export type RosterPayload = { players: SeasonRosterPlayer[] };
+export type ActiveTeam = { id: string; name: string };
+const teamChangeListeners = new Set<() => void>();
+
+export function subscribeToTeamChanges(listener: () => void): () => void {
+  teamChangeListeners.add(listener);
+  return () => teamChangeListeners.delete(listener);
+}
+
+export function notifyTeamChanged(): void {
+  teamChangeListeners.forEach((listener) => listener());
+}
 
 const DEFAULT_SETTINGS: SeasonSettings = {
   game_length_minutes: 70,
@@ -16,6 +27,16 @@ const DEFAULT_SETTINGS: SeasonSettings = {
   substitution_alert: 'flash_and_vibrate',
   substitution_warning_seconds: 30,
 };
+
+export async function getActiveTeam(): Promise<ActiveTeam> {
+  const team = (await listTeams(await getDatabase())).find((item) => item.active);
+  if (!team?.id) throw new Error('Select an active team first.');
+  return { id: team.id, name: team.name };
+}
+
+export async function getActiveTeamId(): Promise<string> {
+  return (await getActiveTeam()).id;
+}
 
 export async function getTeams(): Promise<TeamPayload> {
   return { teams: await listTeams(await getDatabase()) };

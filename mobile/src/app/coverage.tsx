@@ -6,7 +6,7 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
 import { calculateGroupCoverage } from '@/coverage-utils';
 import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';

@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import LiveScreen from './live';
 import { clearAcceptedSchedule, getAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
-import { notifyTeamChanged } from '@/team-api';
+import { notifyTeamChanged } from '@/services/team-service';
 import { activateTeam, getTeams } from '@/services/team-service';
 import { rosterMatchesFormation } from '@/position-validation';
 

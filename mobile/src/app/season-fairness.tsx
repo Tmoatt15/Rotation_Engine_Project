@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam } from '@/team-api';
+import { getActiveTeam } from '@/services/team-service';
 import { getSeasonFairness, type SeasonFairnessReport } from '@/services/report-service';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c', coralSoft: '#f8e4dc' };

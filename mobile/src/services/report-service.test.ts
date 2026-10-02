@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { aggregateSeasonFairness } from './season-fairness';
+import { nextGameNumber } from './report-number';
 import type { AfterGameReport } from '@/engine/models';
 
 function report(gameNumber: number, attendance: number, starters: Record<string, string>, players: AfterGameReport['players'], structuralErrors: string[] = [], endingPositions: Record<string, string> = starters, corePlayerNames: string[] = []): AfterGameReport {
@@ -10,6 +11,16 @@ function report(gameNumber: number, attendance: number, starters: Record<string,
 function player(name: string, blocksPlayed: number, minutesPlayed = blocksPlayed * 7, positions: Record<string, number> = {}): AfterGameReport['players'][number] {
   return { player: name, blocksPlayed, minutesPlayed, positions, unavailableBlocks: 0 };
 }
+
+describe('next game number', () => {
+  it('starts at one when no reports exist', () => {
+    expect(nextGameNumber([])).toBe(1);
+  });
+
+  it('uses the highest saved game number for sparse reports', () => {
+    expect(nextGameNumber([{ game_number: 1 }, { game_number: 3 }])).toBe(4);
+  });
+});
 
 describe('season fairness acceptance', () => {
   it('flags zero-start players after two appearances and structural games', () => {

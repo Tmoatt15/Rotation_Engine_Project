@@ -1,6 +1,6 @@
 import type { AvailabilityChange, Game, GameInput, Player, PlayerInput, PositionGroup, RotationResult, ScheduleBlock } from './models';
 import { computeBlockTargets } from './quotas';
-import { buildTimeline, calculateMovementMetrics, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
+import { assignExactSlots, buildTimeline, calculateMovementMetrics, completeExactAssignmentExists, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus } from './surplus';
 import { eligiblePlayers } from './positional';
 import { GAME_FORMATS } from './season';
@@ -97,7 +97,14 @@ export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previ
         block.GK = replacement.name;
         block.positions.GK = replacement.name;
       } else {
-        block[position] = block[position].filter((name) => name !== player.name); block[position].push(replacement.name);
+        const replacementGroup = block[position].filter((name) => name !== player.name).concat(replacement.name);
+        const replacementSlots = formationSlots(parseFormation(game.formation))[position];
+        if (!completeExactAssignmentExists(roster, replacementGroup, replacementSlots, position)) {
+          player.available = true;
+          throw new Error(`No available replacement can cover the exact ${position} slot in block ${change.block}.`);
+        }
+        block[position] = replacementGroup;
+        Object.assign(block.positions, assignExactSlots(roster, replacementGroup, replacementSlots, position, block.positions, game.season_position_starts));
       }
       block.bench = block.bench.filter((name) => name !== replacement.name); if (!block.bench.includes(player.name)) block.bench.push(player.name);
       if (!game.replacement_credits.some((credit) => credit.player === player.name && credit.block === change.block)) { game.replacement_credits.push({ player: player.name, block: change.block, position, half_index: change.block <= Math.ceil(game.total_blocks / 2) ? 0 : 1, replacement: replacement.name }); game.replacement_bonuses[replacement.name] = (game.replacement_bonuses[replacement.name] ?? 0) + 1; }

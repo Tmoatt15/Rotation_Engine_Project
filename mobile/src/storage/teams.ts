@@ -132,6 +132,8 @@ export async function renameTeam(database: SQLiteDatabase, teamId: string, name:
 }
 
 export async function setActiveTeam(database: SQLiteDatabase, teamId: string): Promise<void> {
+  const team = await database.getFirstAsync<{ id: string }>('SELECT id FROM teams WHERE id = ?', teamId);
+  if (!team) throw new Error('Team was not found.');
   await database.withTransactionAsync(async () => {
     await database.runAsync('UPDATE teams SET active = 0, updated_at = ?', now());
     await database.runAsync('UPDATE teams SET active = 1, updated_at = ? WHERE id = ?', now(), teamId);

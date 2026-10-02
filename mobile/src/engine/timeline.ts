@@ -1,5 +1,5 @@
 import type { Game, MovementMetrics, Player, PositionGroup, QuotaFeasibilityMetadata, RotationResult, ScheduleBlock } from './models';
-import { ANY_POSITION, backupCoversPosition, backupEligiblePlayers, eligiblePlayers, generalPositionAllowsGroup, positionalPriority, POSITION_GROUP_BY_SLOT } from './positional';
+import { ANY_POSITION, backupCoversPosition, backupEligiblePlayers, CENTRAL_DEFENSE_ZONE, CENTRAL_MIDFIELD_ZONE, eligiblePlayers, exclusionBlocksSlot, generalPositionAllowsGroup, positionalPriority, POSITION_GROUP_BY_SLOT, STRIKER_ZONE } from './positional';
 
 export type FormationCounts = { D: number; M: number; F: number; _shape?: string };
 
@@ -97,7 +97,7 @@ export function replayTimeline(roster: Player[], prefix: ScheduleBlock[], game: 
 
 const rosterPlayerMaps = new WeakMap<Player[], Map<string, Player>>();
 
-function completeExactAssignmentExists(roster: Player[], names: string[], slots: string[], group: PositionGroup): boolean {
+export function completeExactAssignmentExists(roster: Player[], names: string[], slots: string[], group: PositionGroup): boolean {
   const playerByName = rosterPlayerMaps.get(roster) ?? new Map(roster.map((player) => [player.name, player]));
   rosterPlayerMaps.set(roster, playerByName);
   const players = names.map((name) => playerByName.get(name)).filter((player): player is Player => Boolean(player));
@@ -127,10 +127,11 @@ function completeExactAssignmentExists(roster: Player[], names: string[], slots:
   return orderedSlots.every((slot) => augment(slot, new Set<string>()));
 }
 
-function assignExactSlots(roster: Player[], names: string[], slots: string[], group: PositionGroup, previous: Record<string, string>, seasonStarts: Record<string, Record<string, number>> = {}, allowUnrestricted = false): Record<string, string> {
+export function assignExactSlots(roster: Player[], names: string[], slots: string[], group: PositionGroup, previous: Record<string, string>, seasonStarts: Record<string, Record<string, number>> = {}, allowUnrestricted = false): Record<string, string> {
   const players = names.map((name) => roster.find((player) => player.name === name)).filter((player): player is Player => Boolean(player));
   if (allowUnrestricted) return Object.fromEntries(slots.map((slot, index) => [slot, players[index]?.name ?? 'UNASSIGNED']));
-  const candidatesBySlot = new Map(slots.map((slot) => [slot, players.filter((player) => allowUnrestricted || canCoverSlot(player, slot, group))]));
+  const candidatesBySlot = new Map(slots.map((slot) => [slot, players.filter((player) => !exclusionBlocksSlot(player.forbidden_positions, slot)
+    && (allowUnrestricted || canCoverSlot(player, slot, group)))]));
   const orderedSlots = [...slots].sort((left, right) => (candidatesBySlot.get(left)?.length ?? 0) - (candidatesBySlot.get(right)?.length ?? 0));
   let bestAssignment: Record<string, string> | null = null;
   let bestScore: [number, number, number, number, string] | null = null;
@@ -181,7 +182,7 @@ export function canCoverSlot(player: Player, slot: string, group: PositionGroup)
   const centralDefense = new Set(['LCB', 'CB', 'RCB']);
   const equivalentCentralMidfield = centralMidfield.has(slot) && player.primary_positions.some((position) => centralMidfield.has(position));
   const equivalentCentralDefense = centralDefense.has(slot) && player.primary_positions.some((position) => centralDefense.has(position));
-  return !player.forbidden_positions.includes(group) && (
+  return !exclusionBlocksSlot(player.forbidden_positions, slot) && (
     player.primary_positions.includes(slot) ||
     (player.primary_positions.includes(ANY_POSITION) && generalPositionAllowsGroup(player, group)) ||
     equivalentCentralMidfield ||
@@ -192,7 +193,7 @@ export function canCoverSlot(player: Player, slot: string, group: PositionGroup)
 }
 
 function movementMetricScore(metrics: MovementMetrics): [number, number, number, number, number] {
-  return [metrics.exact_slot_switches, metrics.turnovers, metrics.backup_assignments, metrics.emergency_assignments, -metrics.primary_assignments];
+  return [-metrics.primary_assignments, metrics.exact_slot_switches, metrics.turnovers, metrics.backup_assignments, metrics.emergency_assignments];
 }
 
 function compareMetricScores(left: MovementMetrics, right: MovementMetrics): number {
@@ -208,8 +209,13 @@ type AssignmentQuality = 'primary' | 'general' | 'backup' | 'emergency';
 
 function assignmentQuality(player: Player | undefined, slot: string, emergencyActive: boolean): AssignmentQuality | null {
   if (!player || player.name === 'UNASSIGNED') return null;
-  if (player.primary_positions.includes(slot)) return 'primary';
-  const group = POSITION_GROUP_BY_SLOT[slot];
+  const normalizedSlot = slot.trim().toUpperCase();
+  if (player.primary_positions.some((position) => position.trim().toUpperCase() === normalizedSlot)) return 'primary';
+  const primaryZone = normalizedSlot === 'GK'
+    ? undefined
+    : [CENTRAL_MIDFIELD_ZONE, CENTRAL_DEFENSE_ZONE, STRIKER_ZONE].find((zone) => zone.has(normalizedSlot));
+  if (primaryZone && player.primary_positions.some((position) => primaryZone.has(position.trim().toUpperCase()))) return 'primary';
+  const group = POSITION_GROUP_BY_SLOT[normalizedSlot];
   if (group && generalPositionAllowsGroup(player, group)) return 'general';
   if (backupCoversPosition(player, slot)) return 'backup';
   return emergencyActive ? 'emergency' : null;
@@ -458,7 +464,7 @@ type EndpointLineup = {
 };
 
 function endpointAssignmentTier(player: Player, slot: string, group: PositionGroup): 0 | 1 | 2 | null {
-  if (player.forbidden_positions.includes(group)) return null;
+  if (exclusionBlocksSlot(player.forbidden_positions, slot)) return null;
   if (player.primary_positions.includes(slot) && player.primary_positions.some((position) => position.toUpperCase() !== ANY_POSITION)) return 0;
   if (generalPositionAllowsGroup(player, group)) return 1;
   if (backupCoversPosition(player, slot)) return 2;
@@ -858,6 +864,13 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const assignableChoices = (available: Player[], requiredNames: Set<string>, limit: number): Player[][] => {
       if (available.length < formation[position]) return [];
       if ([...requiredNames].some((name) => !available.some((player) => player.name === name))) return [];
+      const allSlotsFlexible = slots.every((slot) => available.every((player) => canCoverSlot(player, slot, position)));
+      if (allSlotsFlexible) {
+        const ordered = [...available].sort((left, right) => Number(requiredNames.has(right.name)) - Number(requiredNames.has(left.name)) || left.name.localeCompare(right.name));
+        return combinations(ordered, formation[position], limit).filter((choice) => requiredNames.size > formation[position]
+          ? choice.every((player) => requiredNames.has(player.name))
+          : [...requiredNames].every((name) => choice.some((player) => player.name === name)));
+      }
       const candidatesBySlot = new Map(slots.map((slot) => [slot, available
         .filter((player) => eligibleNamesBySlot.get(slot)?.has(player.name))
         .sort((left, right) => {

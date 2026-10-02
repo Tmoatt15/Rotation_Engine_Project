@@ -5,7 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam } from '@/team-api';
+import { getActiveTeam } from '@/services/team-service';
 import { deleteSavedReport, getSavedReports, renameSavedReport as renameReportInStorage } from '@/services/report-service';
 import type { AfterGameReport } from '@/live-schedule';
 
@@ -24,7 +24,7 @@ export default function SavedAfterGameReportsScreen() {
   const [renaming, setRenaming] = useState(false);
   const load = useCallback(async () => { try { const team = await getActiveTeam(); setTeamName(team.name); setReports(await getSavedReports(team.id) as SavedReport[]); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to load reports.'); } }, []);
   useEffect(() => { void load(); }, [load]);
-  function deleteReport(report: SavedReport) { Alert.alert('Delete after-game report?', reportLabel(report), [{ text: 'CANCEL', style: 'cancel' }, { text: 'DELETE', style: 'destructive', onPress: async () => { await deleteSavedReport(report.id); setReports((current) => current.filter((item) => item.id !== report.id)); } }]); }
+  function deleteReport(report: SavedReport) { Alert.alert('Delete after-game report?', reportLabel(report), [{ text: 'CANCEL', style: 'cancel' }, { text: 'DELETE', style: 'destructive', onPress: async () => { try { setError(null); await deleteSavedReport(report.id); setReports((current) => current.filter((item) => item.id !== report.id)); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Unable to delete after-game report.'); } } }]); }
   function openRename(report: SavedReport) { setError(null); setRenameReport(report); setRenameValue(reportLabel(report)); }
   async function renameSavedReport() {
     const name = renameValue.trim();

@@ -13,6 +13,22 @@ export const POSITION_GROUP_BY_SLOT: Record<string, PositionGroup> = {
   LB: 'D', LCB: 'D', CB: 'D', RCB: 'D', RB: 'D', LWB: 'D', RWB: 'D',
 };
 
+export const CENTRAL_MIDFIELD_ZONE = new Set(['LCM', 'CM', 'RCM', 'CDM', 'CAM']);
+export const CENTRAL_DEFENSE_ZONE = new Set(['LCB', 'CB', 'RCB']);
+export const STRIKER_ZONE = new Set(['ST', 'CF']);
+
+export function exclusionBlocksSlot(forbiddenPositions: string[], slot: string): boolean {
+  const forbidden = forbiddenPositions.map((entry) => entry.trim().toUpperCase());
+  const target = slot.trim().toUpperCase();
+  if (forbidden.includes(target)) return true;
+  const group = POSITION_GROUP_BY_SLOT[target] ?? target;
+  if (forbidden.includes(group)) return true;
+  for (const zone of [CENTRAL_MIDFIELD_ZONE, CENTRAL_DEFENSE_ZONE, STRIKER_ZONE]) {
+    if (zone.has(target) && [...zone].some((zoned) => forbidden.includes(zoned))) return true;
+  }
+  return false;
+}
+
 export function generalPositionAllowsGroup(player: Pick<Player, 'general_positions'>, group: PositionGroup): boolean {
   if (group === 'GK') return false;
   return player.general_positions.some((position) => {
@@ -24,16 +40,25 @@ export function generalPositionAllowsGroup(player: Pick<Player, 'general_positio
 export function backupCoversPosition(player: Player, position: string): boolean {
   const requested = position.trim().toUpperCase();
   const group = POSITION_GROUP_BY_SLOT[requested] ?? requested;
+  const requestedIsGroup = ['D', 'M', 'F', 'GK'].includes(requested);
   return player.backup_positions.some((backup) => {
     const value = backup.trim().toUpperCase();
-    return value === requested || value === ANY_POSITION || (['D', 'M', 'F'].includes(value) && value === group);
+    return value === requested
+      || value === ANY_POSITION
+      || (requestedIsGroup
+        ? POSITION_GROUP_BY_SLOT[value] === requested
+        : ['D', 'M', 'F'].includes(value) && value === group);
   });
 }
 
 export function positionalPriority(player: Player, position: PositionGroup): number {
   const requested = position.toUpperCase();
   if (player.forbidden_positions.map((value) => value.toUpperCase()).includes(requested)) return 3;
-  if (player.general_positions.some((value) => value.toUpperCase() === requested || (value.toUpperCase() === ANY_POSITION && requested !== 'GK'))) return 0;
+  if (player.primary_positions.some((value) => {
+    const normalized = value.trim().toUpperCase();
+    return normalized === requested || POSITION_GROUP_BY_SLOT[normalized] === requested;
+  })) return 0;
+  if (player.general_positions.some((value) => value.toUpperCase() === requested || (value.toUpperCase() === ANY_POSITION && requested !== 'GK'))) return 1;
   if (backupCoversPosition(player, requested)) return 2;
   return 3;
 }
@@ -48,5 +73,8 @@ export function eligiblePlayers(roster: Player[], position: PositionGroup): Play
 }
 
 export function backupEligiblePlayers(roster: Player[], position: string): Player[] {
-  return roster.filter((player) => player.available && !player.forbidden_positions.includes(position) && backupCoversPosition(player, position));
+  const requested = position.trim().toUpperCase();
+  return roster.filter((player) => player.available
+    && !player.forbidden_positions.some((value) => value.trim().toUpperCase() === requested)
+    && backupCoversPosition(player, requested));
 }

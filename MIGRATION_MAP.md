@@ -81,17 +81,17 @@ objects. It must preserve the current output shape, including timeline blocks,
 
 | Current API behavior | Current mobile callers | Future local owner |
 | --- | --- | --- |
-| `GET/PUT /roster` | `game.tsx`, `roster.tsx`, `coverage.tsx`, `position-assignment.tsx` | `team-service.ts` |
-| `GET/PUT /season` | `settings.tsx`, `coverage.tsx`, `position-assignment.tsx` | `team-service.ts` |
-| `GET/POST/PUT/DELETE /teams` and activation | `index.tsx`, `team-create.tsx`, `saved-teams.tsx`, `team-edit.tsx` | `team-service.ts` |
-| `POST /schedule` | `game.tsx` | `schedule-service.ts` calling the local engine |
-| `GET/POST/PATCH/DELETE /schedules` | `saved-schedules.tsx`, `schedule.tsx` | `schedule-service.ts` |
-| `GET/POST/PATCH/DELETE /game-reports` | `after-game.tsx`, `saved-after-game-reports.tsx` | `report-service.ts` |
-| `GET /season-totals` | `season-totals.tsx` | `report-service.ts` or `analytics-service.ts` |
+| `GET/PUT /roster` | Migrated screen callers | `team-service.ts` |
+| `GET/PUT /season` | Migrated screen callers | `team-service.ts` |
+| `GET/POST/PUT/DELETE /teams` and activation | Migrated screen callers | `team-service.ts` |
+| `POST /schedule` | Migrated screen callers | `schedule-service.ts` calling the local engine |
+| `GET/POST/PATCH/DELETE /schedules` | Migrated screen callers | `schedule-service.ts` |
+| `GET/POST/PATCH/DELETE /game-reports` | Migrated screen callers | `report-service.ts` |
+| `GET /season-totals` | Migrated screen callers | `report-service.ts` |
 
-`mobile/src/team-api.ts` is currently the shared HTTP client and active-team
-notification point. During the migration, its active-team behavior should be
-preserved while its HTTP implementation is replaced by local service calls.
+`mobile/src/services/team-service.ts` owns active-team reads and team-change
+notifications. Screen callers use local team, schedule, and report services;
+the retired `mobile/src/team-api.ts` facade is no longer part of the app path.
 The final app must not require `EXPO_PUBLIC_API_URL`.
 
 ## Port Order
@@ -106,7 +106,12 @@ The final app must not require `EXPO_PUBLIC_API_URL`.
 8. SQLite storage and team/roster service
 9. Schedule service
 10. Report and season-total service
-11. Screen call-site replacement
+11. Screen call-site replacement (completed)
+
+The migrated mobile path is behaviorally covered by the engine and focused
+storage/service suites. A full TypeScript check still reports pre-existing
+diagnostics in `engine/timeline.ts`, rotation test imports, and fingerprint
+tooling; these are separate from the completed service and screen migration.
 
 ## Behavior Contracts
 

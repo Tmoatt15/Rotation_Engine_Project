@@ -40,19 +40,30 @@ type BlockCapacityCheck = {
   positionRequired: Record<'D' | 'M' | 'F', number>;
 };
 
+type FormationCounts = Record<'D' | 'M' | 'F', number>;
+
 function isDedicatedGoalkeeper(player: Player): boolean {
   return player.general_positions.some((position) => position.toUpperCase() === 'GK');
 }
 
-export function positionCapacityWarnings(formationName: string, roster: Player[]): string[] {
+function formationCountsForName(formationName: string): FormationCounts {
   const formation = formationName.split('-').map(Number);
-  const formationCounts: Record<'D' | 'M' | 'F', number> = formationName === '2-1-2-1'
+  return formationName === '2-1-2-1'
     ? { D: 2, M: 3, F: 1 }
     : formationName === '4-2-3-1'
       ? { D: 4, M: 5, F: 1 }
       : formation.length === 2
         ? { D: formation[0] ?? 0, M: 0, F: formation[1] ?? 0 }
         : { D: formation[0] ?? 0, M: formation[1] ?? 0, F: formation[2] ?? 0 };
+}
+
+export interface PositionCapacityDeficit {
+  position: 'D' | 'M' | 'F';
+  candidates: string[];
+}
+
+export function positionCapacityWarnings(formationName: string, roster: Player[]): string[] {
+  const formationCounts = formationCountsForName(formationName);
   const warnings: string[] = [];
   for (const position of ['D', 'M', 'F'] as const) {
     if (!formationCounts[position]) continue;
@@ -67,6 +78,28 @@ export function positionCapacityWarnings(formationName: string, roster: Player[]
     }
   }
   return warnings;
+}
+
+export function positionCapacityDeficits(formationName: string, roster: Player[], totalBlocks: number): PositionCapacityDeficit[] {
+  const formationCounts = formationCountsForName(formationName);
+  const capacity = blockCapacityCheck(formationCounts, roster, totalBlocks, new Set());
+  return (['D', 'M', 'F'] as const)
+    .filter((position) => formationCounts[position] > 0 && capacity.positionCapacity[position] < capacity.positionRequired[position])
+    .map((position) => {
+      const alreadyEligible = new Set([
+        ...eligiblePlayers(roster, position),
+        ...backupEligiblePlayers(roster, position),
+      ].map((player) => player.name));
+      const candidates = roster
+        .filter((player) => player.available
+          && !isDedicatedGoalkeeper(player)
+          && !alreadyEligible.has(player.name)
+          && !player.forbidden_positions.includes(position))
+        .sort((left, right) => maximumFieldBlocksForPlayer(right, totalBlocks) - maximumFieldBlocksForPlayer(left, totalBlocks)
+          || left.name.localeCompare(right.name))
+        .map((player) => player.name);
+      return { position, candidates };
+    });
 }
 
 function blockCapacityCheck(
@@ -232,14 +265,7 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
   const result: RotationResult = { timeline: [], block_counts: {}, gk_summary: {}, position_summary: {}, warnings: [], errors: [], metadata: { total_blocks: game.total_blocks, method: 'percentage-based quotas' } };
   const rotationalHigh = rotatingHighNames(game, roster.filter((player) => player.group === 'rotational' && !isDedicatedGoalkeeper(player)), 'rotational');
   const developingHigh = rotatingHighNames(game, roster.filter((player) => ['developing', 'developmental'].includes(player.group)), 'developing');
-  const formation = game.formation.split('-').map(Number);
-  const formationCounts: Record<'D' | 'M' | 'F', number> = game.formation === '2-1-2-1'
-    ? { D: 2, M: 3, F: 1 }
-    : game.formation === '4-2-3-1'
-      ? { D: 4, M: 5, F: 1 }
-      : formation.length === 2
-        ? { D: formation[0] ?? 0, M: 0, F: formation[1] ?? 0 }
-        : { D: formation[0] ?? 0, M: formation[1] ?? 0, F: formation[2] ?? 0 };
+  const formationCounts = formationCountsForName(game.formation);
   const quotaFeasibility = calculateQuotaFeasibility(formationCounts, roster, game.total_blocks);
   const minimumFor = (player: Player) => ['core', 'core_a', 'core_b'].includes(player.group)
     ? minimumBlocksForPercentage(game.total_blocks, CORE_MIN)

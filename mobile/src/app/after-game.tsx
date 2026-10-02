@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam } from '@/team-api';
+import { getActiveTeam } from '@/services/team-service';
 import { saveLocalReport } from '@/services/report-service';
 import type { AfterGameReport } from '@/live-schedule';
 

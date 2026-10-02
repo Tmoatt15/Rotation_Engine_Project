@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId } from '@/team-api';
+import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
 import { getSeasonSettings, updateSeasonSettings } from '@/services/team-service';
 import { shareDiagnosticSnapshot } from '@/services/diagnostic-service';
 const palette = {

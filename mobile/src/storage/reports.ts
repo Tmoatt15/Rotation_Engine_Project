@@ -44,9 +44,11 @@ export async function saveReport(
 export async function renameReport(database: SQLiteDatabase, reportId: string, name: string): Promise<void> {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error('Report name is required.');
-  await database.runAsync('UPDATE game_reports SET name = ? WHERE id = ?', trimmedName, reportId);
+  const result = await database.runAsync('UPDATE game_reports SET name = ? WHERE id = ?', trimmedName, reportId);
+  if (!result.changes) throw new Error('After-game report was not found.');
 }
 
 export async function deleteReport(database: SQLiteDatabase, reportId: string): Promise<void> {
-  await database.runAsync('DELETE FROM game_reports WHERE id = ?', reportId);
+  const result = await database.runAsync('DELETE FROM game_reports WHERE id = ?', reportId);
+  if (!result.changes) throw new Error('After-game report was not found.');
 }

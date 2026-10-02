@@ -53,9 +53,11 @@ export async function saveSchedule(
 export async function renameSchedule(database: SQLiteDatabase, scheduleId: string, name: string): Promise<void> {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error('Schedule name is required.');
-  await database.runAsync('UPDATE saved_schedules SET name = ? WHERE id = ?', trimmedName, scheduleId);
+  const result = await database.runAsync('UPDATE saved_schedules SET name = ? WHERE id = ?', trimmedName, scheduleId);
+  if (!result.changes) throw new Error('Saved schedule was not found.');
 }
 
 export async function deleteSchedule(database: SQLiteDatabase, scheduleId: string): Promise<void> {
-  await database.runAsync('DELETE FROM saved_schedules WHERE id = ?', scheduleId);
+  const result = await database.runAsync('DELETE FROM saved_schedules WHERE id = ?', scheduleId);
+  if (!result.changes) throw new Error('Saved schedule was not found.');
 }

@@ -6,8 +6,8 @@ vi.setConfig({ testTimeout: 15000 });
 import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
-import { eligiblePlayers } from '../positional';
-import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
+import { backupEligiblePlayers, eligiblePlayers, exclusionBlocksSlot, positionalPriority } from '../positional';
+import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
 import { calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
@@ -288,6 +288,24 @@ describe('goalkeeper and minimum protection', () => {
     expect(updated.timeline[0].positions.GK).toBe('G2');
   });
 
+  it('updates exact positions when replacing an unavailable field player', () => {
+    const players = [
+      createPlayer({ name: 'G1', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'G2', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'D1', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] }),
+      createPlayer({ name: 'D2', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] }),
+      createPlayer({ name: 'F1', group: 'rotational', general_positions: ['F'], primary_positions: ['ST'] }),
+    ];
+    const game = { total_blocks: 2, formation: '1-0-1', first_half_gk: 'G1', second_half_gk: 'G2' };
+    const initial = generateSchedule(game, players);
+    const updated = regenerateSchedule(game as Game, players, initial.timeline, [{ player: 'D1', action: 'unavailable', block: 1 }]);
+
+    expect(updated.timeline[0].D).toEqual(['D2']);
+    expect(updated.timeline[0].positions.CB).toBe('D2');
+    expect(updated.timeline[0].positions).not.toHaveProperty('CB', 'D1');
+    expect(updated.timeline[1].positions.CB).not.toBe('D1');
+  });
+
   it('does not auto-select a goalkeeper when the coach selection is missing or stale', () => {
     const players = [
       createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
@@ -370,6 +388,59 @@ describe('goalkeeper and minimum protection', () => {
     expect(canCoverSlot(midfieldAny, 'CB', 'D')).toBe(false);
     expect(canCoverSlot(unrestrictedAny, 'CB', 'D')).toBe(true);
     expect(canCoverSlot(unrestrictedAny, 'CM', 'M')).toBe(true);
+  });
+
+  it('applies case-insensitive zone-based slot exclusions', () => {
+    const cases = [
+      { forbidden: ['LM'], slot: 'LM', expected: true },
+      { forbidden: ['M'], slot: 'RM', expected: true },
+      { forbidden: ['CM'], slot: 'RCM', expected: true },
+      { forbidden: ['cm'], slot: 'LCM', expected: true },
+      { forbidden: ['CB'], slot: 'LCB', expected: true },
+      { forbidden: ['CM'], slot: 'LM', expected: false },
+      { forbidden: ['LM'], slot: 'RM', expected: false },
+      { forbidden: ['CB'], slot: 'LB', expected: false },
+    ];
+
+    cases.forEach(({ forbidden, slot, expected }) => {
+      expect(exclusionBlocksSlot(forbidden, slot), `${forbidden.join(',')} -> ${slot}`).toBe(expected);
+    });
+  });
+
+  it('never assigns a CM-excluded midfielder to central midfield slots', () => {
+    const players = [
+      ...['D1', 'D2', 'D3', 'D4'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['D'], primary_positions: ['D'] })),
+      ...['M1', 'M2', 'M3', 'M4'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['M'] })),
+      createPlayer({ name: 'CM Excluded', group: 'developing', general_positions: ['M'], primary_positions: ['CM'], forbidden_positions: ['CM'] }),
+      ...['F1', 'F2'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['F'], primary_positions: ['F'] })),
+      createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+    ];
+    const result = generateSchedule({ total_blocks: 5, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(result.timeline.flatMap((block) => ['LCM', 'CM', 'RCM', 'CDM', 'CAM'].map((slot) => block.positions[slot])).filter((name) => name === 'CM Excluded')).toEqual([]);
+    expect(result.timeline.flatMap((block) => [...block.D, ...block.M, ...block.F]).filter((name) => name === 'CM Excluded').length).toBeGreaterThan(0);
+  });
+
+  it('honors central-defense and wide-slot exclusions independently', () => {
+    const defenders = [
+      createPlayer({ name: 'CB Excluded', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'], forbidden_positions: ['CB'] }),
+      ...['D1', 'D2', 'D3'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['D'], primary_positions: ['D'] })),
+    ];
+    const midfielders = [
+      createPlayer({ name: 'LM Excluded', group: 'rotational', general_positions: ['M'], primary_positions: ['LM'], forbidden_positions: ['LM'] }),
+      ...['M1', 'M2', 'M3'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['M'] })),
+    ];
+    const players = [
+      ...defenders,
+      ...midfielders,
+      ...['F1', 'F2'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['F'], primary_positions: ['F'] })),
+      createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+    ];
+    const result = generateSchedule({ total_blocks: 5, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(result.timeline.flatMap((block) => ['LCB', 'CB', 'RCB'].map((slot) => block.positions[slot])).filter((name) => name === 'CB Excluded')).toEqual([]);
+    expect(result.timeline.flatMap((block) => ['LM'].map((slot) => block.positions[slot])).filter((name) => name === 'LM Excluded')).toEqual([]);
+    expect(result.timeline.flatMap((block) => ['LB', 'RB', 'RM', 'LCM', 'RCM'].map((slot) => block.positions[slot]))).toEqual(expect.arrayContaining(['CB Excluded', 'LM Excluded']));
   });
 
   it('reserves half capacity for dual-role goalkeeper assignments', () => {
@@ -694,6 +765,36 @@ describe('quota fairness and controlled coverage', () => {
     expect(positionCapacityWarnings('4-3-3', players)).toContain('Preflight: only 3 available D players can cover 4 D slots.');
   });
 
+  it('recommends eligible backup-position candidates by capacity and name', () => {
+    const unavailablePlayer = createPlayer({ name: 'Unavailable Player', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'] });
+    unavailablePlayer.available = false;
+    const players = [
+      createPlayer({ name: 'Eligible Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] }),
+      createPlayer({ name: 'High Capacity', group: 'core', general_positions: ['M'], primary_positions: ['CM'] }),
+      createPlayer({ name: 'Alpha Capacity', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'] }),
+      createPlayer({ name: 'Zulu Capacity', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'] }),
+      createPlayer({ name: 'Already Backup', group: 'rotational', general_positions: ['M'], backup_positions: ['D'], primary_positions: ['CM'] }),
+      createPlayer({ name: 'Dedicated Keeper', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+      createPlayer({ name: 'Forbidden Player', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'], forbidden_positions: ['D'] }),
+      unavailablePlayer,
+    ];
+
+    expect(positionCapacityDeficits('2-0-0', players, 10)).toEqual([
+      { position: 'D', candidates: ['High Capacity', 'Alpha Capacity', 'Zulu Capacity'] },
+    ]);
+  });
+
+  it('reports an empty candidate list and multiple position deficits', () => {
+    const onlyDefender = createPlayer({ name: 'Only Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] });
+
+    expect(positionCapacityDeficits('2-0-0', [onlyDefender], 10)).toEqual([{ position: 'D', candidates: [] }]);
+    expect(positionCapacityDeficits('1-1-1', [], 10)).toEqual([
+      { position: 'D', candidates: [] },
+      { position: 'M', candidates: [] },
+      { position: 'F', candidates: [] },
+    ]);
+  });
+
   it('reports infeasible fixed-roster 11v11 capacity', () => {
     const testCase = fingerprintCases.find(({ id }) => id === '11v11-position-flexibility');
     if (!testCase) throw new Error('11v11 fingerprint fixture is missing.');
@@ -990,6 +1091,64 @@ describe('quota fairness and controlled coverage', () => {
     expect(metrics.emergency_assignments).toBe(0);
   });
 
+  it('scores equivalent central and striker slots as primary assignments', () => {
+    const roster = [
+      createPlayer({ name: 'Central Midfielder', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'] }),
+      createPlayer({ name: 'Central Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] }),
+      createPlayer({ name: 'Striker', group: 'rotational', general_positions: ['F'], primary_positions: ['ST'] }),
+    ];
+    const block: ScheduleBlock = {
+      GK: '', D: ['Central Defender'], M: ['Central Midfielder'], F: ['Striker'], bench: [],
+      positions: { LCB: 'Central Defender', RCM: 'Central Midfielder', CF: 'Striker' },
+    };
+
+    const metrics = calculateMovementMetrics([block], 1, roster, { D: ['LCB'], M: ['RCM'], F: ['CF'] });
+
+    expect(metrics.primary_assignments).toBe(3);
+    expect(metrics.general_assignments).toBe(0);
+  });
+
+  it('surfaces slot-only backups to their position group without widening slot assignment', () => {
+    const slotBackup = createPlayer({ name: 'Right Back Backup', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['RB'] });
+
+    expect(backupEligiblePlayers([slotBackup], 'D')).toEqual([slotBackup]);
+    expect(backupEligiblePlayers([slotBackup], 'M')).toEqual([]);
+    expect(canCoverSlot(slotBackup, 'RB', 'D')).toBe(true);
+    expect(canCoverSlot(slotBackup, 'LB', 'D')).toBe(false);
+  });
+
+  it('uses a slot-only right-back backup to complete a defender group', () => {
+    const players = [
+      ...['D1', 'D2', 'D3'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['D'], primary_positions: ['D'] })),
+      createPlayer({ name: 'Right Back Backup', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['RB'] }),
+      ...['M1', 'M2', 'M3', 'M4'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['M'] })),
+      ...['F1', 'F2'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['F'], primary_positions: ['F'] })),
+      createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+    ];
+    const result = generateSchedule({ total_blocks: 1, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(result.errors).toEqual([]);
+    expect(result.timeline[0].positions.RB).toBe('Right Back Backup');
+  });
+
+  it('ranks primary group players ahead of general group players', () => {
+    const primaryDefender = createPlayer({ name: 'Primary Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['RB'] });
+    const generalDefender = createPlayer({ name: 'General Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] });
+
+    expect(positionalPriority(primaryDefender, 'D')).toBeLessThan(positionalPriority(generalDefender, 'D'));
+  });
+
+  it('starts a primary defender before a general defender in group planning', () => {
+    const players = [
+      createPlayer({ name: 'StarRB', group: 'rotational', general_positions: ['D'], primary_positions: ['RB'] }),
+      createPlayer({ name: 'General Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] }),
+      createPlayer({ name: 'GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] }),
+    ];
+    const result = generateSchedule({ total_blocks: 2, formation: '1-0', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
+    expect(result.timeline[0].D).toContain('StarRB');
+  });
+
   it('uses positional eligibility only when emergency mode is active', () => {
     const roster = [createPlayer({ name: 'Defender', group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] })];
     const block: ScheduleBlock = { GK: '', D: [], M: ['Defender'], F: [], bench: [], positions: { CM: 'Defender' } };
@@ -1051,6 +1210,28 @@ describe('quota fairness and controlled coverage', () => {
     const after = calculateMovementMetrics(timeline, 6, roster, slots);
     expect(before.exact_slot_switches).toBe(1);
     expect(after.exact_slot_switches).toBe(0);
+  });
+
+  it('prioritizes primary-central placement over exact-slot switches', () => {
+    const primary = createPlayer({ name: 'Primary', group: 'rotational', general_positions: ['D'], primary_positions: ['RB'] });
+    const general = createPlayer({ name: 'General', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] });
+    const slots = { D: ['LB', 'RB'], M: [], F: [] };
+    const block = (positions: Record<string, string>): ScheduleBlock => ({
+      GK: '', D: [positions.LB, positions.RB], M: [], F: [], bench: [], positions,
+    });
+    const timeline = [
+      block({ LB: 'Primary', RB: 'General' }),
+      block({ LB: 'Primary', RB: 'General' }),
+      block({ LB: 'Primary', RB: 'General' }),
+      block({ LB: 'Primary', RB: 'General' }),
+    ];
+
+    optimizeExactSlotSwitches({ total_blocks: 4 } as Game, [primary, general], timeline, slots, 2);
+
+    const metrics = calculateMovementMetrics(timeline, 4, [primary, general], slots);
+    expect(timeline[1].positions).toMatchObject({ LB: 'General', RB: 'Primary' });
+    expect(metrics.primary_assignments).toBe(3);
+    expect(metrics.exact_slot_switches).toBe(2);
   });
 
   it('estimates additional eligible players from missing slots by half', () => {
@@ -1372,6 +1553,17 @@ describe('ten-game season availability simulation', () => {
     const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
 
     expect(performance.now() - started).toBeLessThan(5000);
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
+  }, 20000);
+
+  it('handles ANY-general candidates without late-block holes', () => {
+    const players = [
+      ...Array.from({ length: 15 }, (_, index) => ({ name: `Any ${index + 1}`, group: 'rotational' as const, general_positions: ['ANY'], primary_positions: ['ANY'] })),
+      { name: 'GK', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ].map(createPlayer);
+    const result = generateSchedule({ total_blocks: 10, formation: '4-4-2', first_half_gk: 'GK', second_half_gk: 'GK' }, players);
+
     expect(result.timeline).toHaveLength(10);
     expect(result.timeline.flatMap((block) => Object.values(block.positions))).not.toContain('UNASSIGNED');
   }, 20000);
