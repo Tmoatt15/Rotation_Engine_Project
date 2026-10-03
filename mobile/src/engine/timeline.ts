@@ -847,6 +847,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   fairnessOrderByProfile.forEach((names) => names.sort((left, right) => left.localeCompare(right)));
   const fairnessRank = (player: Player, blockIndex: number): number => {
     const names = fairnessOrderByProfile.get(fairnessProfileKey(player)) ?? [player.name];
+    if (CORE_GROUPS.has(player.group) && names.length <= 2) return 0;
     const index = names.indexOf(player.name);
     return (index - blockIndex + names.length) % names.length;
   };
@@ -962,7 +963,17 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         const capacity = candidates.reduce((total, player) => {
           const remainingHalf = Math.max(0, player.max_blocks_per_half - (postChoice.half.get(player.name)?.[half] ?? 0));
           const remainingTotal = Math.max(0, player.hard_maximum_blocks - (postChoice.raw.get(player.name) ?? 0));
-          return total + Math.min(futureIndices.length, remainingHalf, remainingTotal);
+          const remainingField = assignedGoalkeepers.has(player.name)
+            ? Math.max(0, player.gk_field_maximum_blocks - (postChoice.field.get(player.name) ?? 0))
+            : remainingTotal;
+          const eligibleFutureBlocks = futureIndices.filter((index) => {
+            const plannedBackupNames = new Set(backupBlocks[position].get(index) ?? []);
+            const reservedCoreNames = new Set(coreReservations.byGroupAndBlock[position][index]);
+            return player.available && !reserved[index].has(player.name)
+              && (!plannedBackupNames.size || normalCandidates.includes(player) || plannedBackupNames.has(player.name))
+              && (!coreGroups.has(player.group) || reservedCoreNames.has(player.name));
+          }).length;
+          return total + Math.min(eligibleFutureBlocks, remainingHalf, remainingTotal, remainingField);
         }, 0);
         if (capacity < formation[position] * futureIndices.length) return false;
       }
