@@ -591,7 +591,7 @@
         ]
       }
     ],
-    "fingerprint": "0a14112cbe10dfbea46522694a076c638be50ba24e3ee8b6a6922adb26b00215",
+    "fingerprint": "4e9d32ace1ede8676cd295cc962b7b34ef87813569450c08ce93e06b6dd422d4",
     "spec_verified": true,
     "happy_path": true,
     "expected_goalkeeper_blocks": {
@@ -943,7 +943,7 @@
         ]
       }
     ],
-    "fingerprint": "c2402ca26b32fda86c9ac1eb73ff80bee0c8ff6d01d7b571746c7caa799ac109",
+    "fingerprint": "8cad9c43a286d70b5a584ebfa72173a60d1f9ab0c2f371e67a3672c09d926030",
     "spec_verified": true,
     "happy_path": true,
     "expected_goalkeeper_blocks": {
@@ -1150,7 +1150,7 @@
         ]
       }
     ],
-    "fingerprint": "7a20957a2b687ff9e638914bbdd9ca1c153ef8017abff8959c0203f2e2b9e7bf",
+    "fingerprint": "881cf07a802685fe855fb8f39fa4c39619b2182c0914fc9e5d5c6b57d6f03272",
     "spec_verified": true,
     "expected_goalkeeper_blocks": {
       "Dual GK": 5,
