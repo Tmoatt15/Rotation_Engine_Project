@@ -987,11 +987,11 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             ? Math.max(0, player.gk_field_maximum_blocks - (postChoice.field.get(player.name) ?? 0))
             : remainingTotal;
           const eligibleFutureBlocks = futureIndices.filter((index) => {
-            const plannedBackupNames = new Set(backupBlocks[position].get(index) ?? []);
-            const reservedCoreNames = new Set(coreReservations.byGroupAndBlock[position][index]);
+            const plannedBackupNames = backupBlocks[position].get(index) ?? [];
+            const reservedCoreNames = coreReservations.byGroupAndBlock[position][index];
             return player.available && !reserved[index].has(player.name)
-              && (!plannedBackupNames.size || normalCandidates.includes(player) || plannedBackupNames.has(player.name))
-              && (!coreGroups.has(player.group) || reservedCoreNames.has(player.name));
+              && (!plannedBackupNames.length || normalCandidates.includes(player) || plannedBackupNames.includes(player.name))
+              && (!coreGroups.has(player.group) || reservedCoreNames.includes(player.name));
           }).length;
           return total + Math.min(eligibleFutureBlocks, remainingHalf, remainingTotal, remainingField);
         }, 0);
@@ -1020,11 +1020,11 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             ? Math.max(0, player.gk_field_maximum_blocks - (state.field.get(player.name) ?? 0))
             : remainingTotal;
           const eligibleBlocks = futureIndices.filter((index) => {
-            const plannedBackupNames = new Set(backupBlocks[position].get(index) ?? []);
-            const reservedCoreNames = new Set(coreReservations.byGroupAndBlock[position][index]);
+            const plannedBackupNames = backupBlocks[position].get(index) ?? [];
+            const reservedCoreNames = coreReservations.byGroupAndBlock[position][index];
             return player.available && !reserved[index].has(player.name)
-              && (!plannedBackupNames.size || normalCandidates.includes(player) || plannedBackupNames.has(player.name))
-              && (!coreGroups.has(player.group) || reservedCoreNames.has(player.name))
+              && (!plannedBackupNames.length || normalCandidates.includes(player) || plannedBackupNames.includes(player.name))
+              && (!coreGroups.has(player.group) || reservedCoreNames.includes(player.name))
               && slots.some((slot) => eligibleNamesBySlot.get(slot)?.has(player.name));
           }).length;
           return total + Math.min(eligibleBlocks, remainingHalf, remainingTotal, remainingField);
@@ -1035,12 +1035,12 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           return false;
         }
       }
-      const plannedBackupNames = new Set(backupBlocks[position].get(future) ?? []);
-      const reservedCoreNames = new Set(coreReservations.byGroupAndBlock[position][future]);
+      const plannedBackupNames = backupBlocks[position].get(future) ?? [];
+      const reservedCoreNames = coreReservations.byGroupAndBlock[position][future];
       const available = candidates.filter((player) => {
         const half = blockHalf(future, game.total_blocks);
-        const normalOrPlannedBackup = !plannedBackupNames.size || normalCandidates.includes(player) || plannedBackupNames.has(player.name);
-        const coreAllowed = !coreGroups.has(player.group) || reservedCoreNames.has(player.name);
+        const normalOrPlannedBackup = !plannedBackupNames.length || normalCandidates.includes(player) || plannedBackupNames.includes(player.name);
+        const coreAllowed = !coreGroups.has(player.group) || reservedCoreNames.includes(player.name);
         return player.available && !reserved[future].has(player.name) && normalOrPlannedBackup && coreAllowed &&
           !player.forbidden_positions.includes(position) &&
           (state.raw.get(player.name) ?? 0) < player.hard_maximum_blocks &&
@@ -1100,18 +1100,18 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const backupCandidates = backupEligiblePlayers(roster, position);
     const candidates = [...normalCandidates, ...backupCandidates.filter((player) => !normalCandidates.includes(player))];
     for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks; blockIndex += 1) {
-      const plannedBackupNames = new Set(backupBlocks[position].get(blockIndex) ?? []);
-      const reservedCoreNames = new Set(coreReservations.byGroupAndBlock[position][blockIndex]);
+      const plannedBackupNames = backupBlocks[position].get(blockIndex) ?? [];
+      const reservedCoreNames = coreReservations.byGroupAndBlock[position][blockIndex];
       const available = candidates.filter((player) => usable(player, position, blockIndex)
-        && (!plannedBackupNames.size || normalCandidates.includes(player) || plannedBackupNames.has(player.name))
-        && (!coreGroups.has(player.group) || reservedCoreNames.has(player.name)));
+        && (!plannedBackupNames.length || normalCandidates.includes(player) || plannedBackupNames.includes(player.name))
+        && (!coreGroups.has(player.group) || reservedCoreNames.includes(player.name)));
       const ordered = [...available].sort((left, right) => {
         if (shortageMode) return compareShortagePlayers(left, right, previous, blockHalf(blockIndex, game.total_blocks));
         const leftKey = playerKey(left, position, blockIndex, previous); const rightKey = playerKey(right, position, blockIndex, previous);
         for (let index = 0; index < leftKey.length - 1; index += 1) if (leftKey[index] !== rightKey[index]) return (leftKey[index] as number) - (rightKey[index] as number);
         return String(leftKey[leftKey.length - 1]).localeCompare(String(rightKey[rightKey.length - 1]));
       });
-      const requiredBackups = ordered.filter((player) => plannedBackupNames.has(player.name) || reservedCoreNames.has(player.name));
+      const requiredBackups = ordered.filter((player) => plannedBackupNames.includes(player.name) || reservedCoreNames.includes(player.name));
       const requiredCount = Math.max(0, needed - requiredBackups.length);
       const optional = ordered.filter((player) => !requiredBackups.includes(player));
       const boundedCombinations = (items: Player[], count: number, limit: number): Player[][] => {
