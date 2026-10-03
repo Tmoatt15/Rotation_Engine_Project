@@ -48,6 +48,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test:engine": "vitest run src/engine src/live-schedule.test.ts src/coverage.test.ts",
+    "benchmark:engine": "tsx scripts/benchmark-engine.ts",
     "fingerprints:update": "tsx scripts/update-fingerprints.ts"
   },
   "private": true
