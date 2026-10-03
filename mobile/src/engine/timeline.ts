@@ -1455,6 +1455,22 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       visited += 1;
       if (visited > 10000) return false;
       if (index === indices.length) return true;
+      const remainingIndices = indices.slice(index);
+      const requiredSlots = remainingIndices.length * formation[position];
+      const availableCapacity = roster.reduce((total, player) => {
+        if (!canCoverGroup(game, roster, player.name, position)) return total;
+        const eligibleByHalf = ([0, 1] as const).map((candidateHalf) => remainingIndices.filter((blockIndex) => blockHalf(blockIndex, game.total_blocks) === candidateHalf
+          && usable(player, position, blockIndex)).length);
+        const eligibleTotal = eligibleByHalf[0] + eligibleByHalf[1];
+        const totalRemaining = game.disable_maximum_limits
+          ? eligibleTotal
+          : Math.max(0, player.hard_maximum_blocks - (rawCounts.get(player.name) ?? 0));
+        const halfRemaining = game.disable_maximum_limits
+          ? eligibleTotal
+          : eligibleByHalf.reduce((capacity, eligible, candidateHalf) => capacity + Math.min(eligible, Math.max(0, player.max_blocks_per_half - (halfCounts.get(player.name)?.[candidateHalf as 0 | 1] ?? 0))), 0);
+        return total + Math.min(eligibleTotal, totalRemaining, halfRemaining);
+      }, 0);
+      if (availableCapacity < requiredSlots) return false;
       const blockIndex = indices[index];
       const assignedElsewhere = new Set([goalkeeperNames[blockIndex], ...positions
         .filter((group) => group !== position)
