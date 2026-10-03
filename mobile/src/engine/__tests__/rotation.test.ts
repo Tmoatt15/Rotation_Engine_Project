@@ -926,6 +926,24 @@ describe('quota fairness and controlled coverage', () => {
     }
   });
 
+  it('generates a later season game with prior history and mixed eligibility', () => {
+    const players = seasonSimulationRoster().map(createPlayer);
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      season_total_games: 10,
+      season_game_number: 3,
+      season_player_blocks: Object.fromEntries(players.map((player) => [player.name, player.name.startsWith('Core') ? 16 : 8])),
+      season_position_starts: Object.fromEntries(players.map((player) => [player.name, { D: 1, M: 1, F: 1 }])),
+      season_goalkeeper_starts: { Cameron: 1, Eitan: 1 },
+    }, players);
+
+    expect(result.timeline).toHaveLength(10);
+    expect(result.errors).not.toContain('undefined is not a function');
+  });
+
   it('spreads core rests through the middle window and staggers substitutions', { timeout: 60000 }, () => {
     const players = [
       ...Array.from({ length: 8 }, (_, index) => createPlayer({

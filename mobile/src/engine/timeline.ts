@@ -3,6 +3,12 @@ import { ANY_POSITION, backupCoversPosition, backupEligiblePlayers, CENTRAL_DEFE
 
 export type FormationCounts = { D: number; M: number; F: number; _shape?: string };
 
+function flatMapCompat<T, U>(values: T[], mapper: (value: T, index: number, values: T[]) => U[]): U[] {
+  const result: U[] = [];
+  values.forEach((value, index) => result.push(...mapper(value, index, values)));
+  return result;
+}
+
 function halfLength(totalBlocks: number): number {
   return Math.ceil(totalBlocks / 2);
 }
@@ -53,14 +59,17 @@ export function chooseGk(game: Game, roster: Player[], blockNumber: number): Pla
 
 function goalkeeperSelectionErrors(game: Game, roster: Player[]): string[] {
   if (game.has_goalkeeper === false) return [];
-  return ([['first half', game.first_half_gk ?? game.gk_assignment], ['second half', game.second_half_gk ?? game.gk_assignment]] as const).flatMap(([half, name]) => {
-    if (!name?.trim()) return [`Coach must select a goalkeeper for the ${half}.`];
+  return ([['first half', game.first_half_gk ?? game.gk_assignment], ['second half', game.second_half_gk ?? game.gk_assignment]] as const).reduce<string[]>((errors, [half, name]) => {
+    if (!name?.trim()) {
+      errors.push(`Coach must select a goalkeeper for the ${half}.`);
+      return errors;
+    }
     const player = roster.find((candidate) => candidate.name.trim().toLowerCase() === name.trim().toLowerCase());
-    if (!player) return [`The selected ${half} goalkeeper '${name}' is not on the roster.`];
-    if (!player.available) return [`The selected ${half} goalkeeper '${name}' is unavailable.`];
-    if (!player.primary_positions.some((position) => position.toUpperCase() === 'GK')) return [`The selected ${half} goalkeeper '${name}' is not GK-eligible.`];
-    return [];
-  });
+    if (!player) errors.push(`The selected ${half} goalkeeper '${name}' is not on the roster.`);
+    else if (!player.available) errors.push(`The selected ${half} goalkeeper '${name}' is unavailable.`);
+    else if (!player.primary_positions.some((position) => position.toUpperCase() === 'GK')) errors.push(`The selected ${half} goalkeeper '${name}' is not GK-eligible.`);
+    return errors;
+  }, []);
 }
 
 function resetPlayerStats(player: Player): void {
@@ -255,7 +264,7 @@ export function calculateMovementMetrics(
 ): MovementMetrics {
   const groupsBySlot = slots ?? { D: [], M: [], F: [] };
   const slotGroup = new Map<string, PositionGroup>([
-    ...FIELD_GROUPS.flatMap((group) => groupsBySlot[group].map((slot) => [slot, group] as const)),
+    ...flatMapCompat(FIELD_GROUPS, (group) => groupsBySlot[group].map((slot) => [slot, group] as const)),
     ['GK', 'GK'],
   ]);
   const metrics: MovementMetrics = {
@@ -408,7 +417,7 @@ export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], fo
   const fieldHalfTotals = new Map<string, [number, number]>();
   for (const [index, block] of timeline.entries()) {
     const blockNumber = index + 1;
-    const expectedSlots = (block.GK ? ['GK'] : []).concat(FIELD_GROUPS.flatMap((group) => slots[group]));
+    const expectedSlots = (block.GK ? ['GK'] : []).concat(flatMapCompat(FIELD_GROUPS, (group) => slots[group]));
     const assigned = expectedSlots.map((slot) => block.positions?.[slot] ?? '').filter(Boolean);
     const duplicateCheck = assigned.filter((name) => name !== 'UNASSIGNED' && name !== 'NO GK AVAILABLE');
     if (new Set(duplicateCheck).size !== duplicateCheck.length) errors.push(`Block ${blockNumber}: duplicate players are assigned on the field.`);
@@ -457,7 +466,7 @@ export function estimateAdditionalPlayersNeeded(
   const labels: Record<'D' | 'M' | 'F', string> = { D: 'Defender', M: 'Midfielder', F: 'Forward' };
   const standardMaximum = Math.max(1, Math.ceil(totalBlocks * 0.8));
   const standardHalfMaximum = Math.max(1, Math.ceil(standardMaximum / 2));
-  return FIELD_GROUPS.flatMap((group) => {
+  return flatMapCompat(FIELD_GROUPS, (group) => {
     const [firstHalfMissing, secondHalfMissing] = missingByGroup[group];
     if (!firstHalfMissing && !secondHalfMissing) return [];
     const neededForHalves = Math.max(Math.ceil(firstHalfMissing / standardHalfMaximum), Math.ceil(secondHalfMissing / standardHalfMaximum));
@@ -503,7 +512,7 @@ function endpointAssignmentTier(player: Player, slot: string, group: PositionGro
 
 function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalkeeperName: string, seasonStarts: Record<string, Record<string, number>> = {}, preferredNames = new Set<string>()): EndpointLineup {
   const slots = formationSlots(formation);
-  const fieldSlots = FIELD_GROUPS.flatMap((group) => slots[group].map((slot) => ({ group, slot })));
+  const fieldSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group].map((slot) => ({ group, slot })));
   const corePlayers = roster.filter((player) => player.available && CORE_GROUPS.has(player.group) && player.name !== goalkeeperName);
   let best: { assignment: Map<string, { group: PositionGroup; slot: string; tier: number }>; score: [number, number, number, number, string] } | null = null;
 
@@ -547,7 +556,7 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
   for (const [name, value] of selectedAssignment) { groups[value.group].push(name); assignedCore.add(name); }
   const used = new Set(assignedCore);
   const usedSlots = new Set([...selectedAssignment.values()].map((value) => value.slot));
-  const remainingSlots = FIELD_GROUPS.flatMap((group) => slots[group]
+  const remainingSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group]
     .filter((slot) => !usedSlots.has(slot))
     .map((slot) => ({ group, slot })));
   const nonCore = roster
@@ -1047,7 +1056,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           (state.half.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half &&
           (!assignedGoalkeepers.has(player.name) || (state.field.get(player.name) ?? 0) < player.gk_field_maximum_blocks);
       });
-      const requiredBackups = available.filter((player) => plannedBackupNames.has(player.name) || reservedCoreNames.has(player.name));
+      const requiredBackups = available.filter((player) => plannedBackupNames.includes(player.name) || reservedCoreNames.includes(player.name));
       const choices = assignableChoices(available, new Set(requiredBackups.map((player) => player.name)), 32);
       for (const choice of choices) {
         if (search(future + 1, updateState(state, choice, future))) return true;
@@ -1219,7 +1228,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
 
   const repairCoreReservations = (start: number, end: number): void => {
     for (let blockIndex = start; blockIndex < end; blockIndex += 1) {
-      const assigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((position) => plans[position][blockIndex])]);
+      const assigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (position) => plans[position][blockIndex])]);
       for (const position of positions) {
         for (const coreName of coreReservations.byGroupAndBlock[position][blockIndex]) {
           if (plans[position][blockIndex].includes(coreName)) continue;
@@ -1307,7 +1316,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       if (blockIndex === 0 || blockIndex === game.total_blocks - 1) {
         for (const position of positions) {
           const protectedNames = new Set(coreReservations.byGroupAndBlock[position][blockIndex]);
-          const usedNames = new Set(positions.flatMap((candidatePosition) => plans[candidatePosition][blockIndex]));
+          const usedNames = new Set(flatMapCompat(positions, (candidatePosition) => plans[candidatePosition][blockIndex]));
           const backupCandidates = backupEligiblePlayers(roster, position)
             .filter((player) => !coreGroups.has(player.group) && !usedNames.has(player.name))
             .sort((left, right) => left.name.localeCompare(right.name));
@@ -1336,7 +1345,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   repairCoreReservations(0, game.total_blocks);
 
   const coreRestScore = (blockIndex: number): number => {
-    const assigned = new Set(positions.flatMap((position) => plans[position][blockIndex]));
+    const assigned = new Set(flatMapCompat(positions, (position) => plans[position][blockIndex]));
     const counts = new Map<PositionGroup, number>([['D', 0], ['M', 0], ['F', 0]]);
     for (const player of roster) if (player.available && coreGroups.has(player.group) && !assigned.has(player.name)) {
       for (const group of player.general_positions) if (group === 'D' || group === 'M' || group === 'F') counts.set(group, (counts.get(group) ?? 0) + 1);
@@ -1349,7 +1358,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     while (improved) {
       improved = false;
       const before = coreRestScore(blockIndex);
-      const assigned = new Set(positions.flatMap((position) => plans[position][blockIndex]));
+      const assigned = new Set(flatMapCompat(positions, (position) => plans[position][blockIndex]));
       for (const position of positions) {
         for (const currentName of [...plans[position][blockIndex]]) {
           const current = roster.find((player) => player.name === currentName);
@@ -1384,7 +1393,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const finalBlock = game.total_blocks - 1;
   const secondHalfStart = midpoint;
   if (startBlock - 1 <= finalBlock) {
-    const finalAssigned = new Set([goalkeeperNames[finalBlock], ...positions.flatMap((position) => plans[position][finalBlock])]);
+    const finalAssigned = new Set([goalkeeperNames[finalBlock], ...flatMapCompat(positions, (position) => plans[position][finalBlock])]);
     for (const position of positions) {
       const finalPlayers = plans[position][finalBlock];
       for (let finalSlot = 0; finalSlot < finalPlayers.length; finalSlot += 1) {
@@ -1392,7 +1401,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         if (!finalPlayer || coreGroups.has(finalPlayer.group)) continue;
         let swapped = false;
         for (let blockIndex = secondHalfStart; blockIndex < finalBlock && !swapped; blockIndex += 1) {
-          const sourceAssigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((group) => plans[group][blockIndex])]);
+          const sourceAssigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (group) => plans[group][blockIndex])]);
           const source = plans[position][blockIndex];
           for (let sourceSlot = 0; sourceSlot < source.length; sourceSlot += 1) {
             const core = playersByName.get(source[sourceSlot]);
@@ -1474,7 +1483,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       const blockIndex = indices[index];
       const assignedElsewhere = new Set([goalkeeperNames[blockIndex], ...positions
         .filter((group) => group !== position)
-        .flatMap((group) => plans[group][blockIndex])]);
+        .map((group) => plans[group][blockIndex]).reduce<string[]>((all, names) => all.concat(names), [])]);
       const candidates = roster
         .filter((player) => player.available && !assignedElsewhere.has(player.name)
           && canCoverGroup(game, roster, player.name, position)
@@ -1688,7 +1697,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     if (plans[target][blockIndex].length >= formation[target]) return true;
     if (depth > positions.length) return false;
     const targetSlots = formationSlots(formation)[target];
-    const used = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((group) => plans[group][blockIndex])]);
+    const used = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (group) => plans[group][blockIndex])]);
     const directCandidates = roster
       .filter((player) => !used.has(player.name) && canCoverGroup(game, roster, player.name, target) && usable(player, target, blockIndex))
       .sort((left, right) => shortageMode
@@ -1730,7 +1739,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const half = blockHalf(blockIndex, game.total_blocks);
     for (const position of positions) {
       while (plans[position][blockIndex].length < formation[position]) {
-        const assigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((group) => plans[group][blockIndex])]);
+        const assigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (group) => plans[group][blockIndex])]);
         const emergency = needsEmergencyFieldAssignment(game, roster, formation, goalkeeperNames[blockIndex] ?? '');
         const eligible = new Set([
           ...eligiblePlayers(roster, position),
@@ -1757,7 +1766,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   for (const position of positions) {
     for (let blockIndex = game.total_blocks - 1; blockIndex >= Math.max(0, startBlock - 1); blockIndex -= 1) {
       while (plans[position][blockIndex].length < formation[position]) {
-        const targetAssigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((group) => plans[group][blockIndex])]);
+        const targetAssigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (group) => plans[group][blockIndex])]);
         const candidates = roster.filter((candidate) => !targetAssigned.has(candidate.name)
           && canCoverGroup(game, roster, candidate.name, position)
           && candidate.name !== goalkeeperNames[blockIndex]);
@@ -1765,7 +1774,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         for (const candidate of candidates) {
           const sourceIndex = plans[position].findIndex((players, index) => (shortageMode ? index >= 0 : index > 0) && index < blockIndex && players.includes(candidate.name));
           if (sourceIndex < 0) continue;
-          const sourceAssigned = new Set([goalkeeperNames[sourceIndex], ...positions.flatMap((group) => plans[group][sourceIndex])]);
+          const sourceAssigned = new Set([goalkeeperNames[sourceIndex], ...flatMapCompat(positions, (group) => plans[group][sourceIndex])]);
           const sourcePlayers = plans[position][sourceIndex];
           for (const replacement of roster) {
             if (replacement.name === candidate.name || sourceAssigned.has(replacement.name) || replacement.name === goalkeeperNames[sourceIndex]) continue;
@@ -1808,11 +1817,11 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     for (let targetBlock = game.total_blocks - 1; targetBlock >= Math.max(0, startBlock - 1); targetBlock -= 1) {
       while (plans[targetPosition][targetBlock].length < formation[targetPosition]) {
         let repaired = false;
-        const targetAssigned = new Set([goalkeeperNames[targetBlock], ...positions.flatMap((group) => plans[group][targetBlock])]);
+        const targetAssigned = new Set([goalkeeperNames[targetBlock], ...flatMapCompat(positions, (group) => plans[group][targetBlock])]);
         for (const sourcePosition of positions) {
           if (sourcePosition === targetPosition) continue;
           for (let sourceBlock = Math.max(1, startBlock - 1); sourceBlock < targetBlock && !repaired; sourceBlock += 1) {
-            const sourceAssigned = new Set([goalkeeperNames[sourceBlock], ...positions.flatMap((group) => plans[group][sourceBlock])]);
+            const sourceAssigned = new Set([goalkeeperNames[sourceBlock], ...flatMapCompat(positions, (group) => plans[group][sourceBlock])]);
             for (const candidateName of [...plans[sourcePosition][sourceBlock]]) {
               const candidate = playersByName.get(candidateName);
               if (!candidate || targetAssigned.has(candidateName) || !canCoverGroup(game, roster, candidateName, targetPosition)) continue;
@@ -1859,7 +1868,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       let repaired = false;
       for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks && !repaired; blockIndex += 1) {
         if (blockHalf(blockIndex, game.total_blocks) === goalkeeperHalf) continue;
-        const assigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((group) => plans[group][blockIndex])]);
+        const assigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (group) => plans[group][blockIndex])]);
         if (assigned.has(goalkeeper.name)) continue;
         for (const position of positions) {
           if (!canCoverGroup(game, roster, goalkeeper.name, position) || !usable(goalkeeper, position, blockIndex)) continue;
@@ -1903,7 +1912,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       while (plannedCount(deficit.name) < deficit.hard_minimum_blocks) {
         let repaired = false;
         for (let blockIndex = Math.max(1, startBlock - 1); blockIndex < game.total_blocks - 1 && !repaired; blockIndex += 1) {
-          const assignedElsewhere = new Set(positions.flatMap((group) => plans[group][blockIndex]));
+          const assignedElsewhere = new Set(flatMapCompat(positions, (group) => plans[group][blockIndex]));
           if (assignedElsewhere.has(deficit.name)) continue;
           const current = plans[position][blockIndex];
           for (const donorName of [...current]) {
@@ -1955,7 +1964,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const endpointSolutions = new Map<number, EndpointLineup>();
   for (const blockIndex of endpointBlocks) {
     if (blockIndex < Math.max(0, startBlock - 1) || blockIndex >= game.total_blocks) continue;
-    const preferredNames = new Set(positions.flatMap((position) => plans[position][blockIndex]));
+    const preferredNames = new Set(flatMapCompat(positions, (position) => plans[position][blockIndex]));
     const solved = solveEndpointLineup(roster, formation, goalkeeperNames[blockIndex], game.season_position_starts, preferredNames);
     endpointSolutions.set(blockIndex, solved);
     plans.D[blockIndex] = solved.groups.D;
@@ -1973,7 +1982,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       for (let removed = 0; removed < excess; removed += 1) {
         let replaced = false;
         for (let priorBlock = 1; priorBlock < game.total_blocks - 1 && !replaced; priorBlock += 1) {
-          const assigned = new Set([goalkeeperNames[priorBlock], ...positions.flatMap((position) => plans[position][priorBlock])]);
+          const assigned = new Set([goalkeeperNames[priorBlock], ...flatMapCompat(positions, (position) => plans[position][priorBlock])]);
           for (const position of positions) {
             const coreIndex = plans[position][priorBlock].indexOf(coreName);
             if (coreIndex < 0) continue;
@@ -2003,7 +2012,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
                 const candidate = playersByName.get(candidateName);
                 if (!candidate || candidate.name === coreName || !canCoverGroup(game, roster, candidate.name, position)) continue;
                 const sourceIndex = plans[otherPosition][priorBlock].indexOf(candidate.name);
-                const sourceAssigned = new Set([goalkeeperNames[priorBlock], ...positions.flatMap((candidatePosition) => plans[candidatePosition][priorBlock])]);
+                const sourceAssigned = new Set([goalkeeperNames[priorBlock], ...flatMapCompat(positions, (candidatePosition) => plans[candidatePosition][priorBlock])]);
                 const sourceReplacement = roster
                   .filter((player) => player.available && player.name !== candidate.name
                     && player.name !== goalkeeperNames[priorBlock] && !sourceAssigned.has(player.name)
@@ -2045,7 +2054,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const replaceMiddleAssignment = (donorName: string, half: 0 | 1 | null): boolean => {
     for (const blockIndex of middleBlocks) {
       if (half !== null && blockHalf(blockIndex, game.total_blocks) !== half) continue;
-      const assigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((position) => plans[position][blockIndex])]);
+      const assigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (position) => plans[position][blockIndex])]);
       for (const position of positions) {
         const donorIndex = plans[position][blockIndex].indexOf(donorName);
         if (donorIndex < 0) continue;
@@ -2107,7 +2116,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     while (liveCount(deficit.name) < deficit.hard_minimum_blocks) {
       let repaired = false;
       for (const blockIndex of middleBlocks) {
-        const assigned = new Set([goalkeeperNames[blockIndex], ...positions.flatMap((position) => plans[position][blockIndex])]);
+        const assigned = new Set([goalkeeperNames[blockIndex], ...flatMapCompat(positions, (position) => plans[position][blockIndex])]);
         if (assigned.has(deficit.name)) continue;
         for (const position of positions) {
           const current = plans[position][blockIndex];
@@ -2339,7 +2348,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
               const isEndpoint = blockIndex === 0 || blockIndex === game.total_blocks - 1;
               if (isEndpoint && (!lowPlayer || !highPlayer || !CORE_GROUPS.has(lowPlayer.group) || CORE_GROUPS.has(highPlayer.group))) continue;
               const current = planned[group][blockIndex];
-              const blockAssigned = new Set(FIELD_GROUPS.flatMap((candidateGroup) => planned[candidateGroup][blockIndex]));
+              const blockAssigned = new Set(flatMapCompat(FIELD_GROUPS, (candidateGroup) => planned[candidateGroup][blockIndex]));
               if (!current.includes(highName) || blockAssigned.has(lowName)) continue;
               const replacement = current.map((name) => name === highName ? lowName : name);
               if (!completeExactAssignmentExists(roster, replacement, formationSlots(formation)[group], group)) continue;
@@ -2476,7 +2485,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
         for (const high of donors) {
           for (let blockIndex = 0; blockIndex < result.timeline.length; blockIndex += 1) {
             const block = result.timeline[blockIndex];
-            const fieldAssigned = new Set(FIELD_GROUPS.flatMap((group) => block[group]));
+            const fieldAssigned = new Set(flatMapCompat(FIELD_GROUPS, (group) => block[group]));
             if (fieldAssigned.has(low.name)) continue;
             const group = FIELD_GROUPS.find((candidateGroup) => block[candidateGroup].includes(high.name));
             if (!group || !canCoverGroup(game, roster, low.name, group)) continue;

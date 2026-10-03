@@ -39,7 +39,7 @@ export class SeasonSetup {
 
   constructor(settings: Pick<SeasonSettings, 'game_length_minutes' | 'game_format'> & Partial<SeasonSettings> & { total_blocks?: number; block_length_minutes?: number }) {
     if (settings.game_length_minutes <= 0) throw new Error('Game length must be greater than zero minutes.');
-    const gameFormat = String(settings.game_format).trim().toLowerCase().replaceAll(' ', '') as GameFormat;
+    const gameFormat = String(settings.game_format).trim().toLowerCase().replace(/ /g, '') as GameFormat;
     if (!(gameFormat in GAME_FORMATS)) throw new Error(`Game format must be one of: ${Object.keys(GAME_FORMATS).join(', ')}.`);
     if ((settings.total_blocks == null) === (settings.block_length_minutes == null)) throw new Error('Provide either total_blocks or block_length_minutes, not both.');
     const totalSeconds = Math.round(settings.game_length_minutes * 60);
@@ -86,7 +86,7 @@ export class SeasonSetup {
   get field_players(): number { return this.players_on_field - (this.has_goalkeeper ? 1 : 0); }
   get blocks_divide_evenly(): boolean { return this.block_seconds.every((seconds) => seconds === this.base_block_seconds); }
   get block_lengths_minutes(): number[] { return this.block_seconds.map((seconds) => seconds / 60); }
-  get extended_block_numbers(): number[] { return this.block_seconds.flatMap((seconds, index) => seconds === this.base_block_seconds ? [] : [index + 1]); }
+  get extended_block_numbers(): number[] { return this.block_seconds.reduce<number[]>((extended, seconds, index) => seconds === this.base_block_seconds ? extended : [...extended, index + 1], []); }
   get formation_options(): Formation[] { return FORMATIONS_BY_FORMAT[this.game_format]; }
 
   validate_formation(): string | null {
