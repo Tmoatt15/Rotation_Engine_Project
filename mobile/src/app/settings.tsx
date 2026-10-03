@@ -1,4 +1,5 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -184,6 +185,34 @@ export default function SettingsScreen() {
                   </View>
                 )}
 
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Playing time targets</Text>
+                  <Text style={styles.helperText}>How the scheduler shares playing time across player levels.</Text>
+                  <View style={styles.targetList}>
+                    <View style={styles.targetRow}>
+                      <View style={styles.targetHeading}>
+                        <Text style={styles.targetLabel}>Core</Text>
+                        <Text style={styles.targetBand}>70–80% playing time</Text>
+                      </View>
+                      <Text style={styles.targetDescription}>Your more experienced players. They start and finish games.</Text>
+                    </View>
+                    <View style={styles.targetRow}>
+                      <View style={styles.targetHeading}>
+                        <Text style={styles.targetLabel}>Rotational</Text>
+                        <Text style={styles.targetBand}>50–60% playing time</Text>
+                      </View>
+                      <Text style={styles.targetDescription}>Regular contributors who rotate through the lineup.</Text>
+                    </View>
+                    <View style={styles.targetRow}>
+                      <View style={styles.targetHeading}>
+                        <Text style={styles.targetLabel}>Developing</Text>
+                        <Text style={styles.targetBand}>40–50% playing time</Text>
+                      </View>
+                      <Text style={styles.targetDescription}>Newer players getting meaningful game time as they grow.</Text>
+                    </View>
+                  </View>
+                </View>
+
                 {!editing && (
                   <Pressable onPress={exportDiagnostics} disabled={exporting} style={[styles.exportButton, exporting && styles.disabledButton]} accessibilityRole="button">
                     <Text style={styles.exportButtonText}>{exporting ? 'Preparing snapshot...' : 'Share diagnostic snapshot'}</Text>
@@ -275,6 +304,11 @@ export default function SettingsScreen() {
                 {error && <Text style={styles.errorText}>{error}</Text>}
                   </>
                 )}
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>About</Text>
+                  <SummaryLine label="Version" value={Constants.expoConfig?.version ?? 'Unknown'} />
+                </View>
               </>
             )}
           </ScrollView>
@@ -305,6 +339,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper }, safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' }, content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
   header: { alignItems: 'center', flexDirection: 'row', marginBottom: 26 }, backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 }, headerCopy: { marginLeft: 13 }, eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
   section: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 16, padding: 16 }, sectionTitle: { color: palette.ink, fontSize: 17, fontWeight: '800' }, helperText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 5 }, formatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 15 }, formatButton: { borderColor: palette.line, borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 }, formatButtonSelected: { backgroundColor: palette.green, borderColor: palette.green }, formatText: { color: palette.muted, fontSize: 12, fontWeight: '800' }, formatTextSelected: { color: palette.panel },
+  targetList: { marginTop: 14 }, targetRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 12 }, targetHeading: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' }, targetLabel: { color: palette.ink, fontSize: 14, fontWeight: '800' }, targetBand: { color: palette.green, fontSize: 12, fontWeight: '800' }, targetDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   summaryCard: { backgroundColor: palette.greenSoft, borderRadius: 17, marginBottom: 16, padding: 17 }, summaryDetails: { width: '100%' }, summaryEyebrow: { color: palette.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.4, marginBottom: 7 }, summaryLine: { flexDirection: 'row', marginBottom: 5, width: '100%' }, summaryLineLabel: { color: palette.muted, flexShrink: 0, fontSize: 12, fontWeight: '700', width: 205 }, summaryLineValue: { color: palette.ink, flex: 1, fontSize: 12, fontWeight: '800' }, editButton: { alignSelf: 'flex-start', backgroundColor: palette.coral, borderRadius: 10, marginTop: 10, paddingHorizontal: 14, paddingVertical: 9 }, editButtonText: { color: palette.panel, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 }, exportButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', gap: 9, marginBottom: 16, minHeight: 52, paddingHorizontal: 16 }, exportButtonText: { color: palette.panel, fontSize: 14, fontWeight: '800' },
   fieldRow: { flexDirection: 'row', gap: 10, marginTop: 14 }, field: { flex: 1 }, fieldLabel: { color: palette.muted, fontSize: 11, fontWeight: '700', marginBottom: 6 }, input: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 10, borderWidth: 1, color: palette.ink, fontSize: 15, fontWeight: '700', minHeight: 44, paddingHorizontal: 11 }, saveButton: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', gap: 9, minHeight: 54 }, disabledButton: { opacity: 0.55 }, saveText: { color: palette.panel, fontSize: 15, fontWeight: '800' }, successText: { color: palette.green, fontSize: 13, fontWeight: '700', marginTop: 14, textAlign: 'center' }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 14 },
 });

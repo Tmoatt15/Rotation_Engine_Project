@@ -181,7 +181,7 @@ export default function HomeScreen() {
               <Text style={styles.eyebrow}>MATCHDAY CONTROL</Text>
               <Text style={styles.title}>Rotation Engine</Text>
             </View>
-            <TouchableOpacity style={styles.profileButton} accessibilityLabel="Open settings">
+            <TouchableOpacity style={styles.profileButton} accessibilityLabel="Open settings" onPress={() => router.navigate('/settings')}>
               <SymbolView
                 name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
                 size={20}
@@ -280,11 +280,6 @@ export default function HomeScreen() {
               label="Saved After Game Reports"
               detail="Review game and season playing time totals"
               onPress={() => router.push('/saved-after-game-reports')}
-            />
-            <ActionTile
-              icon="calendar"
-              label="Season Settings"
-              onPress={() => router.navigate('/settings')}
             />
           </View>}
           <View style={[styles.actionList, styles.teamActionList]}>
