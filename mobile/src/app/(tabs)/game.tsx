@@ -5,12 +5,12 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, Text
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
+import { GAME_FORMATS } from '@/engine/season';
 import { createPlayer } from '@/engine/rotation';
 import { maximumFieldBlocksForPlayer, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
-import { getRoster, getSeasonSettings } from '@/services/team-service';
+import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -53,6 +53,7 @@ export default function GameScreen() {
   const [showMaximumLimitConfirmation, setShowMaximumLimitConfirmation] = useState(false);
   const [disableMaximumLimits, setDisableMaximumLimits] = useState(false);
   const [playersOnField, setPlayersOnField] = useState(11);
+  const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [totalBlocks, setTotalBlocks] = useState(10);
   const [formation, setFormation] = useState('4-3-3');
   const [rosterPlayers, setRosterPlayers] = useState<RosterPlayer[]>([]);
@@ -76,7 +77,9 @@ export default function GameScreen() {
       .then(([payload, reports, nextGameNumber, settings]) => {
         setCompletedGameCount(reports.length);
         setGameNumber(String(nextGameNumber));
-        setPlayersOnField(settings.players_on_field ?? 11);
+        const formatDetails = GAME_FORMATS[settings.game_format] ?? GAME_FORMATS['11v11'];
+        setPlayersOnField(formatDetails.players_on_field);
+        setHasGoalkeeper(formatDetails.has_goalkeeper);
         setTotalBlocks(settings.total_blocks ?? 10);
         setFormation(settings.formation ?? '4-3-3');
         const rosterPlayers = payload.players as RosterPlayer[];
@@ -130,7 +133,7 @@ export default function GameScreen() {
   }
 
   function continueToGenerationOptions() {
-    const requiredFieldBlocks = totalBlocks * playersOnField;
+    const requiredFieldBlocks = totalBlocks * (playersOnField - (hasGoalkeeper ? 1 : 0));
     const availableFieldPlayers = playerNames
       .filter((name) => !unavailable.has(name) && !goalkeeperNames.includes(name))
       .map((name) => rosterPlayers.find((player) => player.name === name))
@@ -155,11 +158,11 @@ export default function GameScreen() {
 
   async function generateSchedule() {
     const availableGoalkeepers = new Set(goalkeeperNames.filter((name) => !unavailable.has(name)));
-    if (!firstHalfGK || !secondHalfGK) {
+    if (hasGoalkeeper && (!firstHalfGK || !secondHalfGK)) {
       setError('Choose a goalkeeper for both halves before generating the schedule.');
       return;
     }
-    if (!availableGoalkeepers.has(firstHalfGK) || !availableGoalkeepers.has(secondHalfGK)) {
+    if (hasGoalkeeper && (!availableGoalkeepers.has(firstHalfGK!) || !availableGoalkeepers.has(secondHalfGK!))) {
       setError('Choose available goalkeeper selections for both halves.');
       return;
     }
@@ -304,7 +307,7 @@ export default function GameScreen() {
               <Text style={styles.resultCount}>{unavailable.size} unavailable</Text>
             </View>
 
-            <View style={styles.goalkeeperCard}>
+            {hasGoalkeeper && <View style={styles.goalkeeperCard}>
               <Text style={styles.goalkeeperTitle}>Goalkeepers</Text>
               <Text style={styles.goalkeeperDetail}>Choose who plays each half. Select GK Yes players only.</Text>
               {goalkeeperNames.length === 0 ? <Text style={styles.helperText}>No GK-eligible players are configured.</Text> : (
@@ -331,7 +334,7 @@ export default function GameScreen() {
                   </View>
                 </View>
               )}
-            </View>
+            </View>}
 
             {loadingRoster ? <Text style={styles.helperText}>Loading season roster...</Text> : <View style={styles.playerList}>
               {playerNames.map((name, index) => {
@@ -370,14 +373,14 @@ export default function GameScreen() {
 
             <Pressable
               onPress={requestScheduleGeneration}
-              style={[styles.primaryAction, availableCount < 11 && styles.primaryActionDisabled]}
-              disabled={loadingRoster || availableCount < 11 || loading}
+              style={[styles.primaryAction, availableCount < playersOnField && styles.primaryActionDisabled]}
+              disabled={loadingRoster || availableCount < playersOnField || loading}
               accessibilityRole="button">
               <View>
                 <Text style={styles.primaryEyebrow}>NEXT STEP</Text>
                 <Text style={styles.primaryTitle}>{loading ? 'Generating...' : 'Generate schedule'}</Text>
                 <Text style={styles.primaryDetail}>
-                  {availableCount < 11 ? 'At least 11 players are needed' : 'Review this game’s availability'}
+                  {availableCount < playersOnField ? `At least ${playersOnField} players are needed` : 'Review this game’s availability'}
                 </Text>
               </View>
               {loading ? <ActivityIndicator size="small" color={palette.panel} /> : <SymbolView
