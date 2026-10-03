@@ -96,12 +96,21 @@ export function replayTimeline(roster: Player[], prefix: ScheduleBlock[], game: 
 }
 
 const rosterPlayerMaps = new WeakMap<Player[], Map<string, Player>>();
+const exactAssignmentCaches = new WeakMap<Player[], Map<string, boolean>>();
 
 export function completeExactAssignmentExists(roster: Player[], names: string[], slots: string[], group: PositionGroup): boolean {
+  const cache = exactAssignmentCaches.get(roster) ?? new Map<string, boolean>();
+  exactAssignmentCaches.set(roster, cache);
+  const cacheKey = `${group}|${[...names].sort().join('\u001f')}|${[...slots].sort().join('\u001f')}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
   const playerByName = rosterPlayerMaps.get(roster) ?? new Map(roster.map((player) => [player.name, player]));
   rosterPlayerMaps.set(roster, playerByName);
   const players = names.map((name) => playerByName.get(name)).filter((player): player is Player => Boolean(player));
-  if (players.length !== slots.length) return false;
+  if (players.length !== slots.length) {
+    cache.set(cacheKey, false);
+    return false;
+  }
   const candidatesBySlot = new Map(slots.map((slot) => [slot, players
     .filter((player) => canCoverSlot(player, slot, group))
     .sort((left, right) => left.name.localeCompare(right.name))]));
@@ -124,7 +133,9 @@ export function completeExactAssignmentExists(roster: Player[], names: string[],
     return false;
   };
 
-  return orderedSlots.every((slot) => augment(slot, new Set<string>()));
+  const result = orderedSlots.every((slot) => augment(slot, new Set<string>()));
+  cache.set(cacheKey, result);
+  return result;
 }
 
 export function assignExactSlots(roster: Player[], names: string[], slots: string[], group: PositionGroup, previous: Record<string, string>, seasonStarts: Record<string, Record<string, number>> = {}, allowUnrestricted = false): Record<string, string> {
