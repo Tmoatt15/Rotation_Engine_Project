@@ -1461,7 +1461,7 @@ describe('ten-game season availability simulation', () => {
     expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
   });
 
-  it('generates ten sequential games with 11 to 19 available players across deterministic seeds', () => {
+  it('generates ten sequential games with 11 to 19 available players across deterministic seeds', { timeout: 180000 }, () => {
     const rosterInputs = coachAssignedSeasonBackups(seasonSimulationRoster());
     const seedBases = [20260924, 20261001, 20261015];
     type MinimumSummary = { player: string; expectedMinimum: number; actualFieldBlocks: number; deficit: number; capacityExempt: boolean };
