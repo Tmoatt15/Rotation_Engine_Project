@@ -188,12 +188,19 @@ export function assignExactSlots(roster: Player[], names: string[], slots: strin
   return Object.fromEntries(slots.map((slot) => [slot, 'UNASSIGNED']));
 }
 
+const slotCoverageCache = new WeakMap<Player, Map<string, boolean>>();
+
 export function canCoverSlot(player: Player, slot: string, group: PositionGroup): boolean {
+  const cache = slotCoverageCache.get(player) ?? new Map<string, boolean>();
+  slotCoverageCache.set(player, cache);
+  const cacheKey = `${group}|${slot}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
   const centralMidfield = new Set(['LCM', 'CM', 'RCM']);
   const centralDefense = new Set(['LCB', 'CB', 'RCB']);
   const equivalentCentralMidfield = centralMidfield.has(slot) && player.primary_positions.some((position) => centralMidfield.has(position));
   const equivalentCentralDefense = centralDefense.has(slot) && player.primary_positions.some((position) => centralDefense.has(position));
-  return !exclusionBlocksSlot(player.forbidden_positions, slot) && (
+  const result = !exclusionBlocksSlot(player.forbidden_positions, slot) && (
     player.primary_positions.includes(slot) ||
     (player.primary_positions.includes(ANY_POSITION) && generalPositionAllowsGroup(player, group)) ||
     equivalentCentralMidfield ||
@@ -201,6 +208,8 @@ export function canCoverSlot(player: Player, slot: string, group: PositionGroup)
     backupCoversPosition(player, slot) ||
     player.general_positions.includes(group)
   );
+  cache.set(cacheKey, result);
+  return result;
 }
 
 function movementMetricScore(metrics: MovementMetrics): [number, number, number, number, number, number] {
