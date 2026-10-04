@@ -7,7 +7,7 @@ import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { backupEligiblePlayers, eligiblePlayers, exclusionBlocksSlot, positionalPriority } from '../positional';
-import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, fieldCapacityByHalf, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
+import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, fieldCapacityByHalf, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
 import { assignExactSlots, calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
@@ -782,6 +782,16 @@ describe('quota fairness and controlled coverage', () => {
     expect(positionCapacityDeficits('5-0-0', [...defenders, dualRoleKeeper], 10, { firstHalfGk: 'Dual GK' })).toEqual([
       { position: 'D', candidates: [] },
     ]);
+  });
+
+  it('ranks load-bearing primary players after safer backup candidates', () => {
+    const players = [
+      ...['Alvin', 'Everett', 'Ryan', 'Yash'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] })),
+      ...['Artur', 'Brad', 'Mahaswin'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'] })),
+      ...['Midfield backup 1', 'Midfield backup 2'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['F'] })),
+    ];
+
+    expect(positionCapacityCandidates('F', players, 10, '4-3-3')).toEqual(['Artur', 'Brad', 'Mahaswin', 'Alvin', 'Everett', 'Ryan', 'Yash']);
   });
 
   it('recommends eligible backup-position candidates by capacity and name', () => {

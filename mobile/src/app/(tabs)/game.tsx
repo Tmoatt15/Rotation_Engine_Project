@@ -49,7 +49,7 @@ function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlo
   const detail = blockCapacity
     ? `Block ${blockCapacity[1]} needs ${blockCapacity[3]} ${blockCapacity[3] === '1' ? noun : `${noun}s`} but only ${blockCapacity[4]} are available.`
     : `The available roster cannot cover every ${noun} slot within playing-time limits.`;
-  return { position, detail, candidates: positionCapacityCandidates(position, roster.map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])), totalBlocks) };
+  return { position, detail, candidates: positionCapacityCandidates(position, roster.map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])), totalBlocks, formation) };
 }
 
 export default function GameScreen() {

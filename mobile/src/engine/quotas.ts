@@ -73,17 +73,30 @@ export interface PositionCapacityDeficit {
   candidates: string[];
 }
 
-export function positionCapacityCandidates(position: 'D' | 'M' | 'F', roster: Player[], totalBlocks: number): string[] {
+export function positionCapacityCandidates(position: 'D' | 'M' | 'F', roster: Player[], totalBlocks: number, formationName?: string): string[] {
   const alreadyEligible = new Set([
     ...eligiblePlayers(roster, position),
     ...backupEligiblePlayers(roster, position),
   ].map((player) => player.name));
+  const formationCounts = formationName ? formationCountsForName(formationName) : null;
+  const isLoadBearing = (player: Player): boolean => {
+    if (!formationCounts || player.general_positions.length !== 1) return false;
+    const primaryGroup = player.general_positions[0]?.toUpperCase();
+    if (primaryGroup !== 'D' && primaryGroup !== 'M' && primaryGroup !== 'F') return false;
+    if (player.primary_positions.some((candidate) => candidate.toUpperCase() === 'GK')) return false;
+    const primaryPlayers = roster.filter((candidate) => candidate.available
+      && candidate.general_positions.length === 1
+      && candidate.general_positions[0]?.toUpperCase() === primaryGroup
+      && !candidate.primary_positions.some((candidatePosition) => candidatePosition.toUpperCase() === 'GK')).length;
+    return primaryPlayers <= formationCounts[primaryGroup] + 1;
+  };
   return roster
     .filter((player) => player.available
       && !isDedicatedGoalkeeper(player)
       && !alreadyEligible.has(player.name)
       && !player.forbidden_positions.includes(position))
-    .sort((left, right) => maximumFieldBlocksForPlayer(right, totalBlocks) - maximumFieldBlocksForPlayer(left, totalBlocks)
+    .sort((left, right) => Number(isLoadBearing(left)) - Number(isLoadBearing(right))
+      || maximumFieldBlocksForPlayer(right, totalBlocks) - maximumFieldBlocksForPlayer(left, totalBlocks)
       || left.name.localeCompare(right.name))
     .map((player) => player.name);
 }
@@ -121,7 +134,7 @@ export function positionCapacityDeficits(formationName: string, roster: Player[]
   return (['D', 'M', 'F'] as const)
     .filter((position) => formationCounts[position] > 0 && halfBlocks.some((blocks, half) => positionCapacity(position, half as 0 | 1) < formationCounts[position] * blocks))
     .map((position) => {
-      return { position, candidates: positionCapacityCandidates(position, roster, totalBlocks) };
+      return { position, candidates: positionCapacityCandidates(position, roster, totalBlocks, formationName) };
     });
 }
 
