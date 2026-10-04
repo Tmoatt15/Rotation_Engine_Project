@@ -266,10 +266,10 @@ export default function GameScreen() {
               })}
               {(!capacityDeficits.length && positionShortage?.candidates.length) ? <Text style={styles.modalWarning}>Consider making one of these players eligible for {capacityPositionWords(positionShortage.position)[1]}: {positionShortage.candidates.join(', ')}.</Text> : null}
             </View>
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => { recheckCapacityOnFocus.current = true; setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
-              <Pressable onPress={continueWithCapacityOverride} style={styles.confirmButton} accessibilityRole="button"><Text style={styles.confirmButtonText}>TURN OFF LIMITS</Text></Pressable>
-              <Pressable onPress={tryCapacityGeneration} accessibilityRole="button"><Text style={styles.cancelButtonText}>Try anyway with limits</Text></Pressable>
+            <View style={styles.capacityModalActions}>
+              <Pressable onPress={() => { recheckCapacityOnFocus.current = true; setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.capacityAssignButton} accessibilityRole="button"><Text style={styles.capacityAssignButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
+              <Pressable onPress={continueWithCapacityOverride} style={styles.capacityLimitsButton} accessibilityRole="button"><Text style={styles.capacityLimitsButtonText}>TURN OFF LIMITS</Text></Pressable>
+              <Pressable onPress={tryCapacityGeneration} style={styles.capacityTryButton} accessibilityRole="button"><Text style={styles.capacityTryButtonText}>TRY ANYWAY WITH LIMITS</Text></Pressable>
             </View>
           </View>
         </View>
@@ -514,6 +514,13 @@ const styles = StyleSheet.create({
   capacityWarningList: { marginTop: 4 },
   gameNumberInput: { alignSelf: 'flex-start', borderColor: palette.line, borderRadius: 12, borderWidth: 1, color: palette.ink, fontSize: 24, fontWeight: '800', marginTop: 18, minWidth: 90, paddingHorizontal: 15, paddingVertical: 10, textAlign: 'center' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  capacityModalActions: { gap: 10, marginTop: 20 },
+  capacityAssignButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 12, minHeight: 52, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 13 },
+  capacityAssignButtonText: { color: palette.panel, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+  capacityLimitsButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, minHeight: 52, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 13 },
+  capacityLimitsButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+  capacityTryButton: { alignItems: 'center', backgroundColor: '#f3efe6', borderRadius: 12, minHeight: 48, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 11 },
+  capacityTryButtonText: { color: palette.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.7 },
   cancelButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 13 },
   cancelButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   confirmButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 12, flex: 1.4, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 13 },
