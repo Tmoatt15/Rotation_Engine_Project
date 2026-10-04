@@ -952,6 +952,302 @@
     }
   },
   {
+    "id": "5v5-keeper-disambiguation",
+    "game": {
+      "game_format": "5v5",
+      "total_blocks": 6,
+      "formation": "1-2-1",
+      "first_half_gk": "Sam",
+      "second_half_gk": "Sam",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {
+        "name": "Sam",
+        "group": "rotational_gk",
+        "general_positions": [
+          "GK"
+        ],
+        "primary_positions": [
+          "GK"
+        ]
+      },
+      {
+        "name": "Alvin",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Ryan",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Brad",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Mahaswin",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Prerith",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Sawyer",
+        "group": "rotational",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "Artur",
+        "group": "rotational",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "F"
+        ]
+      }
+    ],
+    "fingerprint": "ecd4b98c92d86e339722ab8e8c638cb37ae1efb15fc6d2b9f269d97058f4d415",
+    "spec_verified": false,
+    "happy_path": true,
+    "expected_goalkeeper_blocks": {
+      "Sam": 6
+    },
+    "expected": {
+      "has_goalkeeper": true,
+      "errors": [],
+      "warnings": [],
+      "empty_slots": 0,
+      "player_blocks": {
+        "Alvin": 3,
+        "Ryan": 3,
+        "Brad": 4,
+        "Mahaswin": 4,
+        "Prerith": 4,
+        "Sawyer": 3,
+        "Artur": 3
+      },
+      "gk_summary": {
+        "Sam": {
+          "gk": 6,
+          "field": 0,
+          "bench": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "9v9-balanced-happy-path",
+    "game": {
+      "game_format": "9v9",
+      "total_blocks": 10,
+      "formation": "3-3-2",
+      "first_half_gk": "Cameron",
+      "second_half_gk": "Eitan",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {
+        "name": "Cameron",
+        "group": "rotational_gk",
+        "general_positions": [
+          "GK"
+        ],
+        "primary_positions": [
+          "GK"
+        ]
+      },
+      {
+        "name": "Eitan",
+        "group": "rotational_gk",
+        "general_positions": [
+          "GK"
+        ],
+        "primary_positions": [
+          "GK"
+        ]
+      },
+      {
+        "name": "Everett",
+        "group": "core",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Sid",
+        "group": "core",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Alvin",
+        "group": "core",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Max",
+        "group": "core",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "Ryan",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Yash",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Brad",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Mahaswin",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Sawyer",
+        "group": "rotational",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "Blake",
+        "group": "rotational",
+        "general_positions": [
+          "D",
+          "M"
+        ],
+        "primary_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "Prerith",
+        "group": "developing",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "Leo",
+        "group": "developing",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "F"
+        ]
+      }
+    ],
+    "fingerprint": "101feae0fcc2fb082191937941cf6fca2f5b6fbfba5bbb1d29fed5a2bd3fb72d",
+    "spec_verified": false,
+    "happy_path": true,
+    "expected_goalkeeper_blocks": {
+      "Cameron": 5,
+      "Eitan": 5
+    },
+    "expected_goalkeeper_summaries": {
+      "Cameron": {
+        "gk": 5,
+        "field": 0,
+        "bench": 5
+      },
+      "Eitan": {
+        "gk": 5,
+        "field": 0,
+        "bench": 5
+      }
+    }
+  },
+  {
     "id": "new-dual-role-goalkeeper",
     "game": {
       "total_blocks": 10,

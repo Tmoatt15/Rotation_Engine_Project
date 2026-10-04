@@ -838,6 +838,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const regenerationEndpointCoreNames = startBlock > 1 && endpointCorePlayers.length <= endpointFieldCapacity
     ? new Set(endpointCorePlayers.map((player) => player.name))
     : new Set<string>();
+  const endpointHalf = blockHalf(game.total_blocks - 1, game.total_blocks);
   const playersByName = new Map(roster.map((player) => [player.name, player]));
   const groupUrgency = (player: Player): number => {
     if (CORE_GROUPS.has(player.group)) return 0;
@@ -866,7 +867,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const half = blockHalf(blockIndex, game.total_blocks);
     const middleEndpointHeadroom = regenerationEndpointCoreNames.has(player.name) && blockIndex !== 0 && blockIndex !== game.total_blocks - 1 ? 1 : 0;
     return player.available && !reserved[blockIndex].has(player.name) &&
-      (game.disable_maximum_limits || ((rawCounts.get(player.name) ?? 0) < player.hard_maximum_blocks - middleEndpointHeadroom && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half && (!assignedGoalkeepers.has(player.name) || (fieldCounts.get(player.name) ?? 0) < player.gk_field_maximum_blocks))) &&
+      (game.disable_maximum_limits || ((rawCounts.get(player.name) ?? 0) < player.hard_maximum_blocks - middleEndpointHeadroom && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half - (half === endpointHalf ? middleEndpointHeadroom : 0) && (!assignedGoalkeepers.has(player.name) || (fieldCounts.get(player.name) ?? 0) < player.gk_field_maximum_blocks))) &&
       (ignorePositionRestrictions || !player.forbidden_positions.includes(position));
   };
   const fairnessProfileKey = (player: Player): string => JSON.stringify([
@@ -2401,6 +2402,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     ? new Set(materializationEndpointCorePlayers.map((player) => player.name))
     : endpointCoreNames;
   const materializationEndpointHeadroom = (name: string, block: number): number => startBlock > 1 && block < game.total_blocks && endpointHeadroomNames.has(name) ? 1 : 0;
+  const endpointHalf = blockHalf(game.total_blocks - 1, game.total_blocks);
   let previousPositions: Record<string, string> = startBlock > 1 ? { ...(frozenTimeline[startBlock - 2]?.positions ?? {}) } : {};
   for (let block = startBlock; block <= game.total_blocks; block++) {
     const half: 0 | 1 = block <= Math.ceil(game.total_blocks / 2) ? 0 : 1; const gk = goalkeepers[block - 1]; const used = new Set(gk ? [gk.name] : []);
@@ -2414,7 +2416,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
           && !used.has(player.name)
           && (game.disable_maximum_limits
             || (materializedCount(player.name) < player.hard_maximum_blocks - materializationEndpointHeadroom(player.name, block)
-              && materializedHalfCount(player.name, half) < player.max_blocks_per_half
+              && materializedHalfCount(player.name, half) < player.max_blocks_per_half - (half === endpointHalf ? materializationEndpointHeadroom(player.name, block) : 0)
               && (!goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
                 || materializedFieldCount(player.name) < player.gk_field_maximum_blocks))));
       const emergency = needsEmergencyFieldAssignment(game, roster, formation, gk?.name ?? '');
@@ -2427,7 +2429,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
               || backupEligiblePlayers(roster, group).some((candidate) => candidate.name === player.name)));
         const quotaCandidates = candidates.filter((player) => game.disable_maximum_limits
           || (materializedCount(player.name) < player.hard_maximum_blocks - materializationEndpointHeadroom(player.name, block)
-            && materializedHalfCount(player.name, half) < player.max_blocks_per_half
+            && materializedHalfCount(player.name, half) < player.max_blocks_per_half - (half === endpointHalf ? materializationEndpointHeadroom(player.name, block) : 0)
             && (!goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
               || result.timeline.reduce((total, block) => total + (block.D.includes(player.name) || block.M.includes(player.name) || block.F.includes(player.name) ? 1 : 0), 0) < player.gk_field_maximum_blocks)));
         const endpointSafeCandidates = quotaCandidates.filter((player) => block === 1 || block === game.total_blocks || !endpointCoreNames.has(player.name) || planned[group][block - 1]?.includes(player.name));

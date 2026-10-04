@@ -213,6 +213,52 @@ describe('format and goalkeeper contracts', () => {
 
   it('rejects conflicting game format and goalkeeper settings', () => {
     expect(() => generateSchedule({ total_blocks: 1, formation: '1-1-1', game_format: '4v4', has_goalkeeper: true }, [])).toThrow('has_goalkeeper conflicts with game_format 4v4');
+    expect(() => generateSchedule({ total_blocks: 1, formation: '1-2-1', game_format: '5v5', has_goalkeeper: false }, [])).toThrow('has_goalkeeper conflicts with game_format 5v5');
+  });
+
+  it('disambiguates 5v5 goalkeeper behavior from 4v4 with the same formation', () => {
+    const fiveVFive = fingerprintCases.find(({ id }) => id === '5v5-keeper-disambiguation');
+    const fourVFour = fingerprintCases.find(({ id }) => id === '4v4-basic');
+    if (!fiveVFive || !fourVFour) throw new Error('5v5 or 4v4 fingerprint fixture missing');
+    const fiveVFiveResult = generateSchedule(fiveVFive.game as GameInput, fiveVFive.players.map((player) => createPlayer(player as PlayerInput)));
+    const fourVFourResult = generateSchedule(fourVFour.game as GameInput, fourVFour.players.map((player) => createPlayer(player as PlayerInput)));
+
+    expect(fiveVFiveResult.errors).toEqual([]);
+    expect(fiveVFiveResult.warnings).toEqual([]);
+    expect(fiveVFiveResult.timeline.flatMap((block) => Object.values(block.positions)).filter((value) => value === 'UNASSIGNED')).toHaveLength(0);
+    expect(fiveVFiveResult.timeline.every((block) => block.GK === 'Sam' && block.positions.GK === 'Sam')).toBe(true);
+    expect(fiveVFiveResult.block_counts).toMatchObject(fiveVFive.expected?.player_blocks);
+    expect(fiveVFiveResult.gk_summary).toEqual(fiveVFive.expected?.gk_summary);
+    expect(fourVFourResult.timeline.every((block) => block.GK === '' && block.positions.GK === undefined)).toBe(true);
+  });
+
+  it('satisfies the 9v9 balanced happy-path contracts', () => {
+    const testCase = fingerprintCases.find(({ id }) => id === '9v9-balanced-happy-path');
+    if (!testCase) throw new Error('9v9 fingerprint fixture missing');
+    const result = generateSchedule(testCase.game as GameInput, testCase.players.map((player) => createPlayer(player as PlayerInput)));
+    const fieldBlocks = (name: string) => result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length;
+
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.timeline.flatMap((block) => Object.values(block.positions)).filter((value) => value === 'UNASSIGNED')).toHaveLength(0);
+    expect(result.gk_summary).toEqual(testCase.expected_goalkeeper_summaries);
+    expect(result.timeline[9].D).toHaveLength(3);
+    expect(result.timeline[9].M).toHaveLength(3);
+    expect(result.timeline[9].F).toHaveLength(2);
+    expect(fieldBlocks('Everett')).toBeGreaterThanOrEqual(7);
+    expect(fieldBlocks('Everett')).toBeLessThanOrEqual(8);
+    expect(fieldBlocks('Sid')).toBeGreaterThanOrEqual(7);
+    expect(fieldBlocks('Sid')).toBeLessThanOrEqual(8);
+    expect(fieldBlocks('Alvin')).toBeGreaterThanOrEqual(7);
+    expect(fieldBlocks('Alvin')).toBeLessThanOrEqual(8);
+    expect(fieldBlocks('Max')).toBeGreaterThanOrEqual(7);
+    expect(fieldBlocks('Max')).toBeLessThanOrEqual(8);
+    for (const name of ['Ryan', 'Yash', 'Brad', 'Mahaswin', 'Sawyer', 'Blake']) {
+      expect(fieldBlocks(name), `${name} rotational blocks`).toBeGreaterThanOrEqual(5);
+      expect(fieldBlocks(name), `${name} rotational blocks`).toBeLessThanOrEqual(7);
+    }
+    expect(fieldBlocks('Prerith')).toBe(5);
+    expect(fieldBlocks('Leo')).toBe(5);
   });
 
   it('keeps dual-role goalkeeper field time outside the goalkeeper half', () => {
@@ -581,10 +627,12 @@ describe('goalkeeper and minimum protection', () => {
     const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'Frank', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
 
     expect(initial.errors).toEqual([]);
-    expect(regenerated.errors.filter((error) => error.includes('endpoint'))).toEqual([]);
+    expect(regenerated.errors).toEqual([]);
     expect(regenerated.timeline[9].D).toHaveLength(3);
     expect(regenerated.timeline[9].M).toHaveLength(4);
     expect(regenerated.timeline[9].F).toHaveLength(3);
+    expect(regenerated.timeline[9].F).toContain('Max');
+    expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('Max'))).toHaveLength(3);
   });
 
   it('keeps feasible-capacity but illegal core endpoint misses blocking', () => {
