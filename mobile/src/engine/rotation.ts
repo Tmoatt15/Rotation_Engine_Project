@@ -67,7 +67,7 @@ export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Play
 
 export const generateSchedule = runRotationEngine;
 
-export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[]): RotationResult {
+export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[]): RotationResult {
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
   const updatedTimeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
   const recordAvailabilityChange = (change: AvailabilityChange): void => {
@@ -110,7 +110,16 @@ export function regenerateSchedule(gameInput: Game, rosterInput: Player[], previ
       if (!game.replacement_credits.some((credit) => credit.player === player.name && credit.block === change.block)) { game.replacement_credits.push({ player: player.name, block: change.block, position, half_index: change.block <= Math.ceil(game.total_blocks / 2) ? 0 : 1, replacement: replacement.name }); game.replacement_bonuses[replacement.name] = (game.replacement_bonuses[replacement.name] ?? 0) + 1; }
       earliest = Math.min(earliest, change.block + 1);
     } else {
-      player.available = true; game.quota_exempt_players.add(player.name); recordAvailabilityChange(change); earliest = Math.min(earliest, change.block + 1);
+      player.available = true;
+      if (change.target_blocks !== undefined) {
+        player.target_blocks = change.target_blocks;
+        player.minimum_blocks = change.minimum_blocks ?? 0;
+        player.hard_minimum_blocks = player.minimum_blocks;
+        player.maximum_blocks = change.maximum_blocks ?? game.total_blocks;
+        player.hard_maximum_blocks = player.maximum_blocks;
+        player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
+      }
+      game.quota_exempt_players.add(player.name); recordAvailabilityChange(change); earliest = Math.min(earliest, change.block + 1);
     }
   }
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);

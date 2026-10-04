@@ -11,6 +11,7 @@ import { POSITION_GROUP_BY_SLOT } from '@/engine/positional';
 import { createPlayer } from '@/engine/rotation';
 import type { Player, PositionGroup } from '@/engine/models';
 import { getRoster } from '@/services/team-service';
+import { regenerateLateArrivalSchedule } from '@/services/schedule-service';
 import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
 
 const palette = {
@@ -124,6 +125,10 @@ function playerCameOffField(blocks: ScheduleBlock[], blockIndex: number, player:
   return previousPositions.includes(player) && blocks[blockIndex].bench?.includes(player) === true;
 }
 
+function playerHasGoalkeeperRole(player: Player | undefined): boolean {
+  return player?.primary_positions.some((position) => position.toUpperCase() === 'GK') ?? false;
+}
+
 type LiveScreenProps = {
   schedule?: LiveSchedule | null;
   onExit?: () => void;
@@ -158,6 +163,15 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [positionOverrides, setPositionOverrides] = useState<LivePositionOverride[]>([]);
   const [selectedPosition, setSelectedPosition] = useState<{ blockIndex: number; position: string } | null>(null);
   const [pendingSwap, setPendingSwap] = useState<PendingSwap | null>(null);
+  const [showLateArrival, setShowLateArrival] = useState(false);
+  const [latePlayerName, setLatePlayerName] = useState<string | null>(null);
+  const [lateStartBlock, setLateStartBlock] = useState(1);
+  const [lateTargetBlocks, setLateTargetBlocks] = useState(1);
+  const [lateTakeoverGk, setLateTakeoverGk] = useState(false);
+  const [lateWarning, setLateWarning] = useState(false);
+  const [lateError, setLateError] = useState<string | null>(null);
+  const [lateSaving, setLateSaving] = useState(false);
+  const [lateArrivedNames, setLateArrivedNames] = useState<string[]>([]);
   const warnedBlocks = useRef(new Set<string>());
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -260,6 +274,45 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     warnedBlocks.current.clear();
     setTimeError(null);
     setShowTimeEditor(false);
+  }
+
+  function openLateArrival() {
+    const nextBlock = Math.min(activeBlock + 1, Math.max(1, (schedule?.blocks.length ?? 1) - 1));
+    setLatePlayerName(null);
+    setLateStartBlock(nextBlock + 1);
+    setLateTargetBlocks(Math.max(1, Math.ceil(((schedule?.blocks.length ?? 1) - nextBlock) / 2)));
+    setLateTakeoverGk(false);
+    setLateWarning(false);
+    setLateError(null);
+    setShowLateArrival(true);
+  }
+
+  async function confirmLateArrival() {
+    if (!schedule?.team_id || !latePlayerName) return;
+    const arrivingPlayer = latePlayerName;
+    const player = roster.find((item) => item.name === arrivingPlayer);
+    if (!player) return;
+    const remainingBlocks = schedule.blocks.length - lateStartBlock + 1;
+    const minimum = ['core', 'core_a', 'core_b'].includes(player.group) ? Math.ceil(schedule.blocks.length * 0.7) : player.group === 'rotational' ? Math.ceil(schedule.blocks.length * 0.5) : Math.ceil(schedule.blocks.length * 0.4);
+    if (!lateWarning && lateTargetBlocks < minimum) {
+      setLateWarning(true);
+      return;
+    }
+    setLateSaving(true);
+    setLateError(null);
+    try {
+      const availableNames = [...new Set([...(schedule.available_player_names ?? []), arrivingPlayer])];
+      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: 0, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), secondHalfGk: lateTakeoverGk ? arrivingPlayer : undefined });
+      const nextBlocks = nextSchedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] }));
+      setLiveBlocks(nextBlocks);
+      await setAcceptedSchedule({ ...schedule, ...nextSchedule, blocks: nextBlocks, completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
+      setLateArrivedNames((names) => [...names, arrivingPlayer]);
+      setShowLateArrival(false);
+    } catch (error) {
+      setLateError(error instanceof Error ? error.message : 'The future rotation could not be updated.');
+    } finally {
+      setLateSaving(false);
+    }
   }
 
   if (!schedule) {
@@ -560,6 +613,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <Text style={styles.setTimeButtonText}>SET TIME</Text>
               </Pressable>
             </View>
+            {!isEndOfGame && <Pressable onPress={openLateArrival} style={styles.lateArrivalButton} accessibilityRole="button"><SymbolView name={{ ios: 'person.badge.plus', android: 'person_add', web: 'person_add' }} size={16} tintColor={palette.green} /><Text style={styles.lateArrivalText}>ADD PLAYER</Text></Pressable>}
 
             <View style={styles.blockHeading}>
               <View>
@@ -780,6 +834,35 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
           </View>
         </View>
       </Modal>
+      <Modal visible={showLateArrival} transparent animationType="fade" onRequestClose={() => setShowLateArrival(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <Text style={styles.modalEyebrow}>LATE ARRIVAL</Text>
+            <Text style={styles.modalTitle}>{latePlayerName ? 'Set playing time' : 'Who arrived?'}</Text>
+            <Text style={styles.modalDetail}>{latePlayerName ? 'Choose when they start and how many blocks they play.' : 'Players who were unavailable before the game.'}</Text>
+            {!latePlayerName ? (
+              <ScrollView style={styles.latePlayerList}>
+                {roster.filter((player) => !(schedule.available_player_names ?? []).includes(player.name) && !lateArrivedNames.includes(player.name)).map((player) => (
+                  <Pressable key={player.name} onPress={() => setLatePlayerName(player.name)} style={styles.latePlayerRow} accessibilityRole="button">
+                    <Text style={styles.latePlayerName}>{displayPlayerName(player.name)}</Text><Text style={styles.latePlayerGroup}>{player.group.replace('_', ' ')}</Text>
+                  </Pressable>
+                ))}
+                {roster.filter((player) => !(schedule.available_player_names ?? []).includes(player.name) && !lateArrivedNames.includes(player.name)).length === 0 && <Text style={styles.modalDetail}>Everyone is already in this rotation.</Text>}
+              </ScrollView>
+            ) : (
+              <>
+                <View style={styles.stepperRow}><Text style={styles.stepperLabel}>START BLOCK</Text><View style={styles.stepper}><Pressable onPress={() => setLateStartBlock((value) => Math.max(activeBlock + 2, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateStartBlock}</Text><Pressable onPress={() => setLateStartBlock((value) => Math.min(schedule.blocks.length, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
+                <View style={styles.stepperRow}><Text style={styles.stepperLabel}>BLOCKS TO PLAY</Text><View style={styles.stepper}><Pressable onPress={() => setLateTargetBlocks((value) => Math.max(0, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateTargetBlocks}</Text><Pressable onPress={() => setLateTargetBlocks((value) => Math.min(schedule.blocks.length - lateStartBlock + 1, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
+                {lateStartBlock === halftimeIndex + 1 && latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper in the second half</Text></Pressable>}
+                {lateWarning && <Text style={styles.overrideNotice}>This is below the normal minimum for this player group. Continue anyway?</Text>}
+                {lateError && <Text style={styles.timeError}>{lateError}</Text>}
+                <View style={styles.modalActions}><Pressable onPress={() => lateWarning ? setLateWarning(false) : setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>{lateWarning ? 'GO BACK' : 'BACK'}</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : lateWarning ? 'PROCEED' : 'DONE'}</Text></Pressable></View>
+              </>
+            )}
+            {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={styles.cancelButtonText}>CANCEL</Text></Pressable>}
+          </View>
+        </View>
+      </Modal>
       <Modal visible={pendingSwap !== null} transparent animationType="fade" onRequestClose={() => setPendingSwap(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.timeModal}>
@@ -823,6 +906,8 @@ const styles = StyleSheet.create({
   timerLabel: { color: palette.green, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
   timer: { color: palette.ink, fontSize: 38, fontWeight: '800', letterSpacing: 1 },
   timerButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 11, height: 40, justifyContent: 'center', width: 40 },
+  lateArrivalButton: { alignItems: 'center', alignSelf: 'flex-end', flexDirection: 'row', gap: 5, marginBottom: 10, paddingHorizontal: 4, paddingVertical: 4 },
+  lateArrivalText: { color: palette.green, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   setTimeButton: { alignItems: 'center', flexDirection: 'column', gap: 2, justifyContent: 'center', paddingHorizontal: 4, paddingVertical: 2 },
   setTimeButtonText: { color: palette.green, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   modalOverlay: { alignItems: 'center', backgroundColor: 'rgba(23, 34, 31, 0.55)', flex: 1, justifyContent: 'center', padding: 20 },
@@ -837,6 +922,19 @@ const styles = StyleSheet.create({
   cancelButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   applyButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 12, flex: 1, paddingVertical: 13 },
   applyButtonText: { color: palette.panel, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  latePlayerList: { marginTop: 16, maxHeight: 260 },
+  latePlayerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14 },
+  latePlayerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  latePlayerGroup: { color: palette.muted, fontSize: 11, textTransform: 'uppercase' },
+  lateCancel: { marginTop: 10 },
+  stepperRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14 },
+  stepperLabel: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  stepper: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  stepperButton: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 10, height: 34, justifyContent: 'center', width: 34 },
+  stepperButtonText: { color: palette.green, fontSize: 22, fontWeight: '700' },
+  stepperValue: { color: palette.ink, fontSize: 20, fontWeight: '800', minWidth: 25, textAlign: 'center' },
+  gkChoice: { backgroundColor: palette.greenSoft, borderRadius: 10, marginTop: 14, padding: 12 },
+  gkChoiceText: { color: palette.green, fontSize: 12, fontWeight: '800' },
   blockHeading: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 6 },
   legendItem: { alignItems: 'center', flexDirection: 'row', gap: 5 },

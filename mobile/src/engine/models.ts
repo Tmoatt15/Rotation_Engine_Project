@@ -86,6 +86,9 @@ export interface AvailabilityChange {
   player: string;
   action: 'available' | 'unavailable';
   block: number;
+  target_blocks?: number;
+  minimum_blocks?: number;
+  maximum_blocks?: number;
 }
 
 export interface ReplacementCredit {
