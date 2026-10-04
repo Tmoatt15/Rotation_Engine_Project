@@ -33,6 +33,17 @@ export function maximumFieldBlocksForPlayer(player: Player, totalBlocks: number)
   );
 }
 
+export type GoalkeeperAssignments = { firstHalfGk?: string | null; secondHalfGk?: string | null };
+
+export function fieldCapacityByHalf(player: Player, totalBlocks: number, assignments: GoalkeeperAssignments = {}): [number, number] {
+  if (isDedicatedGoalkeeper(player)) return [0, 0];
+  const gkFieldMaximum = Math.max(1, intendedMaximumBlocksForPercentage(totalBlocks, GK_FIELD_MAXIMUM));
+  if (player.name === assignments.firstHalfGk) return [0, gkFieldMaximum];
+  if (player.name === assignments.secondHalfGk) return [gkFieldMaximum, 0];
+  const perHalfMaximum = Math.max(1, Math.ceil(maximumFieldBlocksForPlayer(player, totalBlocks) / 2));
+  return [perHalfMaximum, perHalfMaximum];
+}
+
 type BlockCapacityCheck = {
   totalCapacity: number;
   requiredSlots: number;
@@ -43,7 +54,7 @@ type BlockCapacityCheck = {
 type FormationCounts = Record<'D' | 'M' | 'F', number>;
 
 function isDedicatedGoalkeeper(player: Player): boolean {
-  return player.general_positions.some((position) => position.toUpperCase() === 'GK');
+  return player.general_positions.length > 0 && player.general_positions.every((position) => position.toUpperCase() === 'GK');
 }
 
 function formationCountsForName(formationName: string): FormationCounts {
@@ -80,11 +91,20 @@ export function positionCapacityWarnings(formationName: string, roster: Player[]
   return warnings;
 }
 
-export function positionCapacityDeficits(formationName: string, roster: Player[], totalBlocks: number): PositionCapacityDeficit[] {
+export function positionCapacityDeficits(formationName: string, roster: Player[], totalBlocks: number, assignments: GoalkeeperAssignments = {}): PositionCapacityDeficit[] {
   const formationCounts = formationCountsForName(formationName);
-  const capacity = blockCapacityCheck(formationCounts, roster, totalBlocks, new Set());
+  const halfBlocks = [Math.ceil(totalBlocks / 2), Math.floor(totalBlocks / 2)];
+  const positionCapacity = (position: 'D' | 'M' | 'F', half: 0 | 1): number => {
+    const candidates = new Map([
+      ...eligiblePlayers(roster, position),
+      ...backupEligiblePlayers(roster, position),
+    ].map((player) => [player.name, player] as const));
+    return [...candidates.values()]
+      .filter((player) => player.available && !player.forbidden_positions.includes(position))
+      .reduce((total, player) => total + fieldCapacityByHalf(player, totalBlocks, assignments)[half], 0);
+  };
   return (['D', 'M', 'F'] as const)
-    .filter((position) => formationCounts[position] > 0 && capacity.positionCapacity[position] < capacity.positionRequired[position])
+    .filter((position) => formationCounts[position] > 0 && halfBlocks.some((blocks, half) => positionCapacity(position, half as 0 | 1) < formationCounts[position] * blocks))
     .map((position) => {
       const alreadyEligible = new Set([
         ...eligiblePlayers(roster, position),

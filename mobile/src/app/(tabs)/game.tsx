@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { GAME_FORMATS } from '@/engine/season';
 import { createPlayer } from '@/engine/rotation';
-import { maximumFieldBlocksForPlayer, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
+import { fieldCapacityByHalf, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
@@ -122,7 +122,7 @@ export default function GameScreen() {
       .filter((player) => !unavailable.has(player.name))
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
     const warnings = positionCapacityWarnings(formation, availableRoster);
-    const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks);
+    const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
     if (warnings.length || deficits.length) {
       setCapacityWarnings(warnings);
       setCapacityDeficits(deficits);
@@ -135,14 +135,11 @@ export default function GameScreen() {
   function continueToGenerationOptions() {
     const requiredFieldBlocks = totalBlocks * (playersOnField - (hasGoalkeeper ? 1 : 0));
     const availableFieldPlayers = playerNames
-      .filter((name) => !unavailable.has(name) && !goalkeeperNames.includes(name))
+      .filter((name) => !unavailable.has(name))
       .map((name) => rosterPlayers.find((player) => player.name === name))
       .filter((player): player is RosterPlayer => player !== undefined)
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
-    const normalMaximumCapacity = availableFieldPlayers.reduce(
-      (total, player) => total + maximumFieldBlocksForPlayer(player, totalBlocks),
-      0,
-    );
+    const normalMaximumCapacity = availableFieldPlayers.reduce((total, player) => total + fieldCapacityByHalf(player, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK }).reduce((sum, capacity) => sum + capacity, 0), 0);
     const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
     if (maximumCapacityPressure) {
       setShowMaximumLimitConfirmation(true);

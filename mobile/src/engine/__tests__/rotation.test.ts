@@ -7,7 +7,7 @@ import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { backupEligiblePlayers, eligiblePlayers, exclusionBlocksSlot, positionalPriority } from '../positional';
-import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
+import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, fieldCapacityByHalf, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
 import { assignExactSlots, calculateMovementMetrics, canCoverSlot, estimateAdditionalPlayersNeeded, formationSlots, optimizeExactSlotSwitches, parseFormation, validateTimeline } from '../timeline';
 import type { AfterGameReport, Game, GameInput, PlayerInput, ScheduleBlock } from '../models';
 import { aggregateSeasonFairness } from '../../services/season-fairness';
@@ -763,6 +763,25 @@ describe('quota fairness and controlled coverage', () => {
     ];
 
     expect(positionCapacityWarnings('4-3-3', players)).toContain('Preflight: only 3 available D players can cover 4 D slots.');
+  });
+
+  it('counts dual-role goalkeepers as field players unless assigned to goal', () => {
+    const dualRoleKeeper = createPlayer({ name: 'Dual GK', group: 'rotational', general_positions: ['GK', 'F'], primary_positions: ['GK', 'CF'] });
+    const dedicatedKeeper = createPlayer({ name: 'Pure GK', group: 'rotational_gk', general_positions: ['GK'], primary_positions: ['GK'] });
+
+    expect(fieldCapacityByHalf(dualRoleKeeper, 10)).toEqual([4, 4]);
+    expect(fieldCapacityByHalf(dualRoleKeeper, 10, { firstHalfGk: 'Dual GK' })).toEqual([0, 3]);
+    expect(fieldCapacityByHalf(dedicatedKeeper, 10)).toEqual([0, 0]);
+  });
+
+  it('reports a position deficit limited to one half', () => {
+    const defenders = ['D1', 'D2', 'D3', 'D4'].map((name) => createPlayer({ name, group: 'rotational', general_positions: ['D'], primary_positions: ['CB'] }));
+    const dualRoleKeeper = createPlayer({ name: 'Dual GK', group: 'rotational', general_positions: ['GK', 'D'], primary_positions: ['GK', 'CB'] });
+
+    expect(positionCapacityDeficits('3-0-0', [...defenders, dualRoleKeeper], 10, { firstHalfGk: 'Dual GK' })).toEqual([]);
+    expect(positionCapacityDeficits('5-0-0', [...defenders, dualRoleKeeper], 10, { firstHalfGk: 'Dual GK' })).toEqual([
+      { position: 'D', candidates: [] },
+    ]);
   });
 
   it('recommends eligible backup-position candidates by capacity and name', () => {
