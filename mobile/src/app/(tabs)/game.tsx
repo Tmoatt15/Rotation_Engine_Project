@@ -116,14 +116,17 @@ export default function GameScreen() {
   }
 
   function requestScheduleGeneration() {
+    if (hasGoalkeeper && (!firstHalfGK || !secondHalfGK)) {
+      setError('Choose a goalkeeper for both halves before generating the schedule.');
+      return;
+    }
     setError(null);
     setDisableMaximumLimits(false);
     const availableRoster = rosterPlayers
       .filter((player) => !unavailable.has(player.name))
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
     const warnings = positionCapacityWarnings(formation, availableRoster);
-    const goalkeeperAssignments = { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK, assumeWorstCase: !firstHalfGK || !secondHalfGK };
-    const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks, goalkeeperAssignments);
+    const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
     if (warnings.length || deficits.length) {
       setCapacityWarnings(warnings);
       setCapacityDeficits(deficits);
@@ -140,7 +143,7 @@ export default function GameScreen() {
       .map((name) => rosterPlayers.find((player) => player.name === name))
       .filter((player): player is RosterPlayer => player !== undefined)
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
-    const normalMaximumCapacity = availableFieldPlayers.reduce((total, player) => total + fieldCapacityByHalf(player, totalBlocks, goalkeeperAssignments).reduce((sum, capacity) => sum + capacity, 0), 0);
+    const normalMaximumCapacity = availableFieldPlayers.reduce((total, player) => total + fieldCapacityByHalf(player, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK }).reduce((sum, capacity) => sum + capacity, 0), 0);
     const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
     if (maximumCapacityPressure) {
       setShowMaximumLimitConfirmation(true);

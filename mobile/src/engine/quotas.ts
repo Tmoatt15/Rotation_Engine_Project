@@ -33,12 +33,11 @@ export function maximumFieldBlocksForPlayer(player: Player, totalBlocks: number)
   );
 }
 
-export type GoalkeeperAssignments = { firstHalfGk?: string | null; secondHalfGk?: string | null; assumeWorstCase?: boolean };
+export type GoalkeeperAssignments = { firstHalfGk?: string | null; secondHalfGk?: string | null };
 
 export function fieldCapacityByHalf(player: Player, totalBlocks: number, assignments: GoalkeeperAssignments = {}): [number, number] {
   if (isDedicatedGoalkeeper(player)) return [0, 0];
   const gkFieldMaximum = Math.max(1, intendedMaximumBlocksForPercentage(totalBlocks, GK_FIELD_MAXIMUM));
-  if (assignments.assumeWorstCase && player.general_positions.some((position) => position.toUpperCase() === 'GK')) return [0, 0];
   if (player.name === assignments.firstHalfGk) return [0, gkFieldMaximum];
   if (player.name === assignments.secondHalfGk) return [gkFieldMaximum, 0];
   const perHalfMaximum = Math.max(1, Math.ceil(maximumFieldBlocksForPlayer(player, totalBlocks) / 2));
