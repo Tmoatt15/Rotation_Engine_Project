@@ -1,13 +1,13 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { GAME_FORMATS } from '@/engine/season';
 import { createPlayer } from '@/engine/rotation';
-import { fieldCapacityByHalf, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
+import { fieldCapacityByHalf, positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
@@ -32,7 +32,24 @@ function displayPlayerName(name: string): string {
 }
 
 function capacityPositionWords(position: PositionCapacityDeficit['position']): [string, string] {
-  return position === 'D' ? ['defender', 'defense'] : position === 'M' ? ['midfielder', 'midfield'] : ['forward', 'attack'];
+  return position === 'D' ? ['defender', 'defender'] : position === 'M' ? ['midfielder', 'midfielder'] : ['forward', 'forward'];
+}
+
+type PositionShortage = { position: PositionCapacityDeficit['position']; detail: string; candidates: string[] };
+
+function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlocks: number): PositionShortage | null {
+  const blockCapacity = message.match(/Block (\d+): ([DMF]) requires (\d+) players but (?:only )?(\d+) were assigned/);
+  const exactAssignment = message.match(/Block (\d+): ([DMF]) players cannot form a complete legal exact-slot assignment/);
+  const endpoint = message.match(/Block (\d+): core player (.+?) could not be assigned to the (first|last) block endpoint/);
+  const match = blockCapacity ?? exactAssignment ?? endpoint;
+  if (!match) return null;
+  const position = (match[2] === 'D' || match[2] === 'M' || match[2] === 'F') ? match[2] : (roster.find((player) => player.name === match[2])?.general_positions ?? []).find((candidate) => ['D', 'M', 'F'].includes(candidate)) as PositionCapacityDeficit['position'] | undefined;
+  if (!position) return null;
+  const [noun] = capacityPositionWords(position);
+  const detail = blockCapacity
+    ? `Block ${blockCapacity[1]} needs ${blockCapacity[3]} ${blockCapacity[3] === '1' ? noun : `${noun}s`} but only ${blockCapacity[4]} are available.`
+    : `The available roster cannot cover every ${noun} slot within playing-time limits.`;
+  return { position, detail, candidates: positionCapacityCandidates(position, roster.map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])), totalBlocks) };
 }
 
 export default function GameScreen() {
@@ -60,6 +77,8 @@ export default function GameScreen() {
   const [capacityWarnings, setCapacityWarnings] = useState<string[]>([]);
   const [capacityDeficits, setCapacityDeficits] = useState<PositionCapacityDeficit[]>([]);
   const [showCapacityWarning, setShowCapacityWarning] = useState(false);
+  const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
+  const recheckCapacityOnFocus = useRef(false);
   const availableCount = playerNames.length - unavailable.size;
   const enteredGameNumber = Number.parseInt(gameNumber, 10);
   const gameNumberWarning = Number.isInteger(enteredGameNumber) && enteredGameNumber <= completedGameCount
@@ -89,17 +108,26 @@ export default function GameScreen() {
           .map((player) => player.name);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
-        setFirstHalfGK(null);
-        setSecondHalfGK(null);
+        if (!recheckCapacityOnFocus.current) {
+          setFirstHalfGK(null);
+          setSecondHalfGK(null);
+        }
       })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load roster.'))
-      .finally(() => setLoadingRoster(false));
+        .finally(() => setLoadingRoster(false));
   }
 
   useFocusEffect(useCallback(() => {
-    setUnavailable(new Set());
+    if (!recheckCapacityOnFocus.current) setUnavailable(new Set());
     loadRoster();
   }, []));
+
+  useEffect(() => {
+    if (!loadingRoster && recheckCapacityOnFocus.current && rosterPlayers.length) {
+      recheckCapacityOnFocus.current = false;
+      requestScheduleGeneration();
+    }
+  }, [loadingRoster, rosterPlayers]);
   function toggleAvailability(name: string) {
     setUnavailable((current) => {
       const next = new Set(current);
@@ -130,6 +158,13 @@ export default function GameScreen() {
     if (warnings.length || deficits.length) {
       setCapacityWarnings(warnings);
       setCapacityDeficits(deficits);
+      const deficit = deficits[0];
+      if (deficit) {
+        const [noun] = capacityPositionWords(deficit.position);
+        setPositionShortage({ position: deficit.position, detail: `The available roster cannot cover every ${noun} slot within playing-time limits.`, candidates: deficit.candidates });
+      } else {
+        setPositionShortage(null);
+      }
       setShowCapacityWarning(true);
       return;
     }
@@ -180,7 +215,17 @@ export default function GameScreen() {
       const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK, disableMaximumLimits });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.');
+      const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
+      const availableRoster = rosterPlayers.filter((player) => !unavailable.has(player.name));
+      const shortage = parsePositionShortage(message, availableRoster, totalBlocks);
+      if (shortage) {
+        setPositionShortage(shortage);
+        setCapacityWarnings([]);
+        setCapacityDeficits([]);
+        setShowCapacityWarning(true);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -198,6 +243,12 @@ export default function GameScreen() {
     requestGameNumberConfirmation();
   }
 
+  function tryCapacityGeneration() {
+    setShowCapacityWarning(false);
+    setDisableMaximumLimits(false);
+    requestGameNumberConfirmation();
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -205,18 +256,20 @@ export default function GameScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.gameNumberModal}>
             <Text style={styles.modalEyebrow}>POSITION CAPACITY</Text>
-            <Text style={styles.modalTitle}>Some positions are short</Text>
-            <Text style={styles.modalDetail}>The available roster cannot cover every legal position slot normally:</Text>
+            <Text style={styles.modalTitle}>{positionShortage ? `Short on ${capacityPositionWords(positionShortage.position)[0]}s` : 'Some positions are short'}</Text>
+            <Text style={styles.modalDetail}>{positionShortage?.detail ?? 'The available roster cannot cover every legal position slot normally:'}</Text>
             <View style={styles.capacityWarningList}>
               {capacityWarnings.map((warning) => <Text key={warning} style={styles.modalWarning}>{warning.replace('Preflight: ', '').replace(/ available ([DMF]) players can cover (\d+) \1 slots\./, (_, position, slots) => ` legal ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'}${Number(slots) === 1 ? '' : 's'} available for ${slots} ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'} slots.`)}</Text>)}
               {capacityDeficits.map((deficit) => {
-                const [noun, destination] = capacityPositionWords(deficit.position);
-                return <Text key={`deficit-${deficit.position}`} style={styles.modalWarning}>The available roster cannot cover every {noun} position slot for this game.{deficit.candidates.length ? ` Consider making one of these players eligible for ${destination}: ${deficit.candidates.join(', ')}.` : ''}</Text>;
+                const [noun] = capacityPositionWords(deficit.position);
+                return <Text key={`deficit-${deficit.position}`} style={styles.modalWarning}>The available roster cannot cover every {noun} position slot for this game.</Text>;
               })}
+              {(!capacityDeficits.length && positionShortage?.candidates.length) ? <Text style={styles.modalWarning}>Consider making one of these players eligible for {capacityPositionWords(positionShortage.position)[1]}: {positionShortage.candidates.join(', ')}.</Text> : null}
             </View>
             <View style={styles.modalActions}>
-              <Pressable onPress={() => { setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
+              <Pressable onPress={() => { recheckCapacityOnFocus.current = true; setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.cancelButton} accessibilityRole="button"><Text style={styles.cancelButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
               <Pressable onPress={continueWithCapacityOverride} style={styles.confirmButton} accessibilityRole="button"><Text style={styles.confirmButtonText}>TURN OFF LIMITS</Text></Pressable>
+              <Pressable onPress={tryCapacityGeneration} accessibilityRole="button"><Text style={styles.cancelButtonText}>Try anyway with limits</Text></Pressable>
             </View>
           </View>
         </View>

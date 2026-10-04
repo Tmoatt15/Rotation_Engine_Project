@@ -73,6 +73,21 @@ export interface PositionCapacityDeficit {
   candidates: string[];
 }
 
+export function positionCapacityCandidates(position: 'D' | 'M' | 'F', roster: Player[], totalBlocks: number): string[] {
+  const alreadyEligible = new Set([
+    ...eligiblePlayers(roster, position),
+    ...backupEligiblePlayers(roster, position),
+  ].map((player) => player.name));
+  return roster
+    .filter((player) => player.available
+      && !isDedicatedGoalkeeper(player)
+      && !alreadyEligible.has(player.name)
+      && !player.forbidden_positions.includes(position))
+    .sort((left, right) => maximumFieldBlocksForPlayer(right, totalBlocks) - maximumFieldBlocksForPlayer(left, totalBlocks)
+      || left.name.localeCompare(right.name))
+    .map((player) => player.name);
+}
+
 export function positionCapacityWarnings(formationName: string, roster: Player[]): string[] {
   const formationCounts = formationCountsForName(formationName);
   const warnings: string[] = [];
@@ -106,19 +121,7 @@ export function positionCapacityDeficits(formationName: string, roster: Player[]
   return (['D', 'M', 'F'] as const)
     .filter((position) => formationCounts[position] > 0 && halfBlocks.some((blocks, half) => positionCapacity(position, half as 0 | 1) < formationCounts[position] * blocks))
     .map((position) => {
-      const alreadyEligible = new Set([
-        ...eligiblePlayers(roster, position),
-        ...backupEligiblePlayers(roster, position),
-      ].map((player) => player.name));
-      const candidates = roster
-        .filter((player) => player.available
-          && !isDedicatedGoalkeeper(player)
-          && !alreadyEligible.has(player.name)
-          && !player.forbidden_positions.includes(position))
-        .sort((left, right) => maximumFieldBlocksForPlayer(right, totalBlocks) - maximumFieldBlocksForPlayer(left, totalBlocks)
-          || left.name.localeCompare(right.name))
-        .map((player) => player.name);
-      return { position, candidates };
+      return { position, candidates: positionCapacityCandidates(position, roster, totalBlocks) };
     });
 }
 
