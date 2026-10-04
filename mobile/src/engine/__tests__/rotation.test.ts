@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 vi.setConfig({ testTimeout: 15000 });
 
@@ -568,6 +569,22 @@ describe('goalkeeper and minimum protection', () => {
     expect(result.timeline[0].D[0]).toBeTruthy();
     expect(result.timeline[1].D[0]).toBeTruthy();
     expect(result.errors.filter((error) => error.includes('endpoint'))).toEqual([]);
+  });
+
+  it('preserves the last endpoint during late-arrival regeneration', () => {
+    const team = JSON.parse(readFileSync('../teams.json', 'utf8'))[0] as { season_roster: PlayerInput[] };
+    const unavailable = new Set(['Blake', 'Frank', 'Sid']);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '3-4-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, team.season_roster.filter((player) => !unavailable.has(player.name)).map(createPlayer));
+    const players = team.season_roster.map(createPlayer);
+    players.forEach((player) => { player.available = !unavailable.has(player.name); });
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'Frank', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
+
+    expect(initial.errors).toEqual([]);
+    expect(regenerated.errors.filter((error) => error.includes('endpoint'))).toEqual([]);
+    expect(regenerated.timeline[9].D).toHaveLength(3);
+    expect(regenerated.timeline[9].M).toHaveLength(4);
+    expect(regenerated.timeline[9].F).toHaveLength(3);
   });
 
   it('keeps feasible-capacity but illegal core endpoint misses blocking', () => {
