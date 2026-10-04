@@ -168,7 +168,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [lateStartBlock, setLateStartBlock] = useState(1);
   const [lateTargetBlocks, setLateTargetBlocks] = useState(1);
   const [lateTakeoverGk, setLateTakeoverGk] = useState(false);
-  const [lateWarning, setLateWarning] = useState(false);
   const [lateError, setLateError] = useState<string | null>(null);
   const [lateSaving, setLateSaving] = useState(false);
   const [lateArrivedNames, setLateArrivedNames] = useState<string[]>([]);
@@ -282,7 +281,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateStartBlock(nextBlock + 1);
     setLateTargetBlocks(Math.max(1, Math.ceil(((schedule?.blocks.length ?? 1) - nextBlock) / 2)));
     setLateTakeoverGk(false);
-    setLateWarning(false);
     setLateError(null);
     setShowLateArrival(true);
   }
@@ -290,14 +288,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   async function confirmLateArrival() {
     if (!schedule?.team_id || !latePlayerName) return;
     const arrivingPlayer = latePlayerName;
-    const player = roster.find((item) => item.name === arrivingPlayer);
-    if (!player) return;
     const remainingBlocks = schedule.blocks.length - lateStartBlock + 1;
-    const minimum = ['core', 'core_a', 'core_b'].includes(player.group) ? Math.ceil(schedule.blocks.length * 0.7) : player.group === 'rotational' ? Math.ceil(schedule.blocks.length * 0.5) : Math.ceil(schedule.blocks.length * 0.4);
-    if (!lateWarning && lateTargetBlocks < minimum) {
-      setLateWarning(true);
-      return;
-    }
     setLateSaving(true);
     setLateError(null);
     try {
@@ -854,9 +845,8 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <View style={styles.stepperRow}><Text style={styles.stepperLabel}>START BLOCK</Text><View style={styles.stepper}><Pressable onPress={() => setLateStartBlock((value) => Math.max(activeBlock + 2, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateStartBlock}</Text><Pressable onPress={() => setLateStartBlock((value) => Math.min(schedule.blocks.length, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
                 <View style={styles.stepperRow}><Text style={styles.stepperLabel}>BLOCKS TO PLAY</Text><View style={styles.stepper}><Pressable onPress={() => setLateTargetBlocks((value) => Math.max(0, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateTargetBlocks}</Text><Pressable onPress={() => setLateTargetBlocks((value) => Math.min(schedule.blocks.length - lateStartBlock + 1, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
                 {lateStartBlock === halftimeIndex + 1 && latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper in the second half</Text></Pressable>}
-                {lateWarning && <Text style={styles.overrideNotice}>This is below the normal minimum for this player group. Continue anyway?</Text>}
                 {lateError && <Text style={styles.timeError}>{lateError}</Text>}
-                <View style={styles.modalActions}><Pressable onPress={() => lateWarning ? setLateWarning(false) : setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>{lateWarning ? 'GO BACK' : 'BACK'}</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : lateWarning ? 'PROCEED' : 'DONE'}</Text></Pressable></View>
+                <View style={styles.modalActions}><Pressable onPress={() => setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>BACK</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : 'DONE'}</Text></Pressable></View>
               </>
             )}
             {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={styles.cancelButtonText}>CANCEL</Text></Pressable>}
