@@ -37,7 +37,7 @@ function capacityPositionWords(position: PositionCapacityDeficit['position']): [
 
 type PositionShortage = { position: PositionCapacityDeficit['position']; detail: string; candidates: string[] };
 
-function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlocks: number): PositionShortage | null {
+function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlocks: number, formation: string): PositionShortage | null {
   const blockCapacity = message.match(/Block (\d+): ([DMF]) requires (\d+) players but (?:only )?(\d+) were assigned/);
   const exactAssignment = message.match(/Block (\d+): ([DMF]) players cannot form a complete legal exact-slot assignment/);
   const endpoint = message.match(/Block (\d+): core player (.+?) could not be assigned to the (first|last) block endpoint/);
@@ -217,7 +217,7 @@ export default function GameScreen() {
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
       const availableRoster = rosterPlayers.filter((player) => !unavailable.has(player.name));
-      const shortage = parsePositionShortage(message, availableRoster, totalBlocks);
+      const shortage = parsePositionShortage(message, availableRoster, totalBlocks, formation);
       if (shortage) {
         setPositionShortage(shortage);
         setCapacityWarnings([]);
