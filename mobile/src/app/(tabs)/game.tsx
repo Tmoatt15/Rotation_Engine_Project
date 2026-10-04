@@ -261,8 +261,8 @@ export default function GameScreen() {
             <View style={styles.capacityWarningList}>
               {capacityWarnings.map((warning) => <Text key={warning} style={styles.modalWarning}>{warning.replace('Preflight: ', '').replace(/ available ([DMF]) players can cover (\d+) \1 slots\./, (_, position, slots) => ` legal ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'}${Number(slots) === 1 ? '' : 's'} available for ${slots} ${position === 'D' ? 'defender' : position === 'M' ? 'midfielder' : 'forward'} slots.`)}</Text>)}
               {capacityDeficits.map((deficit) => {
-                const [noun] = capacityPositionWords(deficit.position);
-                return <Text key={`deficit-${deficit.position}`} style={styles.modalWarning}>The available roster cannot cover every {noun} position slot for this game.</Text>;
+                const [noun, candidatePosition] = capacityPositionWords(deficit.position);
+                return <Text key={`deficit-${deficit.position}`} style={styles.modalWarning}>The available roster cannot cover every {noun} position slot for this game.{deficit.candidates.length ? ` Consider making one of these players eligible for ${candidatePosition}: ${deficit.candidates.join(', ')}.` : ''}</Text>;
               })}
               {(!capacityDeficits.length && positionShortage?.candidates.length) ? <Text style={styles.modalWarning}>Consider making one of these players eligible for {capacityPositionWords(positionShortage.position)[1]}: {positionShortage.candidates.join(', ')}.</Text> : null}
             </View>
