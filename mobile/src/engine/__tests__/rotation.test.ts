@@ -771,6 +771,7 @@ describe('quota fairness and controlled coverage', () => {
 
     expect(fieldCapacityByHalf(dualRoleKeeper, 10)).toEqual([4, 4]);
     expect(fieldCapacityByHalf(dualRoleKeeper, 10, { firstHalfGk: 'Dual GK' })).toEqual([0, 3]);
+    expect(fieldCapacityByHalf(dualRoleKeeper, 10, { assumeWorstCase: true })).toEqual([0, 0]);
     expect(fieldCapacityByHalf(dedicatedKeeper, 10)).toEqual([0, 0]);
   });
 
