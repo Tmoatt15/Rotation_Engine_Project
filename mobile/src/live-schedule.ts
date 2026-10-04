@@ -8,6 +8,8 @@ export type LiveSchedule = {
   team_id?: string;
   team_name?: string;
   game_number: number;
+  first_half_gk?: string | null;
+  second_half_gk?: string | null;
   available_player_names?: string[];
   block_start_minutes?: number[];
   block_lengths_minutes?: number[];
