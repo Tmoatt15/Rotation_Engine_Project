@@ -945,6 +945,30 @@ describe('quota fairness and controlled coverage', () => {
     }
   });
 
+  it('generates the feasible 16-player endpoint roster', () => {
+    const players = [
+      { name: 'Alvin', group: 'core' as const, general_positions: ['D'], primary_positions: ['LCB', 'RCB'], backup_positions: ['M'] },
+      { name: 'Artur', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY'] },
+      { name: 'Brad', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['F'] },
+      { name: 'Cameron', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY', 'GK'] },
+      { name: 'Dane', group: 'core' as const, general_positions: ['M'], primary_positions: ['LM', 'RM'], backup_positions: ['F'] },
+      { name: 'Eitan', group: 'rotational' as const, general_positions: ['D'], primary_positions: ['ANY', 'GK'], backup_positions: ['M'] },
+      { name: 'Everett', group: 'core' as const, general_positions: ['D'], primary_positions: ['LCB', 'RCB'], backup_positions: ['CM'] },
+      { name: 'Hanshith', group: 'core' as const, general_positions: ['F'], primary_positions: ['CF', 'GK'], backup_positions: ['M', 'CM'] },
+      { name: 'Jonathan', group: 'core' as const, general_positions: ['M'], primary_positions: ['CM'], backup_positions: ['D'] },
+      { name: 'Mahaswin', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY'] },
+      { name: 'Max', group: 'core' as const, general_positions: ['F'], primary_positions: ['LF'] },
+      { name: 'Prerith', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['LB', 'RB'] },
+      { name: 'Ryan', group: 'rotational' as const, general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['M'] },
+      { name: 'Sawyer', group: 'core' as const, general_positions: ['F'], primary_positions: ['RF'] },
+      { name: 'Thanish', group: 'rotational' as const, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['LB', 'RB'] },
+      { name: 'Yash', group: 'rotational' as const, general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['M'] },
+    ].map(createPlayer);
+    const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan' }, players);
+
+    expect(result.errors).toEqual([]);
+  });
+
   it('generates a later season game with prior history and mixed eligibility', () => {
     const players = seasonSimulationRoster().map(createPlayer);
     const result = generateSchedule({
