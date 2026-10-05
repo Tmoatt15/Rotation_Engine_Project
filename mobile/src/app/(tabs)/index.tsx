@@ -181,7 +181,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Next move</Text>
           </View>
           <TouchableOpacity
-            style={styles.primaryAction}
+            style={[styles.primaryAction, activeTeamName && !hasAcceptedSchedule && styles.primaryActionCompact]}
             accessibilityRole="button"
             onPress={() => {
               if (!activeTeamName) {
@@ -193,9 +193,9 @@ export default function HomeScreen() {
               }
             }}>
             <View>
-              <Text style={styles.primaryEyebrow}>{!activeTeamName ? 'GET STARTED' : hasAcceptedSchedule ? 'ACCEPTED SCHEDULE' : 'GAME 01'}</Text>
-              <Text style={styles.primaryTitle}>{!activeTeamName ? 'Create your first team' : hasAcceptedSchedule ? 'Resume Live Game' : 'Build Substitution Schedule'}</Text>
-              <Text style={styles.primaryDetail}>{!activeTeamName ? 'Add players to begin setting up rotations' : hasAcceptedSchedule ? 'Continue the saved substitution plan' : 'Select player availability, then generate rotation schedule'}</Text>
+              {(!activeTeamName || hasAcceptedSchedule) && <Text style={styles.primaryEyebrow}>{!activeTeamName ? 'GET STARTED' : 'ACCEPTED SCHEDULE'}</Text>}
+              <Text style={[styles.primaryTitle, activeTeamName && !hasAcceptedSchedule && styles.primaryTitleOnly]}>{!activeTeamName ? 'Create your first team' : hasAcceptedSchedule ? 'Resume Live Game' : 'Build Substitution Schedule'}</Text>
+              {(!activeTeamName || hasAcceptedSchedule) && <Text style={styles.primaryDetail}>{!activeTeamName ? 'Add players to begin setting up rotations' : 'Continue the saved substitution plan'}</Text>}
             </View>
             <View style={styles.primaryArrow}>
               <SymbolView
@@ -365,6 +365,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 19,
     paddingVertical: 17,
   },
+  primaryActionCompact: {
+    minHeight: 80,
+  },
   primaryEyebrow: {
     color: '#f9d7c9',
     fontSize: 10,
@@ -376,6 +379,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     marginTop: 7,
+  },
+  primaryTitleOnly: {
+    marginTop: 0,
   },
   primaryDetail: {
     color: '#f9ddd2',

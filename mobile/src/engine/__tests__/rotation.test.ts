@@ -633,6 +633,11 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.timeline[9].F).toHaveLength(3);
     expect(regenerated.timeline[9].F).toContain('Max');
     expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('Max'))).toHaveLength(3);
+    const frankBlocks = regenerated.timeline
+      .map((block, index) => [...block.D, ...block.M, ...block.F].includes('Frank') ? index + 1 : null)
+      .filter((block): block is number => block !== null);
+    expect(frankBlocks).toEqual(expect.arrayContaining([5]));
+    expect(frankBlocks).toHaveLength(3);
   });
 
   it('keeps feasible-capacity but illegal core endpoint misses blocking', () => {

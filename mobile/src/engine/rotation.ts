@@ -113,7 +113,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       player.available = true;
       if (change.target_blocks !== undefined) {
         player.target_blocks = change.target_blocks;
-        player.minimum_blocks = change.minimum_blocks ?? 0;
+        player.minimum_blocks = change.target_blocks;
         player.hard_minimum_blocks = player.minimum_blocks;
         player.maximum_blocks = change.maximum_blocks ?? game.total_blocks;
         player.hard_maximum_blocks = player.maximum_blocks;
@@ -123,7 +123,32 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     }
   }
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);
+  for (const change of changes) {
+    if (change.action !== 'available' || change.target_blocks === undefined) continue;
+    const player = byName.get(change.player);
+    if (!player) continue;
+    player.target_blocks = change.target_blocks;
+    player.minimum_blocks = change.target_blocks;
+    player.hard_minimum_blocks = change.target_blocks;
+    player.maximum_blocks = change.maximum_blocks ?? game.total_blocks;
+    player.hard_maximum_blocks = player.maximum_blocks;
+    player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
+  }
   const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility);
   const surplus = computeSurplus(game, roster);
-  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  const placementErrors = changes
+    .filter((change) => change.action === 'available' && change.target_blocks !== undefined)
+    .flatMap((change) => {
+      const blocks = timeline.timeline.slice(change.block);
+      const appearances = blocks.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(change.player)).length;
+      const errors: string[] = [];
+      if (!blocks[0] || ![blocks[0].GK, ...blocks[0].D, ...blocks[0].M, ...blocks[0].F].includes(change.player)) {
+        errors.push(`${change.player} could not be placed in block ${change.block + 1}.`);
+      }
+      if (appearances < change.target_blocks!) {
+        errors.push(`${change.player} could not reach ${change.target_blocks} blocks from block ${change.block + 1}; scheduled ${appearances}.`);
+      }
+      return errors;
+    });
+  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
 }

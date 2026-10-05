@@ -293,7 +293,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateError(null);
     try {
       const availableNames = [...new Set([...(schedule.available_player_names ?? []), arrivingPlayer])];
-      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: 0, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined) });
+      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined) });
       const nextBlocks = nextSchedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] }));
       setLiveBlocks(nextBlocks);
       await setAcceptedSchedule({ ...schedule, ...nextSchedule, blocks: nextBlocks, completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
