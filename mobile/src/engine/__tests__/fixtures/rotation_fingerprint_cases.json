@@ -1741,7 +1741,7 @@
       }
     ],
     "fingerprint": "41a7b6fc2b45bdfe76a35a628e49de5a7251d954bdd6830f28d26944fcd9ac42",
-    "spec_verified": false,
+    "spec_verified": true,
     "expected": {
       "errors": [],
       "warnings": [
