@@ -1471,5 +1471,288 @@
       }
     },
     "happy_path": true
+  },
+  {
+    "id": "11v11-4-3-3-balanced",
+    "game": {
+      "total_blocks": 10,
+      "formation": "4-3-3",
+      "game_format": "11v11",
+      "has_goalkeeper": true,
+      "first_half_gk": "RotD05",
+      "second_half_gk": "RotM03",
+      "season_total_games": 1,
+      "season_game_number": 1
+    },
+    "players": [
+      {
+        "name": "CoreF01",
+        "group": "core",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "LF",
+          "RF"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "CoreF02",
+        "group": "core",
+        "general_positions": [
+          "F"
+        ],
+        "primary_positions": [
+          "RF",
+          "LF"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "CoreM01",
+        "group": "core",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "RCM",
+          "LCM"
+        ],
+        "backup_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "CoreM02",
+        "group": "core",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "LCM",
+          "RCM"
+        ],
+        "backup_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "CoreM03",
+        "group": "core",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "CoreD01",
+        "group": "core",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "LB",
+          "RB"
+        ],
+        "backup_positions": [
+          "LCB",
+          "RCB"
+        ]
+      },
+      {
+        "name": "CoreD02",
+        "group": "core",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "RCB",
+          "LCB"
+        ],
+        "backup_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "RotD01",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "RCB",
+          "LCB"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "RotM01",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "LM",
+          "RM"
+        ]
+      },
+      {
+        "name": "RotD02",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "LB",
+          "RB"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "RotD03",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "RotM02",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "RotM03",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M",
+          "GK"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "RotM04",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "RotM05",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ],
+        "backup_positions": [
+          "F"
+        ]
+      },
+      {
+        "name": "CoreD03",
+        "group": "core",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "RotM06",
+        "group": "rotational",
+        "general_positions": [
+          "M"
+        ],
+        "primary_positions": [
+          "M"
+        ],
+        "backup_positions": [
+          "D"
+        ]
+      },
+      {
+        "name": "RotD05",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D",
+          "GK"
+        ],
+        "backup_positions": [
+          "M"
+        ]
+      },
+      {
+        "name": "RotF01",
+        "group": "rotational",
+        "general_positions": [
+          "D"
+        ],
+        "primary_positions": [
+          "D",
+          "M"
+        ]
+      }
+    ],
+    "fingerprint": "41a7b6fc2b45bdfe76a35a628e49de5a7251d954bdd6830f28d26944fcd9ac42",
+    "spec_verified": false,
+    "expected": {
+      "errors": [],
+      "warnings": [
+        "Requested field targets require 116 slots, but the formation provides 100; targets cannot all be met.",
+        "RotM01 (rotational) is under minimum by 1 blocks.",
+        "RotD03 (rotational) is under minimum by 1 blocks.",
+        "RotM06 (rotational) is under minimum by 2 blocks.",
+        "RotF01 (rotational) is under minimum by 1 blocks."
+      ],
+      "field_players_per_block": 10,
+      "core_players_in_final_block": 8
+    }
   }
 ]
