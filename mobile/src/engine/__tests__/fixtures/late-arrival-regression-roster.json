@@ -1,0 +1,156 @@
+{
+  "season_roster": [
+    {
+      "name": "CoreF01",
+      "group": "core",
+      "general_positions": ["F"],
+      "primary_positions": ["LF", "RF"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreF02",
+      "group": "core",
+      "general_positions": ["F"],
+      "primary_positions": ["RF", "LF"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreM01",
+      "group": "core",
+      "general_positions": ["M"],
+      "primary_positions": ["RCM", "LCM"],
+      "backup_positions": ["F"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreM02",
+      "group": "core",
+      "general_positions": ["M"],
+      "primary_positions": ["LCM", "RCM"],
+      "backup_positions": ["F"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreM03",
+      "group": "core",
+      "general_positions": ["M"],
+      "primary_positions": ["M"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreD01",
+      "group": "core",
+      "general_positions": ["D"],
+      "primary_positions": ["LB", "RB"],
+      "backup_positions": ["LCB", "RCB"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreD02",
+      "group": "core",
+      "general_positions": ["D"],
+      "primary_positions": ["RCB", "LCB"],
+      "backup_positions": ["F"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotD01",
+      "group": "rotational",
+      "general_positions": ["D"],
+      "primary_positions": ["RCB", "LCB"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM01",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["LM", "RM"],
+      "backup_positions": [],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotD02",
+      "group": "rotational",
+      "general_positions": ["D"],
+      "primary_positions": ["LB", "RB"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotD03",
+      "group": "rotational",
+      "general_positions": ["D"],
+      "primary_positions": ["D"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM02",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["M"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM03",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["M", "GK"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM04",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["M"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM05",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["M"],
+      "backup_positions": ["F"],
+      "excluded_positions": []
+    },
+    {
+      "name": "CoreD03",
+      "group": "core",
+      "general_positions": ["D"],
+      "primary_positions": ["D"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotM06",
+      "group": "rotational",
+      "general_positions": ["M"],
+      "primary_positions": ["M"],
+      "backup_positions": ["D"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotD05",
+      "group": "rotational",
+      "general_positions": ["D"],
+      "primary_positions": ["D", "GK"],
+      "backup_positions": ["M"],
+      "excluded_positions": []
+    },
+    {
+      "name": "RotF01",
+      "group": "rotational",
+      "general_positions": ["D"],
+      "primary_positions": ["D", "M"],
+      "backup_positions": [],
+      "excluded_positions": []
+    }
+  ]
+}

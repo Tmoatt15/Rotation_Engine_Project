@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 
 vi.setConfig({ testTimeout: 15000 });
 
 import cases from './fixtures/rotation_contract_cases.json';
 import fingerprintCases from './fixtures/rotation_fingerprint_cases.json';
+import regressionRoster from './fixtures/late-arrival-regression-roster.json';
 import { createPlayer, generateSchedule, regenerateSchedule } from '../rotation';
 import { backupEligiblePlayers, eligiblePlayers, exclusionBlocksSlot, positionalPriority } from '../positional';
 import { DEVELOPMENTAL_MAX, HARD_MAXIMUM, ROTATIONAL_MAX, computeBlockTargets, fieldCapacityByHalf, intendedMaximumBlocksForPercentage, minimumBlocksForPercentage, positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, targetBlocksForPercentage } from '../quotas';
@@ -618,23 +618,23 @@ describe('goalkeeper and minimum protection', () => {
   });
 
   it('preserves the last endpoint during late-arrival regeneration', () => {
-    const team = JSON.parse(readFileSync('../teams.json', 'utf8'))[0] as { season_roster: PlayerInput[] };
-    const unavailable = new Set(['Blake', 'Frank', 'Sid']);
-    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '3-4-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true };
+    const team = regressionRoster as { season_roster: PlayerInput[] };
+    const unavailable = new Set(['RotD01', 'RotF01', 'CoreD03']);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '3-4-3', first_half_gk: 'RotD05', second_half_gk: 'RotM03', allow_emergency_assignments: true };
     const initial = generateSchedule(game, team.season_roster.filter((player) => !unavailable.has(player.name)).map(createPlayer));
     const players = team.season_roster.map(createPlayer);
     players.forEach((player) => { player.available = !unavailable.has(player.name); });
-    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'Frank', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'RotF01', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
 
     expect(initial.errors).toEqual([]);
     expect(regenerated.errors).toEqual([]);
     expect(regenerated.timeline[9].D).toHaveLength(3);
     expect(regenerated.timeline[9].M).toHaveLength(4);
     expect(regenerated.timeline[9].F).toHaveLength(3);
-    expect(regenerated.timeline[9].F).toContain('Max');
-    expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('Max'))).toHaveLength(3);
+    expect(regenerated.timeline[9].F).toContain('CoreF01');
+    expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('CoreF01'))).toHaveLength(3);
     const frankBlocks = regenerated.timeline
-      .map((block, index) => [...block.D, ...block.M, ...block.F].includes('Frank') ? index + 1 : null)
+      .map((block, index) => [...block.D, ...block.M, ...block.F].includes('RotF01') ? index + 1 : null)
       .filter((block): block is number => block !== null);
     expect(frankBlocks).toEqual(expect.arrayContaining([5]));
     expect(frankBlocks).toHaveLength(3);
