@@ -2414,6 +2414,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
         .map((name) => roster.find((player) => player.name === name))
         .filter((player): player is Player => player !== undefined
           && !used.has(player.name)
+          && (!(startBlock > 1 && block === game.total_blocks) || canCoverGroup(game, roster, player.name, group))
           && (game.disable_maximum_limits
             || (materializedCount(player.name) < player.hard_maximum_blocks - materializationEndpointHeadroom(player.name, block)
               && materializedHalfCount(player.name, half) < player.max_blocks_per_half - (half === endpointHalf ? materializationEndpointHeadroom(player.name, block) : 0)
@@ -2432,7 +2433,10 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             && materializedHalfCount(player.name, half) < player.max_blocks_per_half - (half === endpointHalf ? materializationEndpointHeadroom(player.name, block) : 0)
             && (!goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
               || result.timeline.reduce((total, block) => total + (block.D.includes(player.name) || block.M.includes(player.name) || block.F.includes(player.name) ? 1 : 0), 0) < player.gk_field_maximum_blocks)));
-        const endpointSafeCandidates = quotaCandidates.filter((player) => block === 1 || block === game.total_blocks || !endpointCoreNames.has(player.name) || planned[group][block - 1]?.includes(player.name));
+        const endpointSafeCandidates = quotaCandidates
+          .filter((player) => block === 1 || block === game.total_blocks || !endpointCoreNames.has(player.name) || planned[group][block - 1]?.includes(player.name))
+          .sort((left, right) => (block === game.total_blocks && startBlock > 1 ? Number(endpointHeadroomNames.has(right.name)) - Number(endpointHeadroomNames.has(left.name)) : 0)
+            || left.name.localeCompare(right.name));
         const candidatePools = game.disable_maximum_limits ? [candidates] : [endpointSafeCandidates, quotaCandidates];
         const validChoice = emergency ? undefined : candidatePools
           .map((pool) => findCombination(
