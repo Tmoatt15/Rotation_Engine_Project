@@ -620,7 +620,7 @@ describe('goalkeeper and minimum protection', () => {
   it('preserves the last endpoint during late-arrival regeneration', () => {
     const team = regressionRoster as { season_roster: PlayerInput[] };
     const unavailable = new Set(['RotD01', 'RotF01', 'CoreD03']);
-    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '3-4-3', first_half_gk: 'RotD05', second_half_gk: 'RotM03', allow_emergency_assignments: true };
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'RotD05', second_half_gk: 'RotM03', allow_emergency_assignments: true, disable_maximum_limits: true };
     const initial = generateSchedule(game, team.season_roster.filter((player) => !unavailable.has(player.name)).map(createPlayer));
     const players = team.season_roster.map(createPlayer);
     players.forEach((player) => { player.available = !unavailable.has(player.name); });
@@ -633,11 +633,36 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.timeline[9].F).toHaveLength(3);
     expect(regenerated.timeline[9].F).toContain('CoreF01');
     expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('CoreF01'))).toHaveLength(3);
+    const regeneratedFieldPlayers = regenerated.timeline.flatMap((block) => [block.GK, ...block.D, ...block.M, ...block.F]);
+    expect(regeneratedFieldPlayers).not.toContain('RotD01');
+    expect(regeneratedFieldPlayers).not.toContain('CoreD03');
     const frankBlocks = regenerated.timeline
       .map((block, index) => [...block.D, ...block.M, ...block.F].includes('RotF01') ? index + 1 : null)
       .filter((block): block is number => block !== null);
     expect(frankBlocks).toEqual(expect.arrayContaining([5]));
     expect(frankBlocks).toHaveLength(3);
+  });
+
+  it('allows core Blake to skip the impossible first endpoint when arriving late', () => {
+    const latePlayer = 'Blake' as const;
+    const roster = [
+      ...seasonSimulationRoster().map((player) => player.name === 'Blake' ? { ...player, group: 'core' as const } : player),
+      { name: 'GK1', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+      { name: 'GK2', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'] },
+    ];
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'GK1', second_half_gk: 'GK2', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, roster.filter((player) => player.name !== latePlayer).map(createPlayer));
+    const players = roster.map(createPlayer);
+    players.find((player) => player.name === latePlayer)!.available = false;
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: latePlayer, action: 'available', block: 4, target_blocks: 3, minimum_blocks: 3, maximum_blocks: 3 }]);
+
+    expect(initial.errors).toEqual([]);
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`Block 1: core player ${latePlayer}`));
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not be placed in block 5`));
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not reach 3 blocks`));
+    expect([...regenerated.timeline[4].D, ...regenerated.timeline[4].M, ...regenerated.timeline[4].F]).toContain(latePlayer);
+    expect([...regenerated.timeline[9].D, ...regenerated.timeline[9].M, ...regenerated.timeline[9].F]).toContain(latePlayer);
+    expect(regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer))).toHaveLength(3);
   });
 
   it('keeps feasible-capacity but illegal core endpoint misses blocking', () => {

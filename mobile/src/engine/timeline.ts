@@ -2474,20 +2474,25 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       ...result.timeline[blockIndex].M,
       ...result.timeline[blockIndex].F,
     ]);
+    const lateArrivalStartsAfterBlock = (playerName: string): boolean => game.availability_changes.some((change) => change.action === 'available' && change.player === playerName && blockIndex < change.block);
     const endpointFieldCapacity = formation.D + formation.M + formation.F;
     const endpointCorePlayers = roster.filter((player) => player.available
       && CORE_GROUPS.has(player.group)
       && player.name !== goalkeepers[blockIndex]?.name
-      && player.general_positions.some((position) => ['ANY', 'D', 'M', 'F'].includes(position)));
+      && player.general_positions.some((position) => ['ANY', 'D', 'M', 'F'].includes(position))
+      && !lateArrivalStartsAfterBlock(player.name));
     if (endpointCorePlayers.length > endpointFieldCapacity) continue;
     roster
       .filter((player) => player.available && CORE_GROUPS.has(player.group)
         && player.name !== goalkeepers[blockIndex]?.name
-        && player.general_positions.some((position) => ['ANY', 'D', 'M', 'F'].includes(position)))
+        && player.general_positions.some((position) => ['ANY', 'D', 'M', 'F'].includes(position))
+        && !lateArrivalStartsAfterBlock(player.name))
       .filter((player) => !assignedFieldPlayers.has(player.name))
       .forEach((player) => result.errors.push(`Block ${blockIndex + 1}: core player ${player.name} could not be assigned to the ${blockIndex === 0 ? 'first' : 'last'} block endpoint; no legal endpoint lineup was available.`));
   }
-  result.errors = [...new Set([...result.errors, ...validateTimeline(roster, result.timeline, formation, slots, game.total_blocks)])];
+  const validationErrors = validateTimeline(roster, result.timeline, formation, slots, game.total_blocks)
+    .filter((error) => !game.disable_maximum_limits || (!error.includes('exceeds hard maximum') && !error.includes('exceeds the half')));
+  result.errors = [...new Set([...result.errors, ...validationErrors])];
   const firstBlockLocked = startBlock === 1 && result.timeline[0]
     ? { ...result.timeline[0], D: [...result.timeline[0].D], M: [...result.timeline[0].M], F: [...result.timeline[0].F], bench: [...result.timeline[0].bench], positions: { ...result.timeline[0].positions } }
     : null;

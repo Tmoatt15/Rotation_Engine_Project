@@ -171,8 +171,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [lateError, setLateError] = useState<string | null>(null);
   const [lateSaving, setLateSaving] = useState(false);
   const [lateArrivedNames, setLateArrivedNames] = useState<string[]>([]);
+  const [availablePlayerNames, setAvailablePlayerNames] = useState<string[]>([]);
   const warnedBlocks = useRef(new Set<string>());
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentAvailablePlayerNames = availablePlayerNames.length ? availablePlayerNames : (schedule?.available_player_names ?? []);
 
   useEffect(() => {
     if (providedSchedule) return undefined;
@@ -193,6 +195,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setCompletedBlocks(schedule.completed_blocks ?? []);
       setReturnedPlayers(schedule.live_returned_players ?? []);
       setPositionOverrides(schedule.live_position_overrides ?? []);
+      setAvailablePlayerNames(schedule.available_player_names ?? []);
     }
   }, [schedule]);
 
@@ -292,10 +295,11 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateSaving(true);
     setLateError(null);
     try {
-      const availableNames = [...new Set([...(schedule.available_player_names ?? []), arrivingPlayer])];
+      const availableNames = [...new Set([...currentAvailablePlayerNames, arrivingPlayer])];
       const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined) });
       const nextBlocks = nextSchedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] }));
       setLiveBlocks(nextBlocks);
+      setAvailablePlayerNames(nextSchedule.available_player_names ?? availableNames);
       await setAcceptedSchedule({ ...schedule, ...nextSchedule, blocks: nextBlocks, completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
       setLateArrivedNames((names) => [...names, arrivingPlayer]);
       setShowLateArrival(false);
@@ -833,12 +837,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
             <Text style={styles.modalDetail}>{latePlayerName ? 'Choose when they start and how many blocks they play.' : 'Players who were unavailable before the game.'}</Text>
             {!latePlayerName ? (
               <ScrollView style={styles.latePlayerList}>
-                {roster.filter((player) => !(schedule.available_player_names ?? []).includes(player.name) && !lateArrivedNames.includes(player.name)).map((player) => (
+                {roster.filter((player) => !currentAvailablePlayerNames.includes(player.name) && !lateArrivedNames.includes(player.name)).map((player) => (
                   <Pressable key={player.name} onPress={() => setLatePlayerName(player.name)} style={styles.latePlayerRow} accessibilityRole="button">
                     <Text style={styles.latePlayerName}>{displayPlayerName(player.name)}</Text><Text style={styles.latePlayerGroup}>{player.group.replace('_', ' ')}</Text>
                   </Pressable>
                 ))}
-                {roster.filter((player) => !(schedule.available_player_names ?? []).includes(player.name) && !lateArrivedNames.includes(player.name)).length === 0 && <Text style={styles.modalDetail}>Everyone is already in this rotation.</Text>}
+                {roster.filter((player) => !currentAvailablePlayerNames.includes(player.name) && !lateArrivedNames.includes(player.name)).length === 0 && <Text style={styles.modalDetail}>Everyone is already in this rotation.</Text>}
               </ScrollView>
             ) : (
               <>
