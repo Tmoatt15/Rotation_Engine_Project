@@ -625,6 +625,7 @@ describe('goalkeeper and minimum protection', () => {
     const players = team.season_roster.map(createPlayer);
     players.forEach((player) => { player.available = !unavailable.has(player.name); });
     const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'RotF01', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
+    const initialGoalkeeperCounts = new Map(['RotD05', 'RotM03'].map((name) => [name, initial.timeline.filter((block) => block.GK === name).length]));
 
     expect(initial.errors).toEqual([]);
     expect(regenerated.errors).toEqual([]);
@@ -642,6 +643,7 @@ describe('goalkeeper and minimum protection', () => {
       .filter((block): block is number => block !== null);
     expect(frankBlocks).toEqual(expect.arrayContaining([5]));
     expect(frankBlocks).toHaveLength(3);
+    initialGoalkeeperCounts.forEach((count, name) => expect(regenerated.timeline.filter((block) => block.GK === name).length).toBe(count));
   });
 
   it('keeps other unavailable players out when one late arrival returns', () => {

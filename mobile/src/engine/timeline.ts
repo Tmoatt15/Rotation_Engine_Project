@@ -857,13 +857,15 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             break;
           }
           if (reservedNames.length >= formation[group]) {
-            const donorIndex = reservedNames.findIndex((name) => {
+            const orderedDonors = [...reservedNames]
+              .sort((left, right) => Number(assignedGoalkeepers.has(left)) - Number(assignedGoalkeepers.has(right)))
+            const donorIndex = orderedDonors.findIndex((name) => {
               const donor = roster.find((candidate) => candidate.name === name);
               return donor && name !== goalkeeperNames[blockIndex] && (reservationCounts.get(name) ?? 0) > donor.hard_minimum_blocks;
             });
             if (donorIndex < 0) continue;
-            const donorName = reservedNames[donorIndex];
-            reservedNames.splice(donorIndex, 1);
+            const donorName = orderedDonors[donorIndex];
+            reservedNames.splice(reservedNames.indexOf(donorName), 1);
             reservationCounts.set(donorName, Math.max(0, (reservationCounts.get(donorName) ?? 0) - 1));
             coreReservations.byBlock[blockIndex].delete(donorName);
           }
@@ -2380,6 +2382,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       : block < startBlock ? roster.find((player) => player.name === frozenTimeline[block - 1]?.GK) ?? null : chooseGk(game, roster, block);
     goalkeepers.push(goalkeeper);
   }
+  const assignedGoalkeeperNames = new Set(goalkeepers.flatMap((player) => player ? [player.name] : []));
   const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock);
   optimizeGlobalPositionSwitches(game, roster, formation, planned, startBlock);
   if (startBlock > 1) {
@@ -2402,7 +2405,9 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             const rightPlayer = right.player!;
             const leftHeadroom = leftPlayer.field_blocks + plannedCount(leftPlayer.name) - (CORE_GROUPS.has(leftPlayer.group) ? leftPlayer.target_blocks : leftPlayer.hard_minimum_blocks);
             const rightHeadroom = rightPlayer.field_blocks + plannedCount(rightPlayer.name) - (CORE_GROUPS.has(rightPlayer.group) ? rightPlayer.target_blocks : rightPlayer.hard_minimum_blocks);
-            return Number(CORE_GROUPS.has(leftPlayer.group)) - Number(CORE_GROUPS.has(rightPlayer.group)) || rightHeadroom - leftHeadroom || leftPlayer.name.localeCompare(rightPlayer.name);
+            return Number(assignedGoalkeeperNames.has(leftPlayer.name)) - Number(assignedGoalkeeperNames.has(rightPlayer.name))
+              || Number(CORE_GROUPS.has(leftPlayer.group)) - Number(CORE_GROUPS.has(rightPlayer.group))
+              || rightHeadroom - leftHeadroom || leftPlayer.name.localeCompare(rightPlayer.name);
           })
           .find(({ player: donorPlayer }) => {
             if (!donorPlayer) return false;
