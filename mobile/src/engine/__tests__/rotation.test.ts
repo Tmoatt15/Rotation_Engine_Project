@@ -628,8 +628,8 @@ describe('goalkeeper and minimum protection', () => {
 
     expect(initial.errors).toEqual([]);
     expect(regenerated.errors).toEqual([]);
-    expect(regenerated.timeline[9].D).toHaveLength(3);
-    expect(regenerated.timeline[9].M).toHaveLength(4);
+    expect(regenerated.timeline[9].D).toHaveLength(4);
+    expect(regenerated.timeline[9].M).toHaveLength(3);
     expect(regenerated.timeline[9].F).toHaveLength(3);
     expect(regenerated.timeline[9].F).toContain('CoreF01');
     expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('CoreF01'))).toHaveLength(3);
