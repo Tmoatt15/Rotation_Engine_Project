@@ -632,7 +632,8 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.timeline[9].M).toHaveLength(3);
     expect(regenerated.timeline[9].F).toHaveLength(3);
     expect(regenerated.timeline[9].F).toContain('CoreF01');
-    expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('CoreF01'))).toHaveLength(3);
+    // CoreF01 meets the 7-block target in blocks 1, 2, 4, 5, 7, 8, and 10.
+    expect(regenerated.timeline.slice(5, 9).filter((block) => [...block.D, ...block.M, ...block.F].includes('CoreF01'))).toHaveLength(2);
     const regeneratedFieldPlayers = regenerated.timeline.flatMap((block) => [block.GK, ...block.D, ...block.M, ...block.F]);
     expect(regeneratedFieldPlayers).not.toContain('RotD01');
     expect(regeneratedFieldPlayers).not.toContain('CoreD03');
