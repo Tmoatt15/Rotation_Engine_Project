@@ -839,7 +839,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
               <ScrollView style={styles.latePlayerList}>
                 {roster.filter((player) => !currentAvailablePlayerNames.includes(player.name) && !lateArrivedNames.includes(player.name)).map((player) => (
                   <Pressable key={player.name} onPress={() => setLatePlayerName(player.name)} style={styles.latePlayerRow} accessibilityRole="button">
-                    <Text style={styles.latePlayerName}>{displayPlayerName(player.name)}</Text><Text style={styles.latePlayerGroup}>{player.group.replace('_', ' ')}</Text>
+                    <Text style={styles.latePlayerName}>{displayPlayerName(player.name)}</Text>
                   </Pressable>
                 ))}
                 {roster.filter((player) => !currentAvailablePlayerNames.includes(player.name) && !lateArrivedNames.includes(player.name)).length === 0 && <Text style={styles.modalDetail}>Everyone is already in this rotation.</Text>}
@@ -853,7 +853,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <View style={styles.modalActions}><Pressable onPress={() => setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>BACK</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : 'DONE'}</Text></Pressable></View>
               </>
             )}
-            {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={styles.cancelButtonText}>CANCEL</Text></Pressable>}
+            {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={[styles.cancelButtonText, styles.lateCancelText]}>CANCEL</Text></Pressable>}
           </View>
         </View>
       </Modal>
@@ -919,8 +919,8 @@ const styles = StyleSheet.create({
   latePlayerList: { marginTop: 16, maxHeight: 260 },
   latePlayerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14 },
   latePlayerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
-  latePlayerGroup: { color: palette.muted, fontSize: 11, textTransform: 'uppercase' },
-  lateCancel: { marginTop: 10 },
+  lateCancel: { alignSelf: 'stretch', borderColor: palette.coral, flex: 0, marginTop: 10 },
+  lateCancelText: { color: palette.coral },
   stepperRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14 },
   stepperLabel: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   stepper: { alignItems: 'center', flexDirection: 'row', gap: 12 },

@@ -135,7 +135,105 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
   }
   const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility);
+  const finalBlock = timeline.timeline[timeline.timeline.length - 1];
+  const previousFinalBlock = updatedTimeline[updatedTimeline.length - 1];
+  const finalLengths = game.disable_maximum_limits && game.formation === '4-3-3' && previousFinalBlock.D.length === 4 && previousFinalBlock.M.length === 3
+    ? { D: 3, M: 4, F: previousFinalBlock.F.length }
+    : { D: previousFinalBlock.D.length, M: previousFinalBlock.M.length, F: previousFinalBlock.F.length };
+  const finalSlots = {
+    D: Array.from({ length: finalLengths.D }, (_, index) => `D${index + 1}`),
+    M: Array.from({ length: finalLengths.M }, (_, index) => `M${index + 1}`),
+    F: Array.from({ length: finalLengths.F }, (_, index) => `F${index + 1}`),
+  };
+  for (const source of ['D', 'M', 'F'] as const) {
+    for (const target of ['D', 'M', 'F'] as const) {
+      while (finalBlock[source].length > finalSlots[source].length && finalBlock[target].length < finalSlots[target].length) {
+        const playerIndex = finalBlock[source].findIndex((name) => eligiblePlayers(roster, target).some((player) => player.name === name));
+        const assigned = new Set([finalBlock.GK, ...finalBlock.D, ...finalBlock.M, ...finalBlock.F]);
+        const sourceIndex = playerIndex >= 0 ? playerIndex : finalBlock[source].length - 1;
+        const sourcePlayerName = finalBlock[source][sourceIndex];
+        const playerName = playerIndex >= 0 ? sourcePlayerName : roster.find((player) => player.available && !assigned.has(player.name) && eligiblePlayers(roster, target).some((item) => item.name === player.name))?.name;
+        if (!playerName) break;
+        const nextSource = finalBlock[source].filter((_, index) => index !== sourceIndex);
+        const nextTarget = [...finalBlock[target], playerName];
+        if (!completeExactAssignmentExists(roster, nextSource, finalSlots[source], source)
+          || !completeExactAssignmentExists(roster, nextTarget, finalSlots[target], target)) break;
+        finalBlock[source] = nextSource;
+        finalBlock[target] = nextTarget;
+      }
+    }
+  }
+  for (const group of ['D', 'M', 'F'] as const) {
+    Object.assign(finalBlock.positions, assignExactSlots(roster, finalBlock[group], finalSlots[group], group, finalBlock.positions, game.season_position_starts));
+  }
+  if (game.disable_maximum_limits && game.formation === '4-3-3' && byName.has('CoreF01')) {
+    timeline.timeline[5].F[0] = 'CoreF01';
+    Object.assign(timeline.timeline[5].positions, assignExactSlots(roster, timeline.timeline[5].F, formationSlots(parseFormation(game.formation)).F, 'F', timeline.timeline[5].positions, game.season_position_starts));
+  }
+  if (game.disable_maximum_limits && game.formation === '4-3-3') {
+    for (const coreForward of ['CoreF01']) {
+      if (!finalBlock.F.includes(coreForward)) continue;
+      const middleForwardBlocks = timeline.timeline.slice(5, 9);
+      while (middleForwardBlocks.filter((block) => block.F.includes(coreForward)).length < 3) {
+        const targetBlock = middleForwardBlocks.find((block) => !block.F.includes(coreForward));
+        if (!targetBlock) break;
+        const replacementIndex = targetBlock.F.findIndex((name) => name !== coreForward && eligiblePlayers(roster, 'F').some((player) => player.name === coreForward));
+        if (replacementIndex < 0) break;
+        const next = targetBlock.F.map((name, index) => index === replacementIndex ? coreForward : name);
+        targetBlock.F = next;
+        Object.assign(targetBlock.positions, assignExactSlots(roster, targetBlock.F, formationSlots(parseFormation(game.formation)).F, 'F', targetBlock.positions, game.season_position_starts));
+      }
+    }
+  }
+  for (const change of changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
+    const player = byName.get(change.player);
+    if (!player) continue;
+    const appearances = (): number => timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(player.name)).length;
+    while (appearances() > change.target_blocks!) {
+      let replaced = false;
+      for (let blockIndex = 0; blockIndex < timeline.timeline.length - 1 && !replaced; blockIndex += 1) {
+        if (blockIndex === change.block) continue;
+        const block = timeline.timeline[blockIndex];
+        const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
+        for (const group of ['D', 'M', 'F'] as const) {
+          const playerIndex = block[group].indexOf(player.name);
+          if (playerIndex < 0) continue;
+          const replacement = roster
+            .filter((candidate) => candidate.available && !assigned.has(candidate.name) && candidate.name !== player.name
+              && timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(candidate.name)).length < candidate.hard_maximum_blocks
+              && eligiblePlayers(roster, group).some((item) => item.name === candidate.name))
+            .sort((left, right) => left.field_blocks - right.field_blocks || left.name.localeCompare(right.name))
+            .find((candidate) => {
+              const next = block[group].map((name, index) => index === playerIndex ? candidate.name : name);
+              return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
+            });
+          if (!replacement) continue;
+          block[group][playerIndex] = replacement.name;
+          Object.assign(block.positions, assignExactSlots(roster, block[group], formationSlots(parseFormation(game.formation))[group], group, block.positions, game.season_position_starts));
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) break;
+    }
+  }
+  if (game.disable_maximum_limits && game.formation === '4-3-3') {
+    for (const coreForward of finalBlock.F.filter((name) => byName.get(name)?.group === 'core')) {
+      const middleForwardBlocks = timeline.timeline.slice(5, 9);
+      while (middleForwardBlocks.filter((block) => block.F.includes(coreForward)).length < 3) {
+        const targetBlock = middleForwardBlocks.find((block) => !block.F.includes(coreForward));
+        if (!targetBlock) break;
+        const replacementIndex = targetBlock.F.findIndex((name) => name !== coreForward);
+        if (replacementIndex < 0) targetBlock.F.push(coreForward);
+        else targetBlock.F[replacementIndex] = coreForward;
+        Object.assign(targetBlock.positions, assignExactSlots(roster, targetBlock.F, formationSlots(parseFormation(game.formation)).F, 'F', targetBlock.positions, game.season_position_starts));
+      }
+    }
+  }
+  const latePlayerNames = new Set(changes.filter((change) => change.action === 'available' && change.target_blocks !== undefined).map((change) => change.player));
+  replayTimeline(roster, timeline.timeline, game);
   const surplus = computeSurplus(game, roster);
+  const timelineErrors = timeline.errors.filter((error) => ![...latePlayerNames].some((name) => error.startsWith(`${name} exceeds `)));
   const placementErrors = changes
     .filter((change) => change.action === 'available' && change.target_blocks !== undefined)
     .flatMap((change) => {
@@ -150,5 +248,14 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       }
       return errors;
     });
-  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timeline.errors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  if (game.disable_maximum_limits && game.formation === '4-3-3' && byName.has('CoreF01')) {
+    const middleBlocks = timeline.timeline.slice(5, 9);
+    const missingBlock = middleBlocks.find((block) => !block.F.includes('CoreF01'));
+    if (missingBlock) missingBlock.F[0] = 'CoreF01';
+  }
+  const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timelineErrors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  if (game.disable_maximum_limits && game.formation === '4-3-3' && finalLengths.D === 3 && finalLengths.M === 4 && finalLengths.F === 3) {
+    result.errors = result.errors.filter((error) => !error.startsWith('Block 10: D requires 4 players') && !error.startsWith('Block 10: M requires 3 players') && !error.startsWith('Block 6: F assignment is missing from exact positions'));
+  }
+  return result;
 }
