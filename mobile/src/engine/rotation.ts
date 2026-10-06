@@ -74,6 +74,10 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     roster.forEach((player) => { player.available = availableNames.has(player.name); });
   }
   const updatedTimeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
+  const previousTotalBlocks = new Map(roster.map((player) => [
+    player.name,
+    previousTimeline.filter((block) => block.GK === player.name || [...block.D, ...block.M, ...block.F].includes(player.name)).length,
+  ]));
   const recordAvailabilityChange = (change: AvailabilityChange): void => {
     if (!game.availability_changes.some((existing) => existing.player === change.player && existing.action === change.action && existing.block === change.block)) {
       game.availability_changes.push(change);
@@ -138,7 +142,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     player.hard_maximum_blocks = player.maximum_blocks;
     player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
   }
-  const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility);
+  const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility, previousTotalBlocks);
   for (const change of changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
     const player = byName.get(change.player);
     if (!player) continue;

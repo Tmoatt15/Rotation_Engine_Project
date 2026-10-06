@@ -799,18 +799,28 @@ function findCombination<T>(items: T[], size: number, isValid: (choice: T[]) => 
   return search(0, size, []);
 }
 
-function planPositionGroups(game: Game, roster: Player[], formation: FormationCounts, goalkeeperNames: string[], startBlock: number): PlannedGroups {
+function planPositionGroups(game: Game, roster: Player[], formation: FormationCounts, goalkeeperNames: string[], startBlock: number, goalkeeperTotalBlocks = new Map<string, number>()): PlannedGroups {
   const positions = (['D', 'M', 'F'] as const).filter((position) => formation[position] > 0);
   const plans: PlannedGroups = { D: Array.from({ length: game.total_blocks }, () => []), M: Array.from({ length: game.total_blocks }, () => []), F: Array.from({ length: game.total_blocks }, () => []) };
   const reserved = goalkeeperNames.map((name) => new Set(name ? [name] : []));
   const assignedGoalkeepers = new Set(goalkeeperNames.filter(Boolean));
+  const goalkeeperFieldTargets = new Map<string, number>();
+  for (const goalkeeperName of assignedGoalkeepers) {
+    const player = roster.find((candidate) => candidate.name === goalkeeperName);
+    const totalTarget = goalkeeperTotalBlocks.get(goalkeeperName);
+    if (!player || totalTarget === undefined) continue;
+    const assignedGoalkeeperCount = goalkeeperNames.filter((name) => name === goalkeeperName).length;
+    goalkeeperFieldTargets.set(goalkeeperName, Math.max(player.field_blocks, totalTarget - assignedGoalkeeperCount));
+  }
   const rawCounts = new Map(roster.map((player) => [player.name, player.block_count]));
-  const fieldCounts = new Map(roster.map((player) => [player.name, player.block_count]));
-  for (const goalkeeperName of goalkeeperNames) {
+  const fieldCounts = new Map(roster.map((player) => [player.name, player.field_blocks]));
+  for (const [blockIndex, goalkeeperName] of goalkeeperNames.entries()) {
+    if (blockIndex < startBlock - 1) continue;
     if (goalkeeperName) rawCounts.set(goalkeeperName, (rawCounts.get(goalkeeperName) ?? 0) + 1);
   }
   const halfCounts = new Map(roster.map((player) => [player.name, [...player.blocks_by_half] as [number, number]]));
   for (const [blockIndex, goalkeeperName] of goalkeeperNames.entries()) {
+    if (blockIndex < startBlock - 1) continue;
     if (!goalkeeperName) continue;
     const half = blockHalf(blockIndex, game.total_blocks);
     const counts = halfCounts.get(goalkeeperName) ?? [0, 0] as [number, number];
@@ -945,7 +955,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const positionStarts = game.season_position_starts?.[player.name]?.[position] ?? 0;
     const fieldMinimum = assignedGoalkeepers.has(player.name) ? player.gk_field_minimum_blocks : player.hard_minimum_blocks;
     const deficit = Math.max(0, fieldMinimum - (fieldCounts.get(player.name) ?? 0));
-    const target = assignedGoalkeepers.has(player.name) ? player.gk_field_maximum_blocks : player.target_blocks;
+    const target = assignedGoalkeepers.has(player.name) ? (goalkeeperFieldTargets.get(player.name) ?? player.gk_field_maximum_blocks) : player.target_blocks;
     const targetDeficit = Math.max(0, target - (fieldCounts.get(player.name) ?? 0));
     const lateArrival = startBlock > 1
       ? game.availability_changes.find((change) => change.action === 'available' && change.player === player.name)
@@ -1483,7 +1493,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     rawCounts.clear(); fieldCounts.clear(); halfCounts.clear();
     for (const player of roster) {
       rawCounts.set(player.name, player.block_count);
-      fieldCounts.set(player.name, player.block_count);
+      fieldCounts.set(player.name, player.field_blocks);
       halfCounts.set(player.name, [...player.blocks_by_half] as [number, number]);
     }
     for (const [blockIndex, goalkeeperName] of goalkeeperNames.entries()) {
@@ -1932,7 +1942,8 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   for (const goalkeeper of roster.filter((player) => assignedGoalkeepers.has(player.name))) {
     const goalkeeperBlock = goalkeeperNames.findIndex((name) => name === goalkeeper.name);
     const goalkeeperHalf = goalkeeperBlock < 0 ? -1 : blockHalf(goalkeeperBlock, game.total_blocks);
-    while ((fieldCounts.get(goalkeeper.name) ?? 0) < goalkeeper.gk_field_minimum_blocks) {
+    const requiredFieldBlocks = Math.max(goalkeeper.gk_field_minimum_blocks, goalkeeperFieldTargets.get(goalkeeper.name) ?? 0);
+    while ((fieldCounts.get(goalkeeper.name) ?? 0) < requiredFieldBlocks) {
       let repaired = false;
       for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks && !repaired; blockIndex += 1) {
         if (blockHalf(blockIndex, game.total_blocks) === goalkeeperHalf) continue;
@@ -2371,7 +2382,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   return plans;
 }
 
-export function buildTimeline(game: Game, roster: Player[], startBlock = 1, frozenTimeline: ScheduleBlock[] = [], quotaFeasibility?: QuotaFeasibilityMetadata): RotationResult {
+export function buildTimeline(game: Game, roster: Player[], startBlock = 1, frozenTimeline: ScheduleBlock[] = [], quotaFeasibility?: QuotaFeasibilityMetadata, goalkeeperTotalBlocks = new Map<string, number>()): RotationResult {
   game.quota_feasibility = quotaFeasibility;
   const result: RotationResult = { timeline: [...frozenTimeline], block_counts: {}, gk_summary: {}, position_summary: {}, warnings: [], errors: [], metadata: { total_blocks: game.total_blocks, formation: game.formation, gk_assignment: game.gk_assignment } };
   result.errors.push(...goalkeeperSelectionErrors(game, roster));
@@ -2383,7 +2394,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     goalkeepers.push(goalkeeper);
   }
   const assignedGoalkeeperNames = new Set(goalkeepers.flatMap((player) => player ? [player.name] : []));
-  const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock);
+  const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock, goalkeeperTotalBlocks);
   optimizeGlobalPositionSwitches(game, roster, formation, planned, startBlock);
   if (startBlock > 1) {
     const plannedCount = (name: string): number => FIELD_GROUPS.reduce((total, group) => total + planned[group].filter((names) => names.includes(name)).length, 0);

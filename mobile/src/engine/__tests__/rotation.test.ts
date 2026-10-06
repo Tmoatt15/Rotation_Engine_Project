@@ -626,6 +626,7 @@ describe('goalkeeper and minimum protection', () => {
     players.forEach((player) => { player.available = !unavailable.has(player.name); });
     const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'RotF01', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }]);
     const initialGoalkeeperCounts = new Map(['RotD05', 'RotM03'].map((name) => [name, initial.timeline.filter((block) => block.GK === name).length]));
+    const initialTotalCounts = new Map(['RotD05', 'RotM03'].map((name) => [name, initial.timeline.filter((block) => block.GK === name || [...block.D, ...block.M, ...block.F].includes(name)).length]));
 
     expect(initial.errors).toEqual([]);
     expect(regenerated.errors).toEqual([]);
@@ -644,6 +645,7 @@ describe('goalkeeper and minimum protection', () => {
     expect(frankBlocks).toEqual(expect.arrayContaining([5]));
     expect(frankBlocks).toHaveLength(3);
     initialGoalkeeperCounts.forEach((count, name) => expect(regenerated.timeline.filter((block) => block.GK === name).length).toBe(count));
+    initialTotalCounts.forEach((count, name) => expect(regenerated.timeline.filter((block) => block.GK === name || [...block.D, ...block.M, ...block.F].includes(name)).length).toBe(count));
   });
 
   it('keeps other unavailable players out when one late arrival returns', () => {
@@ -665,6 +667,38 @@ describe('goalkeeper and minimum protection', () => {
     expect(fieldPlayers).not.toContain('CoreD03');
     expect(benchPlayers).not.toContain('RotD01');
     expect(benchPlayers).not.toContain('CoreD03');
+  });
+
+  it('preserves Cameron total blocks when Frank arrives late', () => {
+    const roster = seasonSimulationRoster();
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, roster.filter((player) => player.name !== 'Frank').map(createPlayer));
+    const players = roster.map(createPlayer);
+    players.find((player) => player.name === 'Frank')!.available = false;
+    const initialCameronBlocks = initial.timeline.filter((block) => block.GK === 'Cameron' || [...block.D, ...block.M, ...block.F].includes('Cameron')).length;
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'Frank', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 3, maximum_blocks: 3 }]);
+    const regeneratedCameronBlocks = regenerated.timeline.filter((block) => block.GK === 'Cameron' || [...block.D, ...block.M, ...block.F].includes('Cameron')).length;
+
+    expect(initialCameronBlocks).toBeGreaterThan(5);
+    expect(regeneratedCameronBlocks).toBe(initialCameronBlocks);
+  });
+
+  it.each(['Blake', 'Sid', 'Frank'] as const)('places real-roster late arrival %s when arriving at block 5', (latePlayer) => {
+    const rosterInputs = coachAssignedSeasonBackups(seasonSimulationRoster()).map((player) => player.name === 'Blake' ? { ...player, group: 'core' as const } : player);
+    const unavailableNames = new Set(['Blake', 'Frank', 'Sid']);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, rosterInputs.filter((player) => !unavailableNames.has(player.name)).map(createPlayer));
+    const players = rosterInputs.map(createPlayer);
+    const availableNames = rosterInputs.filter((player) => !unavailableNames.has(player.name) || player.name === latePlayer).map((player) => player.name);
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: latePlayer, action: 'available', block: 4, target_blocks: 3, minimum_blocks: 3, maximum_blocks: 3 }], availableNames);
+    const fieldBlocks = regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer));
+
+    expect(initial.errors).toEqual([]);
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not be placed in block 5`));
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not reach 3 blocks`));
+    expect(regenerated.errors.filter((error) => /exceeds hard maximum|under minimum|under target/.test(error))).toEqual([]);
+    expect(fieldBlocks).toHaveLength(3);
+    expect(regenerated.timeline[4].D.concat(regenerated.timeline[4].M, regenerated.timeline[4].F)).toContain(latePlayer);
   });
 
   it('allows core Blake to skip the impossible first endpoint when arriving late', () => {
