@@ -199,6 +199,7 @@ export interface MovementMetrics {
 
 export interface RotationResult {
   timeline: ScheduleBlock[];
+  available_player_names?: string[];
   block_counts: Record<string, number>;
   gk_summary: Record<string, GoalkeeperSummary>;
   position_summary: Record<string, Partial<PositionUsage>>;

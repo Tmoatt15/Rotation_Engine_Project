@@ -2632,7 +2632,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       if (Object.values(exactAssignment).some((name) => name === 'UNASSIGNED')) result.errors.push(`Block ${block}: ${group} players cannot form a complete legal exact-slot assignment.`);
       if (chosen.length < formation[group]) result.errors.push(`Block ${block}: ${group} requires ${formation[group]} players but only ${chosen.length} were assigned.`);
     }
-    for (const player of roster) if (!used.has(player.name)) assignment.bench.push(player.name);
+    for (const player of roster) if (player.available && !used.has(player.name)) assignment.bench.push(player.name);
     previousPositions = { ...assignment.positions };
     applyBlockToStats(roster, assignment, half); if (game.has_goalkeeper !== false && !gk) result.errors.push(`Block ${block}: no goalkeeper was assigned.`);
     result.timeline.push(assignment);

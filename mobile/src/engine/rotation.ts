@@ -67,8 +67,12 @@ export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Play
 
 export const generateSchedule = runRotationEngine;
 
-export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[]): RotationResult {
+export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[], availablePlayerNames?: string[]): RotationResult {
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
+  if (availablePlayerNames) {
+    const availableNames = new Set(availablePlayerNames);
+    roster.forEach((player) => { player.available = availableNames.has(player.name); });
+  }
   const updatedTimeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
   const recordAvailabilityChange = (change: AvailabilityChange): void => {
     if (!game.availability_changes.some((existing) => existing.player === change.player && existing.action === change.action && existing.block === change.block)) {
@@ -186,5 +190,6 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       return errors;
     });
   const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timelineErrors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  if (availablePlayerNames) result.available_player_names = roster.filter((player) => player.available).map((player) => player.name);
   return result;
 }

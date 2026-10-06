@@ -644,6 +644,27 @@ describe('goalkeeper and minimum protection', () => {
     expect(frankBlocks).toHaveLength(3);
   });
 
+  it('keeps other unavailable players out when one late arrival returns', () => {
+    const team = regressionRoster as { season_roster: PlayerInput[] };
+    const unavailable = new Set(['RotD01', 'RotF01', 'CoreD03']);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'RotD05', second_half_gk: 'RotM03', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, team.season_roster.filter((player) => !unavailable.has(player.name)).map(createPlayer));
+    const players = team.season_roster.map(createPlayer);
+    const availableNames = team.season_roster.filter((player) => !unavailable.has(player.name) || player.name === 'RotF01').map((player) => player.name);
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: 'RotF01', action: 'available', block: 4, target_blocks: 3, minimum_blocks: 0, maximum_blocks: 3 }], availableNames);
+    const fieldPlayers = regenerated.timeline.flatMap((block) => [block.GK, ...block.D, ...block.M, ...block.F]);
+    const benchPlayers = regenerated.timeline.flatMap((block) => block.bench);
+
+    expect(regenerated.available_player_names).toEqual(availableNames);
+    expect(regenerated.available_player_names).toContain('RotF01');
+    expect(regenerated.available_player_names).not.toContain('RotD01');
+    expect(regenerated.available_player_names).not.toContain('CoreD03');
+    expect(fieldPlayers).not.toContain('RotD01');
+    expect(fieldPlayers).not.toContain('CoreD03');
+    expect(benchPlayers).not.toContain('RotD01');
+    expect(benchPlayers).not.toContain('CoreD03');
+  });
+
   it('allows core Blake to skip the impossible first endpoint when arriving late', () => {
     const latePlayer = 'Blake' as const;
     const roster = [
