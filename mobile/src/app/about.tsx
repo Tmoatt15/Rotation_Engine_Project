@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, InteractionManager, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
@@ -38,10 +38,38 @@ export default function AboutScreen() {
     setSharing(true);
     setMessage(null);
     try {
-      await shareDiagnosticSnapshot(filename);
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timeout = setTimeout(() => {
+          settled = true;
+          reject(new Error('Diagnostic export timed out after 10 seconds.'));
+        }, 10000);
+        InteractionManager.runAfterInteractions(() => {
+          if (settled) return;
+          void shareDiagnosticSnapshot(filename).then(
+            () => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timeout);
+                resolve();
+              }
+            },
+            (error: unknown) => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timeout);
+                reject(error);
+              }
+            },
+          );
+        });
+      });
       setMessage('Diagnostic snapshot is ready to share.');
-    } catch {
+    } catch (exportError) {
+      const detail = exportError instanceof Error ? exportError.message : 'Unknown export error.';
+      console.error('[diagnostic] Export failed:', exportError);
       setMessage('Unable to create diagnostic snapshot.');
+      Alert.alert('Diagnostic export failed', detail);
     } finally {
       setSharing(false);
     }

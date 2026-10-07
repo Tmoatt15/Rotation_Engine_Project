@@ -93,8 +93,15 @@ export async function buildDiagnosticSnapshot(): Promise<DiagnosticSnapshot> {
 }
 
 export async function shareDiagnosticSnapshot(filename: string): Promise<void> {
+  console.log('[diagnostic] Building snapshot');
   const snapshot = await buildDiagnosticSnapshot();
+  console.log(`[diagnostic] Snapshot built for ${snapshot.teams.length} team(s)`);
   const path = `${FileSystem.cacheDirectory}${safeExportFilename(filename)}`;
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(snapshot, null, 2));
+  const json = JSON.stringify(snapshot, null, 2);
+  const byteSize = new TextEncoder().encode(json).byteLength;
+  console.log(`[diagnostic] Serialized snapshot: ${byteSize} bytes`);
+  await FileSystem.writeAsStringAsync(path, json);
+  console.log(`[diagnostic] Snapshot written to ${path}`);
   await Sharing.shareAsync(path, { dialogTitle: 'Share Rotation Engine backup', mimeType: 'application/json' });
+  console.log('[diagnostic] Share sheet completed');
 }
