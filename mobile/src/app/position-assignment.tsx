@@ -116,6 +116,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     [filter, players],
   );
   const health = useMemo(() => positionHealth(formation, players), [formation, players]);
+  const allPositionsHealthy = health.length > 0 && health.every((item) => item.status === 'green');
 
   useEffect(() => subscribeToTeamChanges(() => setTeamChangeVersion((version) => version + 1)), []);
 
@@ -339,6 +340,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
             {!healthDismissed && formationConfigured && (
               <PositionHealthPanel
                 health={health}
+                collapsed={allPositionsHealthy}
                 onSelect={setSelectedHealth}
                 onDismiss={() => setHealthDismissed(true)}
               />
@@ -583,19 +585,19 @@ const healthColors: Record<PositionHealth['status'], { background: string; borde
   green: { background: '#dcebe2', border: '#19634b', text: '#19634b', icon: '🟢' },
 };
 
-function PositionHealthPanel({ health, onSelect, onDismiss }: { health: PositionHealth[]; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
+function PositionHealthPanel({ health, collapsed, onSelect, onDismiss }: { health: PositionHealth[]; collapsed: boolean; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
   return (
-    <View style={styles.healthCard}>
+    <View style={[styles.healthCard, collapsed && styles.healthCardCollapsed]}>
       <View style={styles.healthHeader}>
         <View>
           <Text style={styles.healthTitle}>Position coverage</Text>
-          <Text style={styles.healthSubtitle}>Primary, general, and backup positions</Text>
+          <Text style={styles.healthSubtitle}>{collapsed ? 'All positions covered · Green' : 'Primary, general, and backup positions'}</Text>
         </View>
         <Pressable onPress={onDismiss} accessibilityLabel="Dismiss position coverage">
           <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={17} tintColor={palette.muted} />
         </Pressable>
       </View>
-      <View style={styles.healthRows}>
+      {!collapsed && <View style={styles.healthRows}>
         {health.map((item) => {
           const colors = healthColors[item.status];
           return (
@@ -605,7 +607,7 @@ function PositionHealthPanel({ health, onSelect, onDismiss }: { health: Position
             </Pressable>
           );
         })}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -707,6 +709,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   healthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
+  healthCardCollapsed: { paddingVertical: 10 },
   healthHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   healthTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   healthSubtitle: { color: palette.muted, fontSize: 11, marginTop: 3 },
