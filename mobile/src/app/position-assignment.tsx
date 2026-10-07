@@ -104,7 +104,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [teamName, setTeamName] = useState<string | null>(null);
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
   const [selectedHealth, setSelectedHealth] = useState<PositionHealth | null>(null);
-  const [healthDismissed, setHealthDismissed] = useState(false);
   const [healthExpanded, setHealthExpanded] = useState(false);
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -126,7 +125,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     setLoading(true);
     setError(null);
     setPositionPicker(null);
-    setHealthDismissed(false);
     setFormationConfigured(false);
     setPositionRows([]);
 
@@ -165,7 +163,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     setPlayers(nextPlayers);
     setMessage(null);
     setError(null);
-    setHealthDismissed(false);
     void saveRoster(nextPlayers, false);
   }
 
@@ -182,7 +179,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     setPlayers(nextPlayers);
     setMessage(null);
     setError(null);
-    setHealthDismissed(false);
     void saveRoster(nextPlayers, false);
   }
 
@@ -232,8 +228,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       }
       const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
       setPlayers(updatedPlayers);
-      setHealthDismissed(false);
-    setPositionPicker(null);
+      setPositionPicker(null);
       void saveRoster(updatedPlayers, false);
   }
 
@@ -338,13 +333,12 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                 <Text style={styles.warningText}>Your formation changed. Update player positions to match the current formation.</Text>
               </View>
             )}
-            {!healthDismissed && formationConfigured && (
+            {formationConfigured && (
               <PositionHealthPanel
                 health={health}
                 collapsed={allPositionsHealthy && !healthExpanded}
-                onExpand={() => setHealthExpanded(true)}
+                onToggle={() => setHealthExpanded((expanded) => !expanded)}
                 onSelect={setSelectedHealth}
-                onDismiss={() => setHealthDismissed(true)}
               />
             )}
             {!formationConfigured && (
@@ -587,18 +581,15 @@ const healthColors: Record<PositionHealth['status'], { background: string; borde
   green: { background: '#dcebe2', border: '#19634b', text: '#19634b', icon: '🟢' },
 };
 
-function PositionHealthPanel({ health, collapsed, onExpand, onSelect, onDismiss }: { health: PositionHealth[]; collapsed: boolean; onExpand: () => void; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
+function PositionHealthPanel({ health, collapsed, onToggle, onSelect }: { health: PositionHealth[]; collapsed: boolean; onToggle: () => void; onSelect: (value: PositionHealth) => void }) {
   return (
-    <Pressable onPress={collapsed ? onExpand : undefined} disabled={!collapsed} style={[styles.healthCard, collapsed && styles.healthCardCollapsed]} accessibilityRole={collapsed ? 'button' : undefined} accessibilityHint={collapsed ? 'Tap to view coverage details' : undefined}>
-      <View style={styles.healthHeader}>
+    <View style={[styles.healthCard, collapsed && styles.healthCardCollapsed]}>
+      <Pressable onPress={onToggle} style={styles.healthHeader} accessibilityRole="button" accessibilityState={{ expanded: !collapsed }} accessibilityHint={collapsed ? 'Tap to view coverage details' : 'Tap to collapse coverage details'}>
         <View>
           <Text style={styles.healthTitle}>Position coverage</Text>
           <Text style={styles.healthSubtitle}>{collapsed ? 'All positions covered · Green' : 'Primary, general, and backup positions'}</Text>
         </View>
-        <Pressable onPress={onDismiss} accessibilityLabel="Dismiss position coverage">
-          <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={17} tintColor={palette.muted} />
-        </Pressable>
-      </View>
+      </Pressable>
       {!collapsed && <View style={styles.healthRows}>
         {health.map((item) => {
           const colors = healthColors[item.status];
@@ -610,7 +601,7 @@ function PositionHealthPanel({ health, collapsed, onExpand, onSelect, onDismiss 
           );
         })}
       </View>}
-    </Pressable>
+    </View>
   );
 }
 
