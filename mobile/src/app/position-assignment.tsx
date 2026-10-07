@@ -8,7 +8,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/services/team-service';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
-import { GAME_FORMATS } from '@/engine/season';
 import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
 import { positionHealth, positionHealthMessage, type PositionHealth } from '@/services/roster-health';
 
