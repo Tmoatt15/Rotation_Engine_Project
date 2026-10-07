@@ -415,7 +415,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                       </Pressable>
                     </View>
                     <View style={styles.playerRight}>
-                      <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
                           <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
@@ -423,6 +422,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           </Pressable>
                         ))}
                       </View>
+                      <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
                       {formationConfigured ? (
                         <>
                           <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
