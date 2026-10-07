@@ -105,6 +105,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
   const [selectedHealth, setSelectedHealth] = useState<PositionHealth | null>(null);
   const [healthDismissed, setHealthDismissed] = useState(false);
+  const [healthExpanded, setHealthExpanded] = useState(false);
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
@@ -340,7 +341,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
             {!healthDismissed && formationConfigured && (
               <PositionHealthPanel
                 health={health}
-                collapsed={allPositionsHealthy}
+                collapsed={allPositionsHealthy && !healthExpanded}
+                onExpand={() => setHealthExpanded(true)}
                 onSelect={setSelectedHealth}
                 onDismiss={() => setHealthDismissed(true)}
               />
@@ -585,9 +587,9 @@ const healthColors: Record<PositionHealth['status'], { background: string; borde
   green: { background: '#dcebe2', border: '#19634b', text: '#19634b', icon: '🟢' },
 };
 
-function PositionHealthPanel({ health, collapsed, onSelect, onDismiss }: { health: PositionHealth[]; collapsed: boolean; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
+function PositionHealthPanel({ health, collapsed, onExpand, onSelect, onDismiss }: { health: PositionHealth[]; collapsed: boolean; onExpand: () => void; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
   return (
-    <View style={[styles.healthCard, collapsed && styles.healthCardCollapsed]}>
+    <Pressable onPress={collapsed ? onExpand : undefined} disabled={!collapsed} style={[styles.healthCard, collapsed && styles.healthCardCollapsed]} accessibilityRole={collapsed ? 'button' : undefined} accessibilityHint={collapsed ? 'Tap to view coverage details' : undefined}>
       <View style={styles.healthHeader}>
         <View>
           <Text style={styles.healthTitle}>Position coverage</Text>
@@ -608,7 +610,7 @@ function PositionHealthPanel({ health, collapsed, onSelect, onDismiss }: { healt
           );
         })}
       </View>}
-    </View>
+    </Pressable>
   );
 }
 
