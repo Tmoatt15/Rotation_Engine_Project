@@ -197,6 +197,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       ? [ANY_POSITION, 'D', 'M', 'F']
       : group === 'backup_positions'
         ? ['D', 'M', 'F', ...formationPositions]
+        : group === 'excluded_positions'
+          ? formationPositions.filter((position) => position.toUpperCase() !== 'GK')
         : [ANY_POSITION, ...primaryFormationPositions];
     setPositionPicker({
       playerName: player.name,
