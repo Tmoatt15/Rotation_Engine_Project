@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SymbolView } from 'expo-symbols';
 
 import PositionAssignmentScreen from '../position-assignment';
 import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
@@ -19,7 +19,6 @@ const alerts: Array<{ value: SubstitutionAlert; label: string }> = [
 ];
 
 export default function RosterTab() {
-  const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<SeasonSettings | null>(null);
   const [draft, setDraft] = useState<SeasonSettings | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -87,8 +86,11 @@ export default function RosterTab() {
 
   function renderSeasonSettings() {
     return (
-      <View style={[styles.bar, { paddingTop: 12 + insets.top }]}>
+      <View style={[styles.bar, !configured && styles.barAttention]}>
         <Pressable onPress={openBar} style={[styles.barHeader, !configured && styles.barHeaderAttention]} accessibilityRole="button">
+          <View style={styles.setupIcon}>
+            <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} size={18} tintColor={palette.coral} />
+          </View>
           <View style={styles.barCopy}>
             <Text style={styles.barTitle}>{configured && settings ? `${settings.game_format} · ${settings.formation} · ${settings.total_blocks} blocks` : 'Season Setup Required'}</Text>
             <Text style={styles.barHint}>{expanded ? '' : 'Season settings'}</Text>
@@ -142,9 +144,11 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  bar: { backgroundColor: palette.panel, borderBottomColor: palette.line, borderBottomWidth: 1, padding: 12 },
+  bar: { backgroundColor: palette.panel, borderBottomColor: palette.line, borderBottomWidth: 1, padding: 10 },
+  barAttention: { backgroundColor: '#fff1e9', borderColor: palette.coral, borderRadius: 12, borderWidth: 1, margin: 8 },
   barHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
-  barHeaderAttention: { backgroundColor: '#fff1e9', borderRadius: 10, marginHorizontal: -4, paddingHorizontal: 8, paddingVertical: 8 },
+  barHeaderAttention: { paddingVertical: 2 },
+  setupIcon: { alignItems: 'center', backgroundColor: '#ffe0d4', borderRadius: 9, height: 34, justifyContent: 'center', marginRight: 9, width: 34 },
   barCopy: { flex: 1 },
   barTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   barHint: { color: palette.muted, fontSize: 11, marginTop: 3 },
