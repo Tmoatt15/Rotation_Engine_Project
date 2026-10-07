@@ -1,7 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Platform, Share } from 'react-native';
 
 import { getTeams } from '@/services/team-service';
 import { getRoster } from '@/services/team-service';
@@ -102,6 +101,10 @@ export async function shareDiagnosticSnapshot(filename: string): Promise<void> {
   console.log(`[diagnostic] Serialized snapshot: ${byteSize} bytes`);
   await FileSystem.writeAsStringAsync(path, json);
   console.log(`[diagnostic] Snapshot written to ${path}`);
-  await Sharing.shareAsync(path, { dialogTitle: 'Share Rotation Engine backup', mimeType: 'application/json' });
+  await Share.share({
+    title: 'Rotation Engine backup',
+    message: 'Rotation Engine diagnostic backup',
+    url: path,
+  });
   console.log('[diagnostic] Share sheet completed');
 }
