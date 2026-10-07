@@ -1,4 +1,3 @@
-import Constants from 'expo-constants';
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState, type ReactNode } from 'react';
@@ -7,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { shareDiagnosticSnapshot } from '@/services/diagnostic-service';
+import { buildHash } from '@/buildInfo';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 
@@ -61,8 +61,8 @@ export default function AboutScreen() {
 
             <Section title="About">
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Version</Text>
-                <Text style={styles.detail}>{Constants.expoConfig?.version ?? 'Unknown'}</Text>
+                <Text style={styles.infoLabel}>Build:</Text>
+                <Text style={styles.detail}>{buildHash}</Text>
               </View>
             </Section>
 

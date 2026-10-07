@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -167,6 +167,15 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
     setHealthDismissed(false);
   }
 
+  function updateGroup(name: string, group: Group) {
+    const nextPlayers = players.map((player) => player.name === name ? { ...player, group } : player);
+    setPlayers(nextPlayers);
+    setMessage(null);
+    setError(null);
+    setHealthDismissed(false);
+    void saveRoster(nextPlayers, false);
+  }
+
   function toggleGoalkeeper(name: string) {
     const player = players.find((candidate) => candidate.name === name);
     if (!player) return;
@@ -279,7 +288,8 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={80} style={styles.keyboardAvoidingView}>
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={styles.header}>
               {!embedded && (
                 <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back">
@@ -374,7 +384,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                   <View key={player.name} style={[styles.playerRow, index === filteredPlayers.length - 1 && styles.lastRow]}>
                     <View style={styles.avatarColumn}>
                       <View style={styles.nameLine}>
-                        <Text style={styles.playerName} numberOfLines={2}>{displayPlayerName(player.name)}</Text>
+                        <Text style={styles.playerName} numberOfLines={1}>{displayPlayerName(player.name)}</Text>
                         {editingNumber === player.name ? (
                           <TextInput autoFocus defaultValue={player.number === undefined ? '' : String(player.number)} onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)} keyboardType="number-pad" style={styles.numberEdit} />
                         ) : (
@@ -400,7 +410,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                     <View style={styles.playerCopy}>
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
-                          <Pressable key={group} onPress={() => updatePlayer(player.name, { group })} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
+                          <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
                             <Text style={[styles.groupOptionText, player.group === group && { color: groupColors[group].text }]}>{group}</Text>
                           </Pressable>
                         ))}
@@ -425,7 +435,8 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
               <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save and return home'}</Text>
               <SymbolView name={{ ios: 'checkmark', android: 'check', web: 'check' }} size={19} tintColor={palette.panel} />
             </Pressable>)}
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </View>
       <PositionPickerModal
@@ -473,6 +484,12 @@ function PositionPickerModal({
   const useGroupPositions = picker.group === 'general_positions' || picker.group === 'backup_positions';
   const allowExactPositions = picker.group !== 'general_positions';
   const groupLabel = picker.group.replace('_positions', '');
+  const basePickerRows = picker.group === 'general_positions' && positionRows.length === 0
+    ? ['D', 'M', 'F'].map((group) => ({ label: group, groupPositions: [group], exactPositions: [] }))
+    : positionRows;
+  const pickerRows = picker.group === 'general_positions' && picker.allowedPositions.includes('GK')
+    ? [...basePickerRows, { label: 'GK', groupPositions: ['GK'], exactPositions: [] }]
+    : basePickerRows;
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onFinish}>
       <View style={styles.modalBackdrop}>
@@ -502,7 +519,7 @@ function PositionPickerModal({
                 </View>
               </View>
             )}
-            {positionRows.map((row) => {
+            {pickerRows.map((row) => {
               const positions = useGroupPositions
                 ? [...row.groupPositions, ...(allowExactPositions ? row.exactPositions : [])]
                 : row.exactPositions;
@@ -607,6 +624,7 @@ function PositionHealthModal({ health, onClose }: { health: PositionHealth | nul
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
+  keyboardAvoidingView: { flex: 1 },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
   header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 },
@@ -696,7 +714,7 @@ const styles = StyleSheet.create({
   gkButtonText: { color: palette.muted, fontSize: 11, fontWeight: '800' },
   gkButtonTextSelected: { color: palette.panel },
   playerCopy: { flex: 1, marginLeft: 12 },
-  playerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  playerName: { color: palette.ink, flexShrink: 1, fontSize: 15, fontWeight: '800' },
   formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
   nameLine: { alignItems: 'center', flexDirection: 'row', flex: 1 },
   numberBadge: { backgroundColor: palette.greenSoft, borderRadius: 6, color: palette.green, fontSize: 11, fontWeight: '800', marginLeft: 6, paddingHorizontal: 5, paddingVertical: 3 },

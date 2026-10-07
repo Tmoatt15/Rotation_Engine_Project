@@ -1,0 +1,32 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Expo Go LAN",
+			"type": "shell",
+			"command": "npx",
+			"args": [
+				"--prefix",
+				"mobile",
+				"expo",
+				"start",
+				"--go",
+				"--clear",
+				"--lan",
+				"--port",
+				"8081"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Expo Go LAN Mobile",
+			"type": "shell",
+			"command": "Set-Location .\\mobile; npx expo start --go --clear --lan --port 8081",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
