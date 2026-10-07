@@ -418,7 +418,13 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
                           <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
-                            <Text style={[styles.groupOptionText, player.group === group && { color: groupColors[group].text }]}>{group}</Text>
+                            <Text
+                              style={[styles.groupOptionText, player.group === group && { color: groupColors[group].text }]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.8}>
+                              {group}
+                            </Text>
                           </Pressable>
                         ))}
                       </View>
@@ -734,7 +740,7 @@ const styles = StyleSheet.create({
   addButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 8, justifyContent: 'center', minHeight: 40, paddingHorizontal: 12 },
   addButtonText: { color: palette.panel, fontSize: 12, fontWeight: '800' },
   groupPicker: { flexDirection: 'row', flexWrap: 'nowrap', gap: 3, marginTop: 4, width: '100%' },
-  groupOption: { alignItems: 'center', backgroundColor: '#f1eee5', borderRadius: 8, flex: 1, minWidth: 0, paddingHorizontal: 3, paddingVertical: 5 },
+  groupOption: { alignItems: 'center', backgroundColor: '#f1eee5', borderRadius: 8, flex: 1, justifyContent: 'center', minHeight: 30, minWidth: 0, paddingHorizontal: 3, paddingVertical: 4 },
   groupOptionText: { color: palette.muted, fontSize: 9, fontWeight: '800', textAlign: 'center', textTransform: 'capitalize' },
   positionField: { alignItems: 'center', flexDirection: 'row', marginTop: 8, width: '100%' },
   positionFieldLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', width: 58 },
