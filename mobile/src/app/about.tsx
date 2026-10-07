@@ -5,7 +5,7 @@ import { Alert, InteractionManager, Modal, Pressable, ScrollView, StyleSheet, Te
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getDefaultDiagnosticFilename, shareDiagnosticSnapshot } from '@/services/diagnostic-service';
+import { copyDiagnosticSnapshot, getDefaultDiagnosticFilename, shareDiagnosticSnapshot } from '@/services/diagnostic-service';
 import { buildHash } from '@/buildInfo';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
@@ -75,6 +75,18 @@ export default function AboutScreen() {
     }
   }
 
+  async function copyDiagnostics() {
+    setMessage(null);
+    try {
+      await copyDiagnosticSnapshot();
+      setMessage('Diagnostic JSON copied. Paste it into Notes or a message.');
+    } catch (copyError) {
+      const detail = copyError instanceof Error ? copyError.message : 'Unknown clipboard error.';
+      console.error('[diagnostic] Clipboard copy failed:', copyError);
+      Alert.alert('Copy failed', detail);
+    }
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -112,6 +124,9 @@ export default function AboutScreen() {
               <Pressable onPress={() => void openExportDialog()} disabled={sharing} style={[styles.shareButton, sharing && styles.disabledButton]}>
                 <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share diagnostic snapshot'}</Text>
                 <SymbolView name={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }} size={18} tintColor={palette.panel} />
+              </Pressable>
+              <Pressable onPress={() => void copyDiagnostics()} disabled={sharing} style={styles.copyButton}>
+                <Text style={styles.copyText}>Copy diagnostic JSON</Text>
               </Pressable>
               {message && <Text style={styles.message}>{message}</Text>}
             </Section>
@@ -172,6 +187,8 @@ const styles = StyleSheet.create({
   infoLabel: { color: palette.ink, fontSize: 14, fontWeight: '800' },
   shareButton: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 12, flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 14, minHeight: 48, paddingHorizontal: 12 },
   shareText: { color: palette.panel, fontSize: 13, fontWeight: '800' },
+  copyButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, justifyContent: 'center', marginTop: 10, minHeight: 44, paddingHorizontal: 12 },
+  copyText: { color: palette.green, fontSize: 13, fontWeight: '800' },
   message: { color: palette.green, fontSize: 12, marginTop: 10 },
   disabledButton: { opacity: 0.55 },
   modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(23, 34, 31, 0.45)', flex: 1, justifyContent: 'center', padding: 20 },

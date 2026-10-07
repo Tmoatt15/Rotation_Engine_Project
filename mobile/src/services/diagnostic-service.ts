@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
 import { Platform, Share } from 'react-native';
 
@@ -100,15 +101,24 @@ export async function shareDiagnosticSnapshot(filename: string): Promise<void> {
   const byteSize = new TextEncoder().encode(json).byteLength;
   console.log(`[diagnostic] Serialized snapshot: ${byteSize} bytes`);
   await FileSystem.writeAsStringAsync(path, json);
-  console.log(`[diagnostic] Snapshot written to ${path}`);
+  const fileInfo = await FileSystem.getInfoAsync(path);
+  console.log(`[diagnostic] Snapshot written to ${path}; exists=${fileInfo.exists}`);
   const shareRequest = Share.share({
     title: 'Rotation Engine backup',
-    message: 'Rotation Engine diagnostic backup',
-    url: path,
+    message: json,
   });
   await Promise.race([
     shareRequest,
     new Promise<void>((resolve) => setTimeout(resolve, 1000)),
   ]);
   console.log('[diagnostic] Share sheet completed');
+}
+
+export async function copyDiagnosticSnapshot(): Promise<void> {
+  console.log('[diagnostic] Building snapshot for clipboard');
+  const snapshot = await buildDiagnosticSnapshot();
+  const json = JSON.stringify(snapshot, null, 2);
+  const byteSize = new TextEncoder().encode(json).byteLength;
+  console.log(`[diagnostic] Clipboard snapshot: ${byteSize} bytes`);
+  await Clipboard.setStringAsync(json);
 }
