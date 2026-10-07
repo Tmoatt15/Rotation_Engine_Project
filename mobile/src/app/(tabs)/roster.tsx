@@ -85,8 +85,8 @@ export default function RosterTab() {
     }
   }
 
-  return (
-    <View style={styles.container}>
+  function renderSeasonSettings() {
+    return (
       <View style={[styles.bar, { paddingTop: 12 + insets.top }]}>
         <Pressable onPress={openBar} style={[styles.barHeader, !configured && styles.barHeaderAttention]} accessibilityRole="button">
           <View style={styles.barCopy}>
@@ -106,7 +106,12 @@ export default function RosterTab() {
           </View>
         ))}
       </View>
-      <PositionAssignmentScreen embedded />
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <PositionAssignmentScreen embedded seasonSettingsContent={renderSeasonSettings()} />
     </View>
   );
 }

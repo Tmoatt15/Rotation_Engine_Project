@@ -1,6 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -88,7 +88,7 @@ function withoutGoalkeeper(positionList: string[]): string[] {
   return positionList.filter((position) => position.toUpperCase() !== 'GK');
 }
 
-export default function RosterScreen({ embedded = false }: { embedded?: boolean }) {
+export default function RosterScreen({ embedded = false, seasonSettingsContent }: { embedded?: boolean; seasonSettingsContent?: ReactNode }) {
   const router = useRouter();
   const [players, setPlayers] = useState<Player[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -328,6 +328,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 </Text>}
               </View>
             </Pressable>
+            {seasonSettingsContent}
             {positionsNeedReview && (
               <View style={styles.warningCard}>
                 <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} size={20} tintColor={palette.coral} />
@@ -388,7 +389,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
               {filteredPlayers.map((player, index) => {
                 return (
                   <View key={player.name} style={[styles.playerRow, index === filteredPlayers.length - 1 && styles.lastRow]}>
-                    <View style={styles.playerHeader}>
+                    <View style={styles.playerLeft}>
                       <View style={styles.nameLine}>
                         <Text style={styles.playerName} numberOfLines={1}>{displayPlayerName(player.name)}</Text>
                         {editingNumber === player.name ? (
@@ -398,20 +399,23 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                             <Text style={styles.numberBadge}>{player.number === undefined ? '#' : `#${player.number}`}</Text>
                           </Pressable>
                         )}
-                        <Pressable
-                          onPress={() => toggleGoalkeeper(player.name)}
-                          style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
-                          accessibilityRole="switch"
-                          accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
-                          accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
-                          <SymbolView
-                            name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }}
-                            size={12}
-                            tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted}
-                          />
-                          <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
-                        </Pressable>
                       </View>
+                      <Pressable
+                        onPress={() => toggleGoalkeeper(player.name)}
+                        style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
+                        accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
+                        <SymbolView
+                          name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }}
+                          size={12}
+                          tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted}
+                        />
+                        <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
+                      </Pressable>
+                    </View>
+                    <View style={styles.playerRight}>
+                      <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
                           <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
@@ -419,9 +423,6 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                           </Pressable>
                         ))}
                       </View>
-                    </View>
-                    <View style={styles.playerCopy}>
-                      <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
                       {formationConfigured ? (
                         <>
                           <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
@@ -711,15 +712,15 @@ const styles = StyleSheet.create({
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
   resultCount: { color: palette.muted, fontSize: 11 },
   playerList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, overflow: 'hidden' },
-  playerRow: { alignItems: 'stretch', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'column', minHeight: 75, paddingHorizontal: 13, paddingVertical: 10 },
+  playerRow: { alignItems: 'stretch', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', gap: 10, minHeight: 75, paddingHorizontal: 13, paddingVertical: 10 },
   lastRow: { borderBottomWidth: 0 },
-  playerHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 34 },
+  playerLeft: { flex: 1, minWidth: 0 },
+  playerRight: { flex: 1, minWidth: 0 },
   avatarColumn: { alignItems: 'center', width: 72 },
-  gkButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flexDirection: 'row', gap: 4, justifyContent: 'center', marginLeft: 6, minHeight: 32, paddingHorizontal: 8, paddingVertical: 6, width: 68 },
+  gkButton: { alignItems: 'center', alignSelf: 'flex-start', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flexDirection: 'row', gap: 4, justifyContent: 'center', marginTop: 6, minHeight: 32, paddingHorizontal: 8, paddingVertical: 6, width: 68 },
   gkButtonSelected: { backgroundColor: palette.coral, borderColor: palette.coral },
   gkButtonText: { color: palette.muted, fontSize: 11, fontWeight: '800' },
   gkButtonTextSelected: { color: palette.panel },
-  playerCopy: { flex: 1, marginLeft: 0 },
   playerName: { color: palette.ink, flexShrink: 1, fontSize: 15, fontWeight: '800' },
   formationBanner: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 12, borderWidth: 1, marginBottom: 16, padding: 12 },
   formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
