@@ -12,7 +12,7 @@ export default function RootLayout() {
       <AnimatedSplashOverlay />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="about" options={{ headerShown: false }} />
         <Stack.Screen name="team-create" options={{ headerShown: false }} />
         <Stack.Screen name="saved-teams" options={{ headerShown: false }} />
         <Stack.Screen name="team-edit" options={{ headerShown: false }} />

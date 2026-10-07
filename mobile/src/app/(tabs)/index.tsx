@@ -93,13 +93,6 @@ export default function HomeScreen() {
               <Text style={styles.eyebrow}>MATCHDAY CONTROL</Text>
               <Text style={styles.title}>Rotation Engine</Text>
             </View>
-            <TouchableOpacity style={styles.profileButton} accessibilityLabel="Open settings" onPress={() => router.navigate('/settings')}>
-              <SymbolView
-                name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
-                size={20}
-                tintColor={palette.ink}
-              />
-            </TouchableOpacity>
           </View>
 
           <View style={styles.seasonCard}>
@@ -206,17 +199,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.5,
     marginTop: 5,
-  },
-  profileButton: {
-    alignItems: 'center',
-    backgroundColor: palette.panel,
-    borderColor: palette.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    marginRight: 44,
-    width: 44,
   },
   seasonCard: {
     backgroundColor: palette.green,

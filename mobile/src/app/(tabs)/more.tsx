@@ -8,8 +8,6 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 
 const options = [
-  { icon: 'calendar', label: 'Season Settings', detail: 'Format, blocks, and formation', route: '/settings' },
-  { icon: 'person.3', label: 'Player Positions', detail: 'Assign and Edit Player Positions', route: '/position-assignment' },
   { icon: 'chart.bar', label: 'Position Analytics', detail: 'View position depth information', route: '/coverage' },
   { icon: 'folder', label: 'Saved Teams', detail: 'Edit or delete saved team rosters', route: '/saved-teams' },
   { icon: 'calendar.badge.clock', label: 'Saved Schedules', detail: 'Open saved game schedules', route: '/saved-schedules' },
@@ -17,6 +15,7 @@ const options = [
   { icon: 'chart.line.uptrend.xyaxis', label: 'Season Fairness', detail: 'Review season playing-time balance', route: '/season-fairness' },
   { icon: 'chart.bar.xaxis', label: 'Season Totals', detail: 'Review season player totals', route: '/season-totals' },
   { icon: 'plus.circle', label: 'Create New Team', detail: undefined, route: '/team-create' },
+  { icon: 'info.circle', label: 'About', detail: 'Playing time targets and app info', route: '/about' },
 ] as const;
 
 export default function MoreScreen() {
