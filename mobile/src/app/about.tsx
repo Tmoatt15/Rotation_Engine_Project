@@ -1,11 +1,11 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { shareDiagnosticSnapshot } from '@/services/diagnostic-service';
+import { getDefaultDiagnosticFilename, shareDiagnosticSnapshot } from '@/services/diagnostic-service';
 import { buildHash } from '@/buildInfo';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
@@ -20,12 +20,25 @@ export default function AboutScreen() {
   const router = useRouter();
   const [sharing, setSharing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [filename, setFilename] = useState('');
+  const [nameDialogVisible, setNameDialogVisible] = useState(false);
+
+  async function openExportDialog() {
+    setMessage(null);
+    try {
+      setFilename(await getDefaultDiagnosticFilename());
+      setNameDialogVisible(true);
+    } catch {
+      setMessage('Unable to prepare diagnostic snapshot.');
+    }
+  }
 
   async function exportDiagnostics() {
+    setNameDialogVisible(false);
     setSharing(true);
     setMessage(null);
     try {
-      await shareDiagnosticSnapshot();
+      await shareDiagnosticSnapshot(filename);
       setMessage('Diagnostic snapshot is ready to share.');
     } catch {
       setMessage('Unable to create diagnostic snapshot.');
@@ -68,7 +81,7 @@ export default function AboutScreen() {
 
             <Section title="Diagnostics">
               <Text style={styles.detail}>Share a snapshot when you need help reviewing a schedule or game.</Text>
-              <Pressable onPress={() => void exportDiagnostics()} disabled={sharing} style={[styles.shareButton, sharing && styles.disabledButton]}>
+              <Pressable onPress={() => void openExportDialog()} disabled={sharing} style={[styles.shareButton, sharing && styles.disabledButton]}>
                 <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share diagnostic snapshot'}</Text>
                 <SymbolView name={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }} size={18} tintColor={palette.panel} />
               </Pressable>
@@ -77,6 +90,29 @@ export default function AboutScreen() {
           </ScrollView>
         </SafeAreaView>
       </View>
+      <Modal visible={nameDialogVisible} transparent animationType="fade" onRequestClose={() => setNameDialogVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.nameDialog}>
+            <Text style={styles.dialogTitle}>Name your backup file</Text>
+            <TextInput
+              value={filename}
+              onChangeText={setFilename}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.filenameInput}
+              accessibilityLabel="Backup filename"
+            />
+            <View style={styles.dialogActions}>
+              <Pressable onPress={() => setNameDialogVisible(false)} style={styles.cancelButton}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={() => void exportDiagnostics()} disabled={!filename.trim() || sharing} style={[styles.saveButton, (!filename.trim() || sharing) && styles.disabledButton]}>
+                <Text style={styles.saveText}>Save & Share</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -110,4 +146,13 @@ const styles = StyleSheet.create({
   shareText: { color: palette.panel, fontSize: 13, fontWeight: '800' },
   message: { color: palette.green, fontSize: 12, marginTop: 10 },
   disabledButton: { opacity: 0.55 },
+  modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(23, 34, 31, 0.45)', flex: 1, justifyContent: 'center', padding: 20 },
+  nameDialog: { backgroundColor: palette.panel, borderRadius: 16, padding: 20, width: '100%' },
+  dialogTitle: { color: palette.ink, fontSize: 18, fontWeight: '800', marginBottom: 14 },
+  filenameInput: { borderColor: palette.line, borderRadius: 10, borderWidth: 1, color: palette.ink, minHeight: 46, paddingHorizontal: 12 },
+  dialogActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end', marginTop: 16 },
+  cancelButton: { alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 12 },
+  cancelText: { color: palette.muted, fontSize: 13, fontWeight: '700' },
+  saveButton: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 10, justifyContent: 'center', minHeight: 44, paddingHorizontal: 14 },
+  saveText: { color: palette.panel, fontSize: 13, fontWeight: '800' },
 });

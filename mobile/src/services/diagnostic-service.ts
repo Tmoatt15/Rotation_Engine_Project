@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
-import { Platform, Share } from 'react-native';
+import { Platform } from 'react-native';
 
 import { getTeams } from '@/services/team-service';
 import { getRoster } from '@/services/team-service';
@@ -30,12 +31,24 @@ export interface DiagnosticSnapshot {
   }>;
 }
 
-function diagnosticFilename(snapshot: DiagnosticSnapshot, date = new Date()): string {
-  const teamName = snapshot.teams.length === 1
-    ? snapshot.teams[0].name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+function diagnosticFilename(teamNames: string[], date = new Date()): string {
+  const teamName = teamNames.length === 1
+    ? teamNames[0].replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     : 'rotation-engine';
   const safeTeamName = teamName || 'rotation-engine';
   return `${safeTeamName}-backup-${date.toISOString().slice(0, 10)}.json`;
+}
+
+function safeExportFilename(filename: string): string {
+  const withoutExtension = filename.trim().replace(/\.json$/i, '');
+  const safeName = withoutExtension.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!safeName) throw new Error('A filename is required.');
+  return `${safeName}.json`;
+}
+
+export async function getDefaultDiagnosticFilename(): Promise<string> {
+  const { teams } = await getTeams();
+  return diagnosticFilename(teams.map((team) => team.name));
 }
 
 function movementSlots(positionRows: NonNullable<LiveSchedule['position_rows']> = []) {
@@ -79,14 +92,9 @@ export async function buildDiagnosticSnapshot(): Promise<DiagnosticSnapshot> {
   };
 }
 
-export async function shareDiagnosticSnapshot(): Promise<void> {
+export async function shareDiagnosticSnapshot(filename: string): Promise<void> {
   const snapshot = await buildDiagnosticSnapshot();
-  const filename = diagnosticFilename(snapshot);
-  const path = `${FileSystem.cacheDirectory}${filename}`;
+  const path = `${FileSystem.cacheDirectory}${safeExportFilename(filename)}`;
   await FileSystem.writeAsStringAsync(path, JSON.stringify(snapshot, null, 2));
-  await Share.share({
-    title: 'Rotation Engine diagnostic snapshot',
-    message: 'Rotation Engine diagnostic snapshot',
-    url: path,
-  });
+  await Sharing.shareAsync(path, { dialogTitle: 'Share Rotation Engine backup', mimeType: 'application/json' });
 }
