@@ -14,6 +14,7 @@ const options = [
   { icon: 'doc.text', label: 'After-Game Reports', detail: 'Review completed game reports', route: '/saved-after-game-reports' },
   { icon: 'chart.line.uptrend.xyaxis', label: 'Season Fairness', detail: 'Review season playing-time balance', route: '/season-fairness' },
   { icon: 'chart.bar.xaxis', label: 'Season Totals', detail: 'Review season player totals', route: '/season-totals' },
+  { icon: 'externaldrive', label: 'Backup & Restore', detail: 'Protect teams and roster information', route: '/backup' },
   { icon: 'plus.circle', label: 'Create New Team', detail: undefined, route: '/team-create' },
   { icon: 'info.circle', label: 'About', detail: 'Playing time targets and app info', route: '/about' },
 ] as const;
