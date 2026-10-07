@@ -158,13 +158,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     };
   }, [teamChangeVersion]));
 
-  function updatePlayer(name: string, changes: Partial<Player>) {
-    setPlayers((current) => current.map((player) => player.name === name ? { ...player, ...changes } : player));
-    setMessage(null);
-    setError(null);
-    setHealthDismissed(false);
-  }
-
   function updateGroup(name: string, group: Group) {
     const nextPlayers = players.map((player) => player.name === name ? { ...player, group } : player);
     setPlayers(nextPlayers);
@@ -178,11 +171,17 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     const player = players.find((candidate) => candidate.name === name);
     if (!player) return;
     const allowed = isGoalkeeperAllowed(player);
-    updatePlayer(name, {
+    const nextPlayers = players.map((candidate) => candidate.name === name ? {
+      ...candidate,
       primary_positions: allowed
         ? player.primary_positions.filter((position) => position.toUpperCase() !== 'GK')
         : [...player.primary_positions, 'GK'],
-    });
+    } : candidate);
+    setPlayers(nextPlayers);
+    setMessage(null);
+    setError(null);
+    setHealthDismissed(false);
+    void saveRoster(nextPlayers, false);
   }
 
   function openPositionPicker(player: Player, group: PositionGroup) {
@@ -530,26 +529,31 @@ function PositionPickerModal({
               </View>
             )}
             {pickerRows.map((row) => {
-              const positions = useGroupPositions
-                ? [...row.groupPositions, ...(allowExactPositions ? row.exactPositions : [])]
-                : row.exactPositions;
+              const genericPositions = useGroupPositions
+                ? row.groupPositions.filter((position) => picker.allowedPositions.includes(position))
+                : [];
+              const specificPositions = (useGroupPositions && allowExactPositions ? row.exactPositions : row.exactPositions)
+                .filter((position) => picker.allowedPositions.includes(position));
+              const renderPosition = (position: string) => {
+                const selected = picker.positions.includes(position);
+                return (
+                  <Pressable
+                    key={position}
+                    onPress={() => onToggle(position)}
+                    style={[styles.positionOption, selected && styles.positionOptionSelected]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}>
+                    <Text style={[styles.positionOptionText, selected && styles.positionOptionTextSelected]}>{position}</Text>
+                  </Pressable>
+                );
+              };
               return (
                 <View key={row.label} style={styles.pickerRow}>
                   <Text style={styles.pickerRowLabel}>{row.label}</Text>
                   <View style={styles.pickerOptions}>
-                    {positions.filter((position) => picker.allowedPositions.includes(position)).map((position) => {
-                      const selected = picker.positions.includes(position);
-                      return (
-                        <Pressable
-                          key={position}
-                          onPress={() => onToggle(position)}
-                          style={[styles.positionOption, selected && styles.positionOptionSelected]}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected }}>
-                          <Text style={[styles.positionOptionText, selected && styles.positionOptionTextSelected]}>{position}</Text>
-                        </Pressable>
-                      );
-                    })}
+                    {genericPositions.map(renderPosition)}
+                    {genericPositions.length > 0 && specificPositions.length > 0 && <View style={styles.positionSeparator} />}
+                    {specificPositions.map(renderPosition)}
                   </View>
                 </View>
               );
@@ -757,6 +761,7 @@ const styles = StyleSheet.create({
   pickerRow: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 16, borderWidth: 1, padding: 12 },
   pickerRowLabel: { color: palette.coral, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, marginBottom: 9 },
   pickerOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  positionSeparator: { backgroundColor: palette.line, height: 32, marginHorizontal: 2, width: 1 },
   positionOption: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 54, paddingHorizontal: 10, paddingVertical: 11 },
   positionOptionSelected: { backgroundColor: palette.green, borderColor: palette.green },
   positionOptionText: { color: palette.ink, fontSize: 12, fontWeight: '800' },
