@@ -30,6 +30,14 @@ export interface DiagnosticSnapshot {
   }>;
 }
 
+function diagnosticFilename(snapshot: DiagnosticSnapshot, date = new Date()): string {
+  const teamName = snapshot.teams.length === 1
+    ? snapshot.teams[0].name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    : 'rotation-engine';
+  const safeTeamName = teamName || 'rotation-engine';
+  return `${safeTeamName}-backup-${date.toISOString().slice(0, 10)}.json`;
+}
+
 function movementSlots(positionRows: NonNullable<LiveSchedule['position_rows']> = []) {
   const slots = { D: [] as string[], M: [] as string[], F: [] as string[] };
   for (const row of positionRows) {
@@ -73,7 +81,7 @@ export async function buildDiagnosticSnapshot(): Promise<DiagnosticSnapshot> {
 
 export async function shareDiagnosticSnapshot(): Promise<void> {
   const snapshot = await buildDiagnosticSnapshot();
-  const filename = `rotation-engine-diagnostic-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  const filename = diagnosticFilename(snapshot);
   const path = `${FileSystem.cacheDirectory}${filename}`;
   await FileSystem.writeAsStringAsync(path, JSON.stringify(snapshot, null, 2));
   await Share.share({
