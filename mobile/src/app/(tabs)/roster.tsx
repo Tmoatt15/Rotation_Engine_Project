@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import PositionAssignmentScreen from '../position-assignment';
 import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
@@ -18,6 +19,7 @@ const alerts: Array<{ value: SubstitutionAlert; label: string }> = [
 ];
 
 export default function RosterTab() {
+  const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<SeasonSettings | null>(null);
   const [draft, setDraft] = useState<SeasonSettings | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -28,7 +30,7 @@ export default function RosterTab() {
   useFocusEffect(useCallback(() => {
     let active = true;
     getActiveTeam().then(async (team) => {
-      const [season, roster] = await Promise.all([getSeasonSettings(team.id), getRoster(team.id)]);
+      const [season] = await Promise.all([getSeasonSettings(team.id), getRoster(team.id)]);
       if (!active) return;
       setSettings(season);
       setDraft(season);
@@ -81,7 +83,7 @@ export default function RosterTab() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.bar}>
+      <View style={[styles.bar, { paddingTop: 12 + insets.top }]}>
         <Pressable onPress={openBar} style={styles.barHeader} accessibilityRole="button">
           <View style={styles.barCopy}>
             <Text style={styles.barTitle}>{configured && settings ? `${settings.game_format} · ${settings.formation} · ${settings.total_blocks} blocks` : 'Season setup — tap to finish'}</Text>

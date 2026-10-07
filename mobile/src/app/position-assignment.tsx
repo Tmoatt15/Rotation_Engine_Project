@@ -101,7 +101,6 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
   const [positionRows, setPositionRows] = useState(() => formationPositionRows(fallbackFormation));
   const [formation, setFormation] = useState(fallbackFormation);
   const [formationConfigured, setFormationConfigured] = useState(true);
-  const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
@@ -143,7 +142,6 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         const currentFormation = storedFormation || fallbackFormation;
         setFormationConfigured(Boolean(storedFormation));
         setFormation(currentFormation);
-        setHasGoalkeeper(GAME_FORMATS[seasonPayload.game_format]?.has_goalkeeper ?? true);
         setPositionRows(storedFormation ? formationPositionRows(currentFormation) : []);
       } catch (requestError) {
         if (!active) return;
@@ -197,7 +195,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         return row ? generalGroups.includes(row.label) : false;
       });
     const allowedPositions = group === 'general_positions'
-      ? [ANY_POSITION, 'D', 'M', 'F', ...(hasGoalkeeper ? ['GK'] : [])]
+      ? [ANY_POSITION, 'D', 'M', 'F']
       : group === 'backup_positions'
         ? ['D', 'M', 'F', ...formationPositions]
         : [ANY_POSITION, ...primaryFormationPositions];
@@ -340,6 +338,11 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 onDismiss={() => setHealthDismissed(true)}
               />
             )}
+            {!formationConfigured && (
+              <View style={styles.formationBanner}>
+                <Text style={styles.formationHint}>Set a formation above to assign exact Primary, Backup, and Excluded positions.</Text>
+              </View>
+            )}
 
             <Text style={styles.filterLabel}>Filter by:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
@@ -422,7 +425,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                           <PositionField label="Backup" value={player.backup_positions} onPress={() => openPositionPicker(player, 'backup_positions')} />
                           <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} />
                         </>
-                      ) : <Text style={styles.formationHint}>Set formation above to assign exact positions.</Text>}
+                      ) : null}
                     </View>
                   </View>
                 );
@@ -484,12 +487,9 @@ function PositionPickerModal({
   const useGroupPositions = picker.group === 'general_positions' || picker.group === 'backup_positions';
   const allowExactPositions = picker.group !== 'general_positions';
   const groupLabel = picker.group.replace('_positions', '');
-  const basePickerRows = picker.group === 'general_positions' && positionRows.length === 0
+  const pickerRows = picker.group === 'general_positions' && positionRows.length === 0
     ? ['D', 'M', 'F'].map((group) => ({ label: group, groupPositions: [group], exactPositions: [] }))
     : positionRows;
-  const pickerRows = picker.group === 'general_positions' && picker.allowedPositions.includes('GK')
-    ? [...basePickerRows, { label: 'GK', groupPositions: ['GK'], exactPositions: [] }]
-    : basePickerRows;
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onFinish}>
       <View style={styles.modalBackdrop}>
@@ -715,6 +715,7 @@ const styles = StyleSheet.create({
   gkButtonTextSelected: { color: palette.panel },
   playerCopy: { flex: 1, marginLeft: 12 },
   playerName: { color: palette.ink, flexShrink: 1, fontSize: 15, fontWeight: '800' },
+  formationBanner: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 12, borderWidth: 1, marginBottom: 16, padding: 12 },
   formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
   nameLine: { alignItems: 'center', flexDirection: 'row', flex: 1 },
   numberBadge: { backgroundColor: palette.greenSoft, borderRadius: 6, color: palette.green, fontSize: 11, fontWeight: '800', marginLeft: 6, paddingHorizontal: 5, paddingVertical: 3 },
