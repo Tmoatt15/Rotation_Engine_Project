@@ -105,6 +105,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
   const [selectedHealth, setSelectedHealth] = useState<PositionHealth | null>(null);
   const [healthDismissed, setHealthDismissed] = useState(false);
+  const [helpExpanded, setHelpExpanded] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
   const [editingNumber, setEditingNumber] = useState<string | null>(null);
@@ -307,7 +308,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
               </View>
             </View>
 
-            <View style={styles.summaryCard}>
+            <Pressable style={styles.summaryCard} onPress={() => setHelpExpanded((expanded) => !expanded)} accessibilityRole="button" accessibilityState={{ expanded: helpExpanded }}>
               <View style={styles.summaryIcon}>
                 <SymbolView
                   name={{ ios: 'person.3.fill', android: 'group', web: 'group' }}
@@ -316,14 +317,17 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 />
               </View>
               <View style={styles.summaryCopy}>
-                <Text style={styles.summaryTitle}>When assigning player groups and positions remember:</Text>
-                <Text style={styles.summaryDetail}>
+                <View style={styles.summaryTitleRow}>
+                  <Text style={styles.summaryTitle}>{helpExpanded ? 'When assigning player groups and positions remember:' : 'About player groups & positions'}</Text>
+                  <Text style={styles.summaryChevron}>{helpExpanded ? '−' : '›'}</Text>
+                </View>
+                {helpExpanded && <Text style={styles.summaryDetail}>
                   - Player Groups affect overall playing time (Core = more, Rotational = avg, Developing = less){'\n'}
                   - Too many Core/Developing players can have negative affects on scheduling.{ '\n' }
                   - The order that you select specific positions will affect the scheduling logic (first in list = higher priority)
-                </Text>
+                </Text>}
               </View>
-            </View>
+            </Pressable>
             {positionsNeedReview && (
               <View style={styles.warningCard}>
                 <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} size={20} tintColor={palette.coral} />
@@ -384,7 +388,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
               {filteredPlayers.map((player, index) => {
                 return (
                   <View key={player.name} style={[styles.playerRow, index === filteredPlayers.length - 1 && styles.lastRow]}>
-                    <View style={styles.avatarColumn}>
+                    <View style={styles.playerHeader}>
                       <View style={styles.nameLine}>
                         <Text style={styles.playerName} numberOfLines={1}>{displayPlayerName(player.name)}</Text>
                         {editingNumber === player.name ? (
@@ -394,22 +398,20 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                             <Text style={styles.numberBadge}>{player.number === undefined ? '#' : `#${player.number}`}</Text>
                           </Pressable>
                         )}
+                        <Pressable
+                          onPress={() => toggleGoalkeeper(player.name)}
+                          style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
+                          accessibilityRole="switch"
+                          accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
+                          accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
+                          <SymbolView
+                            name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }}
+                            size={12}
+                            tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted}
+                          />
+                          <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
+                        </Pressable>
                       </View>
-                      <Pressable
-                        onPress={() => toggleGoalkeeper(player.name)}
-                        style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
-                        accessibilityRole="switch"
-                        accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
-                        accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
-                        <SymbolView
-                          name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }}
-                          size={12}
-                          tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted}
-                        />
-                        <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
-                      </Pressable>
-                    </View>
-                    <View style={styles.playerCopy}>
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
                           <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
@@ -417,6 +419,8 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                           </Pressable>
                         ))}
                       </View>
+                    </View>
+                    <View style={styles.playerCopy}>
                       <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
                       {formationConfigured ? (
                         <>
@@ -661,7 +665,9 @@ const styles = StyleSheet.create({
     width: 44,
   },
   summaryCopy: { flex: 1, marginLeft: 12 },
+  summaryTitleRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   summaryTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  summaryChevron: { color: palette.green, fontSize: 24, fontWeight: '700', marginLeft: 8 },
   summaryDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   warningCard: {
     alignItems: 'center',
@@ -705,14 +711,15 @@ const styles = StyleSheet.create({
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
   resultCount: { color: palette.muted, fontSize: 11 },
   playerList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, overflow: 'hidden' },
-  playerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', minHeight: 75, paddingHorizontal: 13 },
+  playerRow: { alignItems: 'stretch', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'column', minHeight: 75, paddingHorizontal: 13, paddingVertical: 10 },
   lastRow: { borderBottomWidth: 0 },
+  playerHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 34 },
   avatarColumn: { alignItems: 'center', width: 72 },
-  gkButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flexDirection: 'row', gap: 4, justifyContent: 'center', marginTop: 6, minHeight: 32, paddingHorizontal: 8, paddingVertical: 6, width: 68 },
+  gkButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flexDirection: 'row', gap: 4, justifyContent: 'center', marginLeft: 6, minHeight: 32, paddingHorizontal: 8, paddingVertical: 6, width: 68 },
   gkButtonSelected: { backgroundColor: palette.coral, borderColor: palette.coral },
   gkButtonText: { color: palette.muted, fontSize: 11, fontWeight: '800' },
   gkButtonTextSelected: { color: palette.panel },
-  playerCopy: { flex: 1, marginLeft: 12 },
+  playerCopy: { flex: 1, marginLeft: 0 },
   playerName: { color: palette.ink, flexShrink: 1, fontSize: 15, fontWeight: '800' },
   formationBanner: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 12, borderWidth: 1, marginBottom: 16, padding: 12 },
   formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
@@ -725,7 +732,7 @@ const styles = StyleSheet.create({
   numberInput: { width: 42 },
   addButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 8, justifyContent: 'center', minHeight: 40, paddingHorizontal: 12 },
   addButtonText: { color: palette.panel, fontSize: 12, fontWeight: '800' },
-  groupPicker: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  groupPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' },
   groupOption: { backgroundColor: '#f1eee5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
   groupOptionText: { color: palette.muted, fontSize: 10, fontWeight: '800', textTransform: 'capitalize' },
   positionField: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },

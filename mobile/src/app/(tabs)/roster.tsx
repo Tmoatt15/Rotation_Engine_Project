@@ -40,6 +40,10 @@ export default function RosterTab() {
   }, []));
 
   function openBar() {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
     setExpanded(true);
     if (configured) setEditing(false);
     else setEditing(true);
@@ -84,12 +88,12 @@ export default function RosterTab() {
   return (
     <View style={styles.container}>
       <View style={[styles.bar, { paddingTop: 12 + insets.top }]}>
-        <Pressable onPress={openBar} style={styles.barHeader} accessibilityRole="button">
+        <Pressable onPress={openBar} style={[styles.barHeader, !configured && styles.barHeaderAttention]} accessibilityRole="button">
           <View style={styles.barCopy}>
-            <Text style={styles.barTitle}>{configured && settings ? `${settings.game_format} · ${settings.formation} · ${settings.total_blocks} blocks` : 'Season setup — tap to finish'}</Text>
+            <Text style={styles.barTitle}>{configured && settings ? `${settings.game_format} · ${settings.formation} · ${settings.total_blocks} blocks` : 'Season Setup Required'}</Text>
             <Text style={styles.barHint}>{expanded ? '' : 'Season settings'}</Text>
           </View>
-          <Text style={styles.chevron}>{expanded ? '−' : '+'}</Text>
+          <View style={styles.setupButton}><Text style={styles.setupButtonText}>{expanded ? 'Close' : configured ? 'Edit' : 'Configure'}</Text></View>
         </Pressable>
         {expanded && settings && (editing ? (
           <SeasonForm value={draft ?? settings} onChange={setDraft} onCancel={() => { setEditing(false); setExpanded(false); }} onSave={() => void save()} saving={saving} />
@@ -135,10 +139,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   bar: { backgroundColor: palette.panel, borderBottomColor: palette.line, borderBottomWidth: 1, padding: 12 },
   barHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  barHeaderAttention: { backgroundColor: '#fff1e9', borderRadius: 10, marginHorizontal: -4, paddingHorizontal: 8, paddingVertical: 8 },
   barCopy: { flex: 1 },
   barTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   barHint: { color: palette.muted, fontSize: 11, marginTop: 3 },
   chevron: { color: palette.green, fontSize: 24, paddingHorizontal: 8 },
+  setupButton: { backgroundColor: palette.coral, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  setupButtonText: { color: palette.panel, fontSize: 11, fontWeight: '900' },
   readOnly: { paddingTop: 10 },
   detail: { color: palette.muted, fontSize: 12, marginTop: 4 },
   editButton: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7 },
