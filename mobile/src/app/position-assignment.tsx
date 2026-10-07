@@ -550,11 +550,17 @@ function PositionPickerModal({
               return (
                 <View key={row.label} style={styles.pickerRow}>
                   <Text style={styles.pickerRowLabel}>{row.label}</Text>
+                  {genericPositions.length > 0 && <Text style={styles.positionSectionLabel}>Generic groups</Text>}
                   <View style={styles.pickerOptions}>
                     {genericPositions.map(renderPosition)}
-                    {genericPositions.length > 0 && specificPositions.length > 0 && <View style={styles.positionSeparator} />}
-                    {specificPositions.map(renderPosition)}
                   </View>
+                  {genericPositions.length > 0 && specificPositions.length > 0 && (
+                    <>
+                      <View style={styles.positionSeparator} />
+                      <Text style={styles.positionSectionLabel}>Exact positions</Text>
+                    </>
+                  )}
+                  {specificPositions.length > 0 && <View style={styles.pickerOptions}>{specificPositions.map(renderPosition)}</View>}
                 </View>
               );
             })}
@@ -761,7 +767,8 @@ const styles = StyleSheet.create({
   pickerRow: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 16, borderWidth: 1, padding: 12 },
   pickerRowLabel: { color: palette.coral, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, marginBottom: 9 },
   pickerOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  positionSeparator: { backgroundColor: palette.line, height: 32, marginHorizontal: 2, width: 1 },
+  positionSectionLabel: { color: palette.muted, fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginBottom: 7, marginTop: 3, textTransform: 'uppercase' },
+  positionSeparator: { backgroundColor: palette.line, height: 1, marginVertical: 11, width: '100%' },
   positionOption: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 54, paddingHorizontal: 10, paddingVertical: 11 },
   positionOptionSelected: { backgroundColor: palette.green, borderColor: palette.green },
   positionOptionText: { color: palette.ink, fontSize: 12, fontWeight: '800' },
