@@ -101,10 +101,14 @@ export async function shareDiagnosticSnapshot(filename: string): Promise<void> {
   console.log(`[diagnostic] Serialized snapshot: ${byteSize} bytes`);
   await FileSystem.writeAsStringAsync(path, json);
   console.log(`[diagnostic] Snapshot written to ${path}`);
-  await Share.share({
+  const shareRequest = Share.share({
     title: 'Rotation Engine backup',
     message: 'Rotation Engine diagnostic backup',
     url: path,
   });
+  await Promise.race([
+    shareRequest,
+    new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+  ]);
   console.log('[diagnostic] Share sheet completed');
 }
