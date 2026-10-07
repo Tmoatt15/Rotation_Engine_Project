@@ -350,7 +350,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     if (onGameEnded) {
       onGameEnded(report);
     } else {
-      exitLiveMode();
+      router.push({ pathname: '/after-game', params: { data: JSON.stringify(report) } });
     }
   }
 

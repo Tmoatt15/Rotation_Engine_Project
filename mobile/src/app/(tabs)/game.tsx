@@ -100,7 +100,7 @@ export default function GameScreen() {
         setPlayersOnField(formatDetails.players_on_field);
         setHasGoalkeeper(formatDetails.has_goalkeeper);
         setTotalBlocks(settings.total_blocks ?? 10);
-        setFormation(settings.formation ?? '4-3-3');
+        setFormation(settings.formation || '4-3-3');
         const rosterPlayers = payload.players as RosterPlayer[];
         setRosterPlayers(rosterPlayers);
         const eligibleGoalkeepers = rosterPlayers

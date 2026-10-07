@@ -100,6 +100,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
   const [positionPicker, setPositionPicker] = useState<PositionPickerState>(null);
   const [positionRows, setPositionRows] = useState(() => formationPositionRows(fallbackFormation));
   const [formation, setFormation] = useState(fallbackFormation);
+  const [formationConfigured, setFormationConfigured] = useState(true);
   const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
     setError(null);
     setPositionPicker(null);
     setHealthDismissed(false);
+    setFormationConfigured(false);
     setPositionRows([]);
 
     async function loadTeamData() {
@@ -137,10 +139,12 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         setTeamId(activeTeamId);
         setTeamName(activeTeam.name);
         setPlayers(rosterPayload.players as Player[]);
-        const currentFormation = seasonPayload.formation ?? fallbackFormation;
+        const storedFormation = seasonPayload.formation || '';
+        const currentFormation = storedFormation || fallbackFormation;
+        setFormationConfigured(Boolean(storedFormation));
         setFormation(currentFormation);
         setHasGoalkeeper(GAME_FORMATS[seasonPayload.game_format]?.has_goalkeeper ?? true);
-        setPositionRows(formationPositionRows(currentFormation));
+        setPositionRows(storedFormation ? formationPositionRows(currentFormation) : []);
       } catch (requestError) {
         if (!active) return;
         setPositionRows(formationPositionRows(fallbackFormation));
@@ -268,7 +272,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
       await saveRoster(nextPlayers, false);
   }
 
-  const positionsNeedReview = !rosterMatchesFormation(formation, players as Player[]);
+  const positionsNeedReview = formationConfigured && !rosterMatchesFormation(formation, players as Player[]);
 
   return (
     <>
@@ -319,7 +323,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 <Text style={styles.warningText}>Your formation changed. Update player positions to match the current formation.</Text>
               </View>
             )}
-            {!healthDismissed && (
+            {!healthDismissed && formationConfigured && (
               <PositionHealthPanel
                 health={health}
                 onSelect={setSelectedHealth}
@@ -402,9 +406,13 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                         ))}
                       </View>
                       <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
-                      <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
-                      <PositionField label="Backup" value={player.backup_positions} onPress={() => openPositionPicker(player, 'backup_positions')} />
-                      <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} />
+                      {formationConfigured ? (
+                        <>
+                          <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
+                          <PositionField label="Backup" value={player.backup_positions} onPress={() => openPositionPicker(player, 'backup_positions')} />
+                          <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} />
+                        </>
+                      ) : <Text style={styles.formationHint}>Set formation above to assign exact positions.</Text>}
                     </View>
                   </View>
                 );
@@ -689,6 +697,7 @@ const styles = StyleSheet.create({
   gkButtonTextSelected: { color: palette.panel },
   playerCopy: { flex: 1, marginLeft: 12 },
   playerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
   nameLine: { alignItems: 'center', flexDirection: 'row', flex: 1 },
   numberBadge: { backgroundColor: palette.greenSoft, borderRadius: 6, color: palette.green, fontSize: 11, fontWeight: '800', marginLeft: 6, paddingHorizontal: 5, paddingVertical: 3 },
   numberEdit: { borderColor: palette.green, borderRadius: 6, borderWidth: 1, color: palette.ink, fontSize: 12, marginLeft: 6, paddingHorizontal: 4, paddingVertical: 2, width: 38 },

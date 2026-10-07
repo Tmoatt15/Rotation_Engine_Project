@@ -28,10 +28,9 @@ export default function CreateTeamScreen() {
     setSaving(true);
     setError(null);
     try {
-      const format = GAME_FORMATS[gameFormat];
       const payload = await createLocalTeam(name, [], {
         game_format: gameFormat,
-        formation: format.default_formation,
+        formation: '',
       });
       await activateTeam(payload.id);
       notifyTeamChanged();

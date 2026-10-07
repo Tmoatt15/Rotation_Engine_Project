@@ -6,7 +6,7 @@ import PositionAssignmentScreen from '../position-assignment';
 import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
 import type { GameFormat, SeasonSettings, SubstitutionAlert } from '@/engine/models';
 import { formationPositionRows } from '@/position-validation';
-import { getActiveTeam, getRoster, getSeasonSettings, updateRoster, updateSeasonSettings } from '@/services/team-service';
+import { getActiveTeam, getRoster, getSeasonSettings, notifyTeamChanged, updateRoster, updateSeasonSettings } from '@/services/team-service';
 
 const palette = { ink: '#17221f', muted: '#6b7873', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', coral: '#d96f4c' };
 const formats = Object.keys(GAME_FORMATS) as GameFormat[];
@@ -32,7 +32,7 @@ export default function RosterTab() {
       if (!active) return;
       setSettings(season);
       setDraft(season);
-      setConfigured(roster.players.length > 0);
+      setConfigured(Boolean(season.formation));
     }).catch(() => undefined);
     return () => { active = false; };
   }, []));
@@ -49,22 +49,26 @@ export default function RosterTab() {
     try {
       const team = await getActiveTeam();
       const roster = await getRoster(team.id);
-      const nextPositions = new Set(
-        FORMATIONS_BY_FORMAT[draft.game_format].flatMap((formation) =>
-          formationPositionRows(formation).flatMap((row) => row.exactPositions),
-        ),
-      );
+      const nextPositions = new Set(formationPositionRows(draft.formation).flatMap((row) => row.exactPositions));
       const changedFormation = settings?.formation !== draft.formation;
+      const unmappablePlayers: string[] = [];
       const remapped = roster.players.map((player) => {
         const primary = player.primary_positions.filter((position) => position === 'ANY' || nextPositions.has(position));
         const backup = player.backup_positions.filter((position) => nextPositions.has(position));
         if (changedFormation && (player.primary_positions.length || player.backup_positions.length) && !primary.length && !backup.length) {
-          Alert.alert('Check player positions', `We couldn't find a clean spot for ${player.name} in the new formation — please check their positions.`);
+          unmappablePlayers.push(player.name);
         }
         return { ...player, primary_positions: primary, backup_positions: backup };
       });
       await updateRoster(team.id, remapped);
       const saved = await updateSeasonSettings(team.id, draft);
+      notifyTeamChanged();
+      if (unmappablePlayers.length) {
+        const names = unmappablePlayers.length === 1
+          ? unmappablePlayers[0]
+          : `${unmappablePlayers.slice(0, -1).join(', ')}, and ${unmappablePlayers[unmappablePlayers.length - 1]}`;
+        Alert.alert('Check player positions', `We couldn't find a clean spot for ${names} in the new formation — please check their positions.`);
+      }
       setSettings(saved);
       setDraft(saved);
       setConfigured(true);
