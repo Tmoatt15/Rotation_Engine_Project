@@ -720,7 +720,7 @@ const styles = StyleSheet.create({
   playerList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, overflow: 'hidden' },
   playerRow: { alignItems: 'stretch', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', gap: 10, minHeight: 75, paddingHorizontal: 13, paddingVertical: 10 },
   lastRow: { borderBottomWidth: 0 },
-  playerLeft: { flex: 0.82, minWidth: 0 },
+  playerLeft: { flex: 0.67, minWidth: 0 },
   playerRight: { alignItems: 'flex-start', flex: 1, minWidth: 0 },
   avatarColumn: { alignItems: 'center', width: 72 },
   gkButton: { alignItems: 'center', alignSelf: 'flex-start', borderColor: palette.line, borderRadius: 9, borderWidth: 1, flexDirection: 'row', gap: 4, justifyContent: 'center', marginTop: 6, minHeight: 32, paddingHorizontal: 8, paddingVertical: 6, width: 68 },
