@@ -1,4 +1,4 @@
-import { FORMATIONS_BY_FORMAT } from '@/engine/season';
+import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
 import type { SeasonRosterPlayer, SeasonSettings, Team } from '@/engine/models';
 import { getDatabase } from '@/storage/database';
 import { createTeam, deleteTeam, getTeam, listTeams, renameTeam, replaceRoster, saveSeasonSettings, setActiveTeam } from '@/storage/teams';
@@ -61,9 +61,20 @@ export async function getSeasonSettings(teamId: string): Promise<SeasonSettings 
   return { ...settings, formation_options: FORMATIONS_BY_FORMAT };
 }
 
-export async function createLocalTeam(name: string, players: string[]): Promise<Team> {
+export async function createLocalTeam(name: string, players: string[], seasonSettings: Partial<SeasonSettings> = {}): Promise<Team> {
   const roster = players.map((player) => ({ name: player, group: 'rotational' as const, general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] }));
-  return createTeam(await getDatabase(), { name, players: roster, season_settings: DEFAULT_SETTINGS });
+  const gameFormat = seasonSettings.game_format ?? DEFAULT_SETTINGS.game_format;
+  return createTeam(await getDatabase(), {
+    name,
+    players: roster,
+    season_settings: {
+      ...DEFAULT_SETTINGS,
+      ...seasonSettings,
+      game_format: gameFormat,
+      players_on_field: GAME_FORMATS[gameFormat].players_on_field,
+      has_goalkeeper: GAME_FORMATS[gameFormat].has_goalkeeper,
+    },
+  });
 }
 
 export async function activateTeam(teamId: string): Promise<Team> {

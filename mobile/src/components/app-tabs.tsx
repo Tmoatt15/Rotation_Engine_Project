@@ -20,21 +20,28 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="game">
-        <NativeTabs.Trigger.Label>Game</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf="sportscourt.fill"
-          md="sports_soccer"
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="live" hidden />
-
       <NativeTabs.Trigger name="roster">
         <NativeTabs.Trigger.Label>Roster</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf="person.3.fill"
           md="groups"
+        />
+      </NativeTabs.Trigger>
+
+      {/* The game route is schedule creation; the live route is the active Game tab. */}
+      <NativeTabs.Trigger name="game">
+        <NativeTabs.Trigger.Label>Create Schedule</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf="calendar.badge.plus"
+          md="event"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="live">
+        <NativeTabs.Trigger.Label>Game</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf="play.circle.fill"
+          md="play_circle"
         />
       </NativeTabs.Trigger>
 

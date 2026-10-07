@@ -5,10 +5,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import LiveScreen from './live';
 import { clearAcceptedSchedule, getAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
-import { notifyTeamChanged } from '@/services/team-service';
-import { activateTeam, getTeams } from '@/services/team-service';
+import { activateTeam, getTeams, notifyTeamChanged } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -30,14 +28,6 @@ type Team = {
   season_settings?: Record<string, unknown>;
 };
 
-type TeamStatus = 'READY' | 'SET UP TEAM' | 'NEEDS SETUP' | 'DATA ERROR';
-
-function isTeamReady(team: Team | undefined): boolean {
-  if (!team?.players?.length || team.season_roster?.length !== team.players.length) return false;
-  const settings = team.season_settings;
-  return Boolean(settings?.formation && settings.game_format && settings.total_blocks && settings.game_length_minutes);
-}
-
 export default function HomeScreen() {
   const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
@@ -45,25 +35,8 @@ export default function HomeScreen() {
   const [teamsError, setTeamsError] = useState(false);
   const [hasAcceptedSchedule, setHasAcceptedSchedule] = useState(false);
   const [acceptedSchedule, setAcceptedSchedule] = useState<LiveSchedule | null>(null);
-  const [showLiveGame, setShowLiveGame] = useState(false);
   const activeTeam = teams.find((team) => team.active);
-  const teamStatus: TeamStatus = teamsError
-    ? 'DATA ERROR'
-    : teams.length === 0
-      ? 'SET UP TEAM'
-      : isTeamReady(activeTeam)
-        ? 'READY'
-        : 'NEEDS SETUP';
-  const statusStyle = teamStatus === 'READY'
-    ? styles.readyStatusSurface
-    : teamStatus === 'DATA ERROR'
-      ? styles.errorStatusSurface
-      : styles.setupStatusSurface;
-  const statusColor = teamStatus === 'READY'
-    ? palette.green
-    : teamStatus === 'DATA ERROR'
-      ? '#ffad9d'
-      : '#f1c76b';
+  const hasPlayers = Boolean(activeTeam?.season_roster?.length || activeTeam?.players?.length);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -111,21 +84,6 @@ export default function HomeScreen() {
     }
   }
 
-  if (showLiveGame && acceptedSchedule) {
-    return (
-      <LiveScreen
-        schedule={acceptedSchedule}
-        onExit={() => setShowLiveGame(false)}
-        onGameEnded={(report) => {
-          setAcceptedSchedule(null);
-          setHasAcceptedSchedule(false);
-          setShowLiveGame(false);
-          router.push({ pathname: '/after-game', params: { data: JSON.stringify(report) } });
-        }}
-      />
-    );
-  }
-
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -150,10 +108,6 @@ export default function HomeScreen() {
                 <Text style={styles.cardEyebrow}>CURRENT SEASON</Text>
                 <Text style={styles.seasonTitle}>Fall 2026</Text>
               </View>
-              <View style={styles.livePill}>
-                <View style={[styles.liveDot, statusStyle]} />
-                <Text style={[styles.liveText, { color: statusColor }]}>{teamStatus}</Text>
-              </View>
             </View>
             <View style={styles.seasonRule} />
             <View style={styles.activeTeamRow}>
@@ -161,8 +115,12 @@ export default function HomeScreen() {
                 <Text style={styles.statLabel}>Select Active Team</Text>
                 <Text style={styles.activeTeamName} numberOfLines={1}>{activeTeamName ?? '--'}</Text>
               </View>
+              <TouchableOpacity style={styles.addTeamButton} onPress={() => router.navigate('/team-create')} accessibilityLabel="Create new team">
+                <Text style={styles.addTeamText}>+</Text>
+              </TouchableOpacity>
             </View>
             {!activeTeamName && <Text style={styles.noTeamText}>Create a team to begin setting up your season.</Text>}
+            {teamsError && <Text style={styles.noTeamText}>Couldn&apos;t load your teams — reopen the app to try again.</Text>}
             {teams.length > 1 && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.teamOptions}>
               {teams.map((team) => (
                 <TouchableOpacity
@@ -187,15 +145,17 @@ export default function HomeScreen() {
               if (!activeTeamName) {
                 router.navigate('/team-create');
               } else if (hasAcceptedSchedule && acceptedSchedule) {
-                setShowLiveGame(true);
+                router.navigate('/live');
+              } else if (!hasPlayers) {
+                router.navigate('/roster');
               } else {
                 router.navigate('/game');
               }
             }}>
             <View>
-              {(!activeTeamName || hasAcceptedSchedule) && <Text style={styles.primaryEyebrow}>{!activeTeamName ? 'GET STARTED' : 'ACCEPTED SCHEDULE'}</Text>}
-              <Text style={[styles.primaryTitle, activeTeamName && !hasAcceptedSchedule && styles.primaryTitleOnly]}>{!activeTeamName ? 'Create your first team' : hasAcceptedSchedule ? 'Resume Live Game' : 'Build Substitution Schedule'}</Text>
-              {(!activeTeamName || hasAcceptedSchedule) && <Text style={styles.primaryDetail}>{!activeTeamName ? 'Add players to begin setting up rotations' : 'Continue the saved substitution plan'}</Text>}
+              {(!activeTeamName || hasAcceptedSchedule || !hasPlayers) && <Text style={styles.primaryEyebrow}>{!activeTeamName ? 'GET STARTED' : hasAcceptedSchedule ? 'ACCEPTED SCHEDULE' : 'ROSTER SETUP'}</Text>}
+              <Text style={[styles.primaryTitle, activeTeamName && !hasAcceptedSchedule && hasPlayers && styles.primaryTitleOnly]}>{!activeTeamName ? 'Create your first team' : hasAcceptedSchedule ? 'Resume Live Game' : !hasPlayers ? 'Add players to your roster' : 'Build Substitution Schedule'}</Text>
+              {(!activeTeamName || hasAcceptedSchedule || !hasPlayers) && <Text style={styles.primaryDetail}>{!activeTeamName ? 'Add players to begin setting up rotations' : hasAcceptedSchedule ? 'Continue the saved substitution plan' : 'Add players before building a schedule'}</Text>}
             </View>
             <View style={styles.primaryArrow}>
               <SymbolView
@@ -280,30 +240,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 3,
   },
-  livePill: {
-    alignItems: 'center',
-    backgroundColor: palette.paper,
-    borderRadius: 20,
-    flexDirection: 'row',
-    gap: 7,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  liveDot: {
-    backgroundColor: palette.yellow,
-    borderRadius: 4,
-    height: 8,
-    width: 8,
-  },
-  readyStatusSurface: { backgroundColor: '#2f765c' },
-  setupStatusSurface: { backgroundColor: '#715b2a' },
-  errorStatusSurface: { backgroundColor: '#713d38' },
-  liveText: {
-    color: '#f6e7bd',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
   seasonRule: {
     backgroundColor: '#448069',
     height: 1,
@@ -320,6 +256,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   activeTeamCopy: { flex: 1 },
+  addTeamButton: { alignItems: 'center', borderColor: '#8eb6a1', borderRadius: 14, borderWidth: 1, height: 32, justifyContent: 'center', width: 32 },
+  addTeamText: { color: '#fffdf8', fontSize: 24, fontWeight: '400', lineHeight: 26 },
   activeTeamName: {
     color: '#fffdf8',
     fontSize: 17,

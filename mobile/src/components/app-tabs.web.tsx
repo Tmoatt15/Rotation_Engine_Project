@@ -21,14 +21,17 @@ export default function AppTabs() {
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          <TabTrigger name="home" href={'/' as never} asChild>
+          <TabTrigger name="index" href={'/' as never} asChild>
             <TabButton icon={{ ios: 'house.fill', web: 'home' }}>Home</TabButton>
-          </TabTrigger>
-          <TabTrigger name="game" href="/game" asChild>
-            <TabButton icon={{ ios: 'sportscourt.fill', web: 'sports_soccer' }}>Game</TabButton>
           </TabTrigger>
           <TabTrigger name="roster" href="/roster" asChild>
             <TabButton icon={{ ios: 'person.3.fill', web: 'groups' }}>Roster</TabButton>
+          </TabTrigger>
+          <TabTrigger name="game" href="/game" asChild>
+            <TabButton icon={{ ios: 'calendar.badge.plus', web: 'event' }}>Create Schedule</TabButton>
+          </TabTrigger>
+          <TabTrigger name="live" href="/live" asChild>
+            <TabButton icon={{ ios: 'play.circle.fill', web: 'play_circle' }}>Game</TabButton>
           </TabTrigger>
           <TabTrigger name="more" href="/more" asChild>
             <TabButton icon={{ ios: 'ellipsis.circle.fill', web: 'more_horiz' }}>More</TabButton>

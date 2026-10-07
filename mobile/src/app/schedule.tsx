@@ -8,7 +8,6 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { calculateMovementMetrics } from '@/engine/timeline';
 import { createPlayer } from '@/engine/rotation';
 import type { Player } from '@/engine/models';
-import LiveScreen from './(tabs)/live';
 import { setAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { saveLocalSchedule } from '@/services/schedule-service';
 import { getRoster } from '@/services/team-service';
@@ -140,7 +139,6 @@ export default function ScheduleScreen() {
   const positionOrder = new Set(positionRows.flatMap((row) => row.positions));
   const [blocks, setBlocks] = useState<ScheduleBlock[]>(schedule?.blocks ?? []);
   const [selectedPosition, setSelectedPosition] = useState<SelectedPosition | null>(null);
-  const [liveSchedule, setLiveSchedule] = useState<LiveSchedule | null>(null);
   const [showPlayerBlocks, setShowPlayerBlocks] = useState(false);
   const [showSaveSchedule, setShowSaveSchedule] = useState(false);
   const [scheduleName, setScheduleName] = useState('');
@@ -182,7 +180,6 @@ export default function ScheduleScreen() {
   useEffect(() => {
     setBlocks(schedule?.blocks ?? []);
     setSelectedPosition(null);
-    setLiveSchedule(null);
     setHasManualChanges(false);
   }, [schedule]);
 
@@ -258,8 +255,6 @@ export default function ScheduleScreen() {
       setSavingSchedule(false);
     }
   }
-
-  if (liveSchedule) return <LiveScreen schedule={liveSchedule} onGameEnded={(report) => router.push({ pathname: '/after-game', params: { data: JSON.stringify(report) } })} />;
 
   return (
     <>
@@ -445,10 +440,10 @@ export default function ScheduleScreen() {
                   <Text style={styles.saveScheduleText}>SAVE SCHEDULE</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => {
+                  onPress={async () => {
                     const acceptedSchedule = { ...schedule, blocks, movement_metrics: movementMetrics, review_status: hasManualChanges ? 'manually_edited' : schedule.errors.length ? 'generated_with_errors' : 'generated' };
-                    void setAcceptedSchedule(acceptedSchedule);
-                    setLiveSchedule(acceptedSchedule);
+                    await setAcceptedSchedule(acceptedSchedule);
+                    router.navigate('/live');
                   }}
                   style={styles.acceptButton}
                   accessibilityRole="button">

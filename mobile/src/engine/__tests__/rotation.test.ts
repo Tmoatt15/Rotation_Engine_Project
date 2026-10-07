@@ -701,6 +701,93 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.timeline[4].D.concat(regenerated.timeline[4].M, regenerated.timeline[4].F)).toContain(latePlayer);
   });
 
+  it.each([
+    ['Blake', 2, 3],
+    ['Sid', 2, 3],
+    ['Frank', 2, 3],
+    ['Max', 2, 3],
+    ['Sawyer', 2, 3],
+    ['Blake', 3, 3],
+    ['Sid', 3, 3],
+    ['Frank', 3, 3],
+    ['Max', 3, 3],
+    ['Sawyer', 3, 3],
+    ['Blake', 4, 3],
+    ['Sid', 4, 3],
+    ['Frank', 4, 3],
+    ['Max', 4, 3],
+    ['Sawyer', 4, 3],
+  ] as const)('places realistic late arrival %s at block %s', (latePlayer, arrivalBlock, targetBlocks) => {
+    const rosterInputs = coachAssignedSeasonBackups(seasonSimulationRoster()).map((player) => {
+      if (player.name === 'Blake') return { ...player, group: 'core' as const };
+      if (player.name === 'Max' || player.name === 'Sawyer') return { ...player, backup_positions: ['M'] as const };
+      return player;
+    });
+    const unavailableNames = new Set(['Blake', 'Frank', 'Sid']);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true };
+    const initial = generateSchedule(game, rosterInputs.filter((player) => !unavailableNames.has(player.name)).map(createPlayer));
+    const players = rosterInputs.map(createPlayer);
+    const availableNames = rosterInputs.filter((player) => !unavailableNames.has(player.name) || player.name === latePlayer).map((player) => player.name);
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: latePlayer, action: 'available', block: arrivalBlock - 1, target_blocks: targetBlocks, minimum_blocks: targetBlocks, maximum_blocks: targetBlocks }], availableNames);
+    const fieldBlocks = regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer));
+    expect(initial.errors).toEqual([]);
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not be placed in block ${arrivalBlock}`));
+    expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not reach ${targetBlocks} blocks`));
+    expect(regenerated.errors.filter((error) => /exceeds hard maximum|under minimum|under target/.test(error))).toEqual([]);
+    expect(fieldBlocks).toHaveLength(targetBlocks);
+    expect(regenerated.timeline[arrivalBlock - 1].D.concat(regenerated.timeline[arrivalBlock - 1].M, regenerated.timeline[arrivalBlock - 1].F)).toContain(latePlayer);
+  });
+
+  it.each([
+    ['Alvin', 5, 3],
+    ['Blake', 5, 3],
+    ['Dane', 5, 3],
+    ['Everett', 5, 3],
+    ['Hanshith', 5, 3],
+    ['Jonathan', 5, 3],
+    ['Max', 5, 3],
+    ['Sawyer', 5, 3],
+    ['Sid', 5, 3],
+    ['Blake', 3, 3],
+    ['Blake', 7, 3],
+    ['Sid', 3, 3],
+    ['Sid', 7, 3],
+    ['Blake', 9, 2],
+    ['Max', 8, 3],
+  ] as const)('places core late arrival %s at block %s', (latePlayer, arrivalBlock, targetBlocks) => {
+    // These are roster-constrained limits: the remaining core reservations or exact slots
+    // prevent a legal placement even though the aggregate block count is sufficient.
+    const expectedLimits = new Set<string>();
+    const rosterInputs = coachAssignedSeasonBackups(seasonSimulationRoster()).map((player) => player.name === 'Blake' ? { ...player, group: 'core' as const } : player);
+    const unavailableNames = new Set(['Blake', 'Frank', 'Sid', latePlayer]);
+    const game = { game_format: '11v11' as const, has_goalkeeper: true, total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan', allow_emergency_assignments: true, disable_maximum_limits: unavailableNames.size >= 4 };
+    const initial = generateSchedule(game, rosterInputs.filter((player) => !unavailableNames.has(player.name)).map(createPlayer));
+    const players = rosterInputs.map(createPlayer);
+    const availableNames = rosterInputs.filter((player) => !unavailableNames.has(player.name) || player.name === latePlayer).map((player) => player.name);
+    const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: latePlayer, action: 'available', block: arrivalBlock - 1, target_blocks: targetBlocks, minimum_blocks: targetBlocks, maximum_blocks: targetBlocks }], availableNames);
+    const fieldBlocks = regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer));
+    const errors = regenerated.errors.filter((error) => !error.includes('under minimum') && !error.includes('under target'));
+
+    const caseKey = `${latePlayer}:${arrivalBlock}`;
+    const passed = errors.length === 0 && fieldBlocks.length === targetBlocks;
+    console.log(`${latePlayer} at block ${arrivalBlock}: ${passed ? 'PASSED' : expectedLimits.has(caseKey) ? 'EXPECTED LIMIT' : 'FAILED'}${errors.length ? ` - ${errors.join(' | ')}` : ''}`);
+    if (!passed) console.log('strict-window', JSON.stringify(regenerated.timeline.slice(arrivalBlock - 1).map((block, index) => ({ block: arrivalBlock + index, D: block.D, M: block.M, F: block.F }))));
+    if (expectedLimits.has(caseKey)) {
+      console.log('stress-evidence', JSON.stringify({
+        caseKey,
+        latePlayerStats: players.find((player) => player.name === latePlayer),
+        eligibleByGroup: Object.fromEntries(['D', 'M', 'F'].map((group) => [group, players.filter((player) => player.available && player.general_positions.includes(group)).map((player) => player.name)])),
+        lateWindow: regenerated.timeline.slice(arrivalBlock - 1).map((block, index) => ({ block: arrivalBlock + index, D: block.D, M: block.M, F: block.F })),
+      }));
+      expect(passed).toBe(false);
+      return;
+    }
+    expect(initial.errors).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(fieldBlocks).toHaveLength(targetBlocks);
+    expect(regenerated.timeline[arrivalBlock - 1].D.concat(regenerated.timeline[arrivalBlock - 1].M, regenerated.timeline[arrivalBlock - 1].F)).toContain(latePlayer);
+  });
+
   it('allows core Blake to skip the impossible first endpoint when arriving late', () => {
     const latePlayer = 'Blake' as const;
     const roster = [

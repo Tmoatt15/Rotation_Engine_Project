@@ -129,6 +129,10 @@ function playerHasGoalkeeperRole(player: Player | undefined): boolean {
   return player?.primary_positions.some((position) => position.toUpperCase() === 'GK') ?? false;
 }
 
+function playerNumber(roster: Player[], name: string): number | undefined {
+  return roster.find((player) => player.name === name)?.number;
+}
+
 type LiveScreenProps = {
   schedule?: LiveSchedule | null;
   onExit?: () => void;
@@ -314,7 +318,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <View style={styles.emptyState}><Text style={styles.emptyText}>No accepted schedule was provided.</Text></View>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>No live game right now.</Text>
+            <Pressable onPress={() => router.navigate('/game')} style={styles.emptyAction} accessibilityRole="button">
+              <Text style={styles.emptyActionText}>Create a schedule</Text>
+            </Pressable>
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -663,7 +672,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                                   accessibilityRole="button"
                                   accessibilityLabel={selectingUnavailablePlayer ? `Mark ${displayPlayerName(block.positions[position])} unavailable` : `Select ${displayPlayerName(block.positions[position])} at ${position}`}>
                                   <Text style={styles.positionLabel}>{position}</Text>
-                                  <Text style={styles.assignmentName} numberOfLines={1}>{displayPlayerName(block.positions[position])}</Text>
+                                  <Text style={styles.assignmentName} numberOfLines={1}>
+                                    {displayPlayerName(block.positions[position])}
+                                    {playerNumber(roster, block.positions[position]) !== undefined ? ` #${playerNumber(roster, block.positions[position])}` : ''}
+                                  </Text>
                                 </Pressable>
                               ))}
                             </View>
@@ -677,7 +689,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                         {block.bench?.length
                           ? block.bench.map((player, playerIndex, bench) => (
                             <Text key={player} style={playerCameOffField(liveBlocks, blockIndex, player) ? styles.benchSubbedOutName : undefined}>
-                              {displayPlayerName(player)}{playerIndex < bench.length - 1 ? ', ' : ''}
+                              {displayPlayerName(player)}{playerNumber(roster, player) !== undefined ? ` #${playerNumber(roster, player)}` : ''}{playerIndex < bench.length - 1 ? ', ' : ''}
                             </Text>
                           ))
                           : 'None'}
@@ -990,6 +1002,8 @@ const styles = StyleSheet.create({
   endGameButtonText: { color: palette.panel, fontSize: 14, fontWeight: '800' },
   footerHint: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 18, textAlign: 'center' },
   emptyState: { backgroundColor: palette.panel, borderRadius: 17, margin: 16, padding: 18 },
-  emptyText: { color: palette.muted, fontSize: 13 },
+  emptyText: { color: palette.ink, fontSize: 18, fontWeight: '800' },
+  emptyAction: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 12, marginTop: 18, minHeight: 46, justifyContent: 'center', paddingHorizontal: 16 },
+  emptyActionText: { color: palette.panel, fontSize: 13, fontWeight: '800' },
   warningFlash: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(255, 255, 255, 0.82)' },
 });

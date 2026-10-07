@@ -84,10 +84,16 @@ function playerUnavailable(game: Game, name: string, blockNumber: number): boole
 
 export function applyBlockToStats(roster: Player[], block: ScheduleBlock, half: 0 | 1, game?: Game, blockNumber?: number): void {
   const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
-  for (const position of ['D', 'M', 'F'] as const) for (const name of block[position]) {
-    const player = roster.find((candidate) => candidate.name === name); if (!player) continue;
-    player.block_count += 1; player.field_blocks += 1; player.blocks_by_half[half] += 1; player.position_usage[position] += 1;
-  }
+    for (const position of ['D', 'M', 'F'] as const) {
+      for (const name of block[position]) {
+        const player = roster.find((candidate) => candidate.name === name);
+        if (!player) continue;
+        player.block_count += 1;
+        player.field_blocks += 1;
+        player.blocks_by_half[half] += 1;
+        player.position_usage[position] += 1;
+      }
+    }
   const goalkeeper = roster.find((player) => player.name === block.GK);
   if (goalkeeper) { goalkeeper.block_count += 1; goalkeeper.gk_blocks += 1; goalkeeper.blocks_by_half[half] += 1; goalkeeper.position_usage.GK += 1; }
   for (const player of roster) if (!assigned.has(player.name) && (!game || !playerUnavailable(game, player.name, blockNumber ?? 0))) player.bench_count += 1;
@@ -96,12 +102,16 @@ export function applyBlockToStats(roster: Player[], block: ScheduleBlock, half: 
 export function replayTimeline(roster: Player[], prefix: ScheduleBlock[], game: Game): void {
   roster.forEach(resetPlayerStats);
   prefix.forEach((block, index) => applyBlockToStats(roster, block, index < halfLength(game.total_blocks) ? 0 : 1, game, index + 1));
-  for (const credit of game.replacement_credits) {
-    const player = roster.find((candidate) => candidate.name === credit.player); if (!player) continue;
-    const half = credit.block <= halfLength(game.total_blocks) ? 0 : 1;
-    player.block_count += 1; player.blocks_by_half[half] += 1; player.position_usage[credit.position as PositionGroup] += 1;
-    if (credit.position === 'GK') player.gk_blocks += 1; else player.field_blocks += 1;
-  }
+    for (const credit of game.replacement_credits) {
+      const player = roster.find((candidate) => candidate.name === credit.player);
+      if (!player) continue;
+      const half = credit.block <= halfLength(game.total_blocks) ? 0 : 1;
+      player.block_count += 1;
+      player.blocks_by_half[half] += 1;
+      player.position_usage[credit.position as PositionGroup] += 1;
+      if (credit.position === 'GK') player.gk_blocks += 1;
+      else player.field_blocks += 1;
+    }
 }
 
 const rosterPlayerMaps = new WeakMap<Player[], Map<string, Player>>();
@@ -350,7 +360,7 @@ function legalAssignments(names: string[], slots: string[], roster: Player[], gr
   return assignments;
 }
 
-export function optimizeExactSlotSwitches(game: Game, roster: Player[], timeline: ScheduleBlock[], slots: Record<'D' | 'M' | 'F', string[]>, startBlock: number): void {
+export function optimizeExactSlotSwitches(game: Game, roster: Player[], timeline: ScheduleBlock[], slots: Record<'D' | 'M' | 'F', string[]>, startBlock: number, constraints?: LateArrivalConstraints): void {
   const firstBlock = Math.max(0, startBlock - 1);
   let improved = true;
   for (let pass = 0; improved && pass < game.total_blocks * FIELD_GROUPS.length; pass += 1) {
@@ -370,6 +380,7 @@ export function optimizeExactSlotSwitches(game: Game, roster: Player[], timeline
         const firstAssignments = assignmentsForBlock(blockIndex);
         for (const candidate of firstAssignments) {
           const current = Object.fromEntries(groupSlots.map((slot) => [slot, timeline[blockIndex].positions[slot]]));
+          if (constraints && [...(constraints.byBlock[blockIndex]?.get(group) ?? [])].some((name) => !Object.values(candidate).includes(name))) continue;
           if (groupSlots.every((slot) => candidate[slot] === current[slot])) continue;
           Object.assign(timeline[blockIndex].positions, candidate);
           const after = calculateMovementMetrics(timeline, game.total_blocks, roster, slots);
@@ -389,6 +400,9 @@ export function optimizeExactSlotSwitches(game: Game, roster: Player[], timeline
             Object.fromEntries(groupSlots.map((slot) => [slot, timeline[blockIndex].positions[slot]])),
             Object.fromEntries(groupSlots.map((slot) => [slot, timeline[nextBlock].positions[slot]])),
           ];
+          if (constraints
+            && ([blockIndex, nextBlock] as const).some((index) => [...(constraints.byBlock[index]?.get(group) ?? [])]
+              .some((name) => !Object.values(index === blockIndex ? firstCandidate : nextCandidate).includes(name)))) continue;
           if (groupSlots.every((slot) => firstCandidate[slot] === current[0][slot])
             && groupSlots.every((slot) => nextCandidate[slot] === current[1][slot])) continue;
           Object.assign(timeline[blockIndex].positions, firstCandidate);
@@ -488,6 +502,28 @@ function chooseFieldPlayers(game: Game, roster: Player[], group: PositionGroup, 
 }
 
 type PlannedGroups = Record<'D' | 'M' | 'F', string[][]>;
+type FieldGroup = 'D' | 'M' | 'F';
+type LateArrivalConstraints = {
+  byBlock: Array<Map<FieldGroup, Set<string>>>;
+  byPlayer: Map<string, Set<string>>;
+};
+
+const isRequired = (constraints: LateArrivalConstraints, playerName: string, blockIndex: number, group: FieldGroup): boolean =>
+  constraints.byBlock[blockIndex]?.get(group)?.has(playerName) ?? false;
+
+const emptyLateArrivalConstraints = (totalBlocks: number): LateArrivalConstraints => ({
+  byBlock: Array.from({ length: totalBlocks }, () => new Map<FieldGroup, Set<string>>()),
+  byPlayer: new Map<string, Set<string>>(),
+});
+
+const addLateArrivalConstraint = (constraints: LateArrivalConstraints, playerName: string, blockIndex: number, group: FieldGroup): void => {
+  const players = constraints.byBlock[blockIndex].get(group) ?? new Set<string>();
+  players.add(playerName);
+  constraints.byBlock[blockIndex].set(group, players);
+  const placements = constraints.byPlayer.get(playerName) ?? new Set<string>();
+  placements.add(`${blockIndex}:${group}`);
+  constraints.byPlayer.set(playerName, placements);
+};
 
 const FIELD_GROUPS: Array<'D' | 'M' | 'F'> = ['D', 'M', 'F'];
 const CORE_GROUPS = new Set<Player['group']>(['core', 'core_a', 'core_b']);
@@ -720,7 +756,7 @@ function groupSwitchCount(plans: PlannedGroups, fromBlock: number, toBlock: numb
   return switches;
 }
 
-function optimizeGlobalPositionSwitches(game: Game, roster: Player[], formation: FormationCounts, plans: PlannedGroups, startBlock: number): void {
+function optimizeGlobalPositionSwitches(game: Game, roster: Player[], formation: FormationCounts, plans: PlannedGroups, startBlock: number, constraints: LateArrivalConstraints): void {
   const firstBlock = Math.max(0, startBlock - 1);
   const totalSwitches = (): number => {
     let score = 0;
@@ -743,9 +779,11 @@ function optimizeGlobalPositionSwitches(game: Game, roster: Player[], formation:
           const rightGroup = FIELD_GROUPS[rightGroupIndex];
           for (let leftIndex = 0; leftIndex < plans[leftGroup][blockIndex].length; leftIndex += 1) {
             const leftName = plans[leftGroup][blockIndex][leftIndex];
+            if (isRequired(constraints, leftName, blockIndex, leftGroup)) continue;
             if (!canCoverGroup(game, roster, leftName, rightGroup)) continue;
             for (let rightIndex = 0; rightIndex < plans[rightGroup][blockIndex].length; rightIndex += 1) {
               const rightName = plans[rightGroup][blockIndex][rightIndex];
+              if (isRequired(constraints, rightName, blockIndex, rightGroup)) continue;
               if (!canCoverGroup(game, roster, rightName, leftGroup)) continue;
               plans[leftGroup][blockIndex][leftIndex] = rightName;
               plans[rightGroup][blockIndex][rightIndex] = leftName;
@@ -848,7 +886,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const lateCoreChanges = game.availability_changes.filter((change) => change.action === 'available' && change.target_blocks !== undefined);
     for (const change of lateCoreChanges) {
       const player = roster.find((candidate) => candidate.name === change.player);
-      if (!player || !CORE_GROUPS.has(player.group)) continue;
+      if (!player) continue;
       const startIndex = Math.max(startBlock - 1, change.block);
       const candidateBlocks = [
         startIndex,
@@ -869,10 +907,12 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           if (reservedNames.length >= formation[group]) {
             const orderedDonors = [...reservedNames]
               .sort((left, right) => Number(assignedGoalkeepers.has(left)) - Number(assignedGoalkeepers.has(right)))
-            const donorIndex = orderedDonors.findIndex((name) => {
-              const donor = roster.find((candidate) => candidate.name === name);
-              return donor && name !== goalkeeperNames[blockIndex] && (reservationCounts.get(name) ?? 0) > donor.hard_minimum_blocks;
-            });
+            const donorIndex = [
+              (name: string) => !assignedGoalkeepers.has(name) && !coreGroups.has(roster.find((candidate) => candidate.name === name)?.group ?? '') && (reservationCounts.get(name) ?? 0) > (roster.find((candidate) => candidate.name === name)?.hard_minimum_blocks ?? 0),
+              (name: string) => !assignedGoalkeepers.has(name) && !coreGroups.has(roster.find((candidate) => candidate.name === name)?.group ?? '') && (reservationCounts.get(name) ?? 0) > 0,
+              (name: string) => !assignedGoalkeepers.has(name) && coreGroups.has(roster.find((candidate) => candidate.name === name)?.group ?? '') && (reservationCounts.get(name) ?? 0) > (roster.find((candidate) => candidate.name === name)?.hard_minimum_blocks ?? 0),
+            ].map((eligibleDonor) => orderedDonors.findIndex((name) => name !== goalkeeperNames[blockIndex] && eligibleDonor(name)))
+              .find((index) => index >= 0) ?? -1;
             if (donorIndex < 0) continue;
             const donorName = orderedDonors[donorIndex];
             reservedNames.splice(reservedNames.indexOf(donorName), 1);
@@ -949,7 +989,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const index = names.indexOf(player.name);
     return (index - blockIndex + names.length) % names.length;
   };
-  const playerKey = (player: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): [number, number, number, number, number, number, number, number] => {
+  const playerKey = (player: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): number[] => {
     const half = blockHalf(blockIndex, game.total_blocks);
     const totalStarts = Object.values(game.season_position_starts?.[player.name] ?? {}).reduce((sum, count) => sum + count, 0);
     const positionStarts = game.season_position_starts?.[player.name]?.[position] ?? 0;
@@ -981,7 +1021,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
               : ['developing', 'developmental'].includes(player.group) && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 4
                 : manualOverrideCount < game.total_blocks ? 5 : 6);
     return game.disable_maximum_limits
-      ? [overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)]
+      ? [lateArrivalPriority, overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)]
       : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fairnessRank(player, blockIndex)];
   };
   const comparePlayerKeys = (left: Player, right: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): number => {
@@ -1195,7 +1235,14 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         for (let index = 0; index < leftKey.length - 1; index += 1) if (leftKey[index] !== rightKey[index]) return (leftKey[index] as number) - (rightKey[index] as number);
         return String(leftKey[leftKey.length - 1]).localeCompare(String(rightKey[rightKey.length - 1]));
       });
-      const requiredBackups = ordered.filter((player) => plannedBackupNames.includes(player.name) || reservedCoreNames.includes(player.name));
+      const lateArrivalNames = ordered.filter((player) => game.availability_changes.some((change) => change.action === 'available'
+        && change.player === player.name
+        && blockIndex >= change.block
+        && (fieldCounts.get(player.name) ?? 0) < (change.target_blocks ?? 0)));
+      const requiredBackups = [
+        ...lateArrivalNames,
+        ...ordered.filter((player) => !lateArrivalNames.includes(player) && (plannedBackupNames.includes(player.name) || reservedCoreNames.includes(player.name))),
+      ];
       const requiredCount = Math.max(0, needed - requiredBackups.length);
       const optional = ordered.filter((player) => !requiredBackups.includes(player));
       const boundedCombinations = (items: Player[], count: number, limit: number): Player[][] => {
@@ -1315,7 +1362,10 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             const sourceIndex = plans[sourcePosition][blockIndex].indexOf(coreName);
             const targetIndex = plans[position][blockIndex].findIndex((name) => {
               const donor = playersByName.get(name);
-              return Boolean(donor && coreGroups.has(donor.group) && canCoverGroup(game, roster, donor.name, sourcePosition));
+              return Boolean(donor && coreGroups.has(donor.group)
+                && !game.availability_changes.some((change) => change.action === 'available' && change.player === donor.name
+                  && blockIndex >= change.block && (fieldCounts.get(donor.name) ?? 0) < (change.target_blocks ?? 0))
+                && canCoverGroup(game, roster, donor.name, sourcePosition));
             });
             if (targetIndex >= 0) {
               const replacement = [...plans[position][blockIndex]];
@@ -1332,15 +1382,35 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             }
           }
           if (assigned.has(coreName)) continue;
-          const donorIndex = plans[position][blockIndex].findIndex((name) => {
-            const donor = playersByName.get(name);
-            return Boolean(donor && !coreGroups.has(donor.group));
-          });
+          const donorIndex = [
+            (name: string) => {
+              const donor = playersByName.get(name);
+              return Boolean(donor && !assignedGoalkeepers.has(name) && !coreGroups.has(donor.group)
+                && !game.availability_changes.some((change) => change.action === 'available' && change.player === name
+                  && blockIndex >= change.block && (fieldCounts.get(name) ?? 0) < (change.target_blocks ?? 0))
+                && (fieldCounts.get(name) ?? 0) > donor.hard_minimum_blocks);
+            },
+            (name: string) => {
+              const donor = playersByName.get(name);
+              return Boolean(donor && !assignedGoalkeepers.has(name) && !coreGroups.has(donor.group)
+                && !game.availability_changes.some((change) => change.action === 'available' && change.player === name
+                  && blockIndex >= change.block && (fieldCounts.get(name) ?? 0) < (change.target_blocks ?? 0))
+                && (fieldCounts.get(name) ?? 0) >= donor.hard_minimum_blocks);
+            },
+            (name: string) => {
+              const donor = playersByName.get(name);
+              return Boolean(donor && !assignedGoalkeepers.has(name) && coreGroups.has(donor.group)
+                && (fieldCounts.get(name) ?? 0) > donor.hard_minimum_blocks);
+            },
+          ].map((eligibleDonor) => plans[position][blockIndex].findIndex(eligibleDonor))
+            .find((index) => index >= 0) ?? -1;
           if (donorIndex < 0) {
             let exchanged = false;
             for (const donorName of plans[position][blockIndex]) {
               const donor = playersByName.get(donorName);
-              if (!donor || !coreGroups.has(donor.group)) continue;
+              if (!donor || !coreGroups.has(donor.group)
+                || game.availability_changes.some((change) => change.action === 'available' && change.player === donor.name
+                  && blockIndex >= change.block && (fieldCounts.get(donor.name) ?? 0) < (change.target_blocks ?? 0))) continue;
               for (const otherPosition of positions) {
                 if (otherPosition === position) continue;
                 const otherDonorIndex = plans[otherPosition][blockIndex].findIndex((name) => {
@@ -1996,7 +2066,9 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           const current = plans[position][blockIndex];
           for (const donorName of [...current]) {
             const donor = playersByName.get(donorName);
-            if (!donor || plannedCount(donor.name) <= donor.hard_minimum_blocks) continue;
+            if (!donor || plannedCount(donor.name) <= donor.hard_minimum_blocks
+              || game.availability_changes.some((change) => change.action === 'available' && change.player === donor.name
+                && blockIndex >= change.block && plannedCount(donor.name) < (change.target_blocks ?? 0))) continue;
             const replacement = current.map((name) => name === donor.name ? deficit.name : name);
             if (!completeExactAssignmentExists(roster, replacement, formationSlots(formation)[position], position)) continue;
             plans[position][blockIndex] = replacement;
@@ -2394,13 +2466,19 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     goalkeepers.push(goalkeeper);
   }
   const assignedGoalkeeperNames = new Set(goalkeepers.flatMap((player) => player ? [player.name] : []));
+  const lateArrivalConstraints = emptyLateArrivalConstraints(game.total_blocks);
   const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock, goalkeeperTotalBlocks);
-  optimizeGlobalPositionSwitches(game, roster, formation, planned, startBlock);
+  for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available')) {
+    const blockIndex = change.block;
+    for (const group of FIELD_GROUPS) {
+      if (planned[group][blockIndex]?.includes(change.player)) addLateArrivalConstraint(lateArrivalConstraints, change.player, blockIndex, group);
+    }
+  }
   if (startBlock > 1) {
     const plannedCount = (name: string): number => FIELD_GROUPS.reduce((total, group) => total + planned[group].filter((names) => names.includes(name)).length, 0);
     for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
       const player = roster.find((candidate) => candidate.name === change.player);
-      if (!player || !CORE_GROUPS.has(player.group)) continue;
+      if (!player) continue;
       const blockOrder = [change.block, game.total_blocks - 1, ...Array.from({ length: game.total_blocks }, (_, index) => index)]
         .filter((blockIndex, index, values) => blockIndex >= Math.max(startBlock - 1, change.block) && blockIndex < game.total_blocks && values.indexOf(blockIndex) === index);
       for (const blockIndex of blockOrder) {
@@ -2427,7 +2505,10 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             const replacement = planned[group][blockIndex].map((name) => name === donorPlayer.name ? player.name : name);
             return completeExactAssignmentExists(roster, replacement, formationSlots(formation)[group], group);
           });
-        if (donor) planned[group][blockIndex][donor.index] = player.name;
+        if (donor) {
+          planned[group][blockIndex][donor.index] = player.name;
+          addLateArrivalConstraint(lateArrivalConstraints, player.name, blockIndex, group);
+        }
       }
     }
     for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
@@ -2459,6 +2540,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
+  optimizeGlobalPositionSwitches(game, roster, formation, planned, startBlock, lateArrivalConstraints);
   if (game.disable_maximum_limits) {
     const plannedCount = (name: string): number => FIELD_GROUPS.reduce((total, group) => total + planned[group].filter((players) => players.includes(name)).length, 0);
     for (let blockIndex = 0; blockIndex < game.total_blocks; blockIndex += 1) {
@@ -2525,6 +2607,8 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
               const current = planned[group][blockIndex];
               const blockAssigned = new Set(flatMapCompat(FIELD_GROUPS, (candidateGroup) => planned[candidateGroup][blockIndex]));
               if (!current.includes(highName) || blockAssigned.has(lowName)) continue;
+              const highArrival = game.availability_changes.find((change) => change.action === 'available' && change.player === highName && change.target_blocks !== undefined);
+              if (highArrival && plannedCount(highName) <= highArrival.target_blocks!) continue;
               const replacement = current.map((name) => name === highName ? lowName : name);
               if (!completeExactAssignmentExists(roster, replacement, formationSlots(formation)[group], group)) continue;
               planned[group][blockIndex] = replacement;
@@ -2611,6 +2695,18 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
               && materializedHalfCount(player.name, half) < player.max_blocks_per_half - (half === endpointHalf ? materializationEndpointHeadroom(player.name, block) : 0)
               && (!goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
                 || materializedFieldCount(player.name) < player.gk_field_maximum_blocks))));
+      const requiredNames = [...(lateArrivalConstraints.byBlock[block - 1]?.get(group) ?? new Set<string>())];
+      for (const requiredName of requiredNames) {
+        if (chosen.some((player) => player.name === requiredName) || used.has(requiredName)) continue;
+        const requiredPlayer = roster.find((player) => player.name === requiredName);
+        if (!requiredPlayer || !requiredPlayer.available || requiredPlayer.name === gk?.name || !canCoverGroup(game, roster, requiredPlayer.name, group)) {
+          result.errors.push(`Block ${block}: ${requiredName} is required in ${group} but is unavailable or cannot cover the group.`);
+          continue;
+        }
+        const removableIndex = chosen.findIndex((player) => !requiredNames.includes(player.name));
+        if (removableIndex >= 0) chosen[removableIndex] = requiredPlayer;
+        else if (chosen.length < formation[group]) chosen.push(requiredPlayer);
+      }
       const emergency = needsEmergencyFieldAssignment(game, roster, formation, gk?.name ?? '');
       if (chosen.length < formation[group]) {
         const slotsForGroup = slots[group];
@@ -2686,7 +2782,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       .filter((error) => !error.includes('exceeds hard maximum') && !error.includes('exceeds the half'));
     if (firstBlockErrors.length) result.errors.push(...firstBlockErrors.map((error) => `First block: ${error}`));
   }
-  optimizeExactSlotSwitches(game, roster, result.timeline, slots, firstBlockLocked ? 2 : startBlock);
+  optimizeExactSlotSwitches(game, roster, result.timeline, slots, firstBlockLocked ? 2 : startBlock, lateArrivalConstraints);
   if (firstBlockLocked) result.timeline[0] = firstBlockLocked;
   if (game.disable_maximum_limits) {
     const fieldNames = roster
@@ -2725,6 +2821,9 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             if (fieldAssigned.has(low.name)) continue;
             const group = FIELD_GROUPS.find((candidateGroup) => block[candidateGroup].includes(high.name));
             if (!group || !canCoverGroup(game, roster, low.name, group)) continue;
+            if (isRequired(lateArrivalConstraints, high.name, blockIndex, group)) continue;
+            const highArrival = game.availability_changes.find((change) => change.action === 'available' && change.player === high.name && change.target_blocks !== undefined);
+            if (highArrival && fieldCount(high.name) <= highArrival.target_blocks!) continue;
             const isEndpoint = blockIndex === 0 || blockIndex === result.timeline.length - 1;
             if (isEndpoint && (!CORE_GROUPS.has(low.group) || CORE_GROUPS.has(high.group))) continue;
             const slot = slots[group].find((slotName) => block.positions[slotName] === high.name);

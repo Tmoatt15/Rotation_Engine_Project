@@ -1,14 +1,16 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/services/team-service';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
+import { GAME_FORMATS } from '@/engine/season';
 import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
+import { positionHealth, positionHealthMessage, type PositionHealth } from '@/services/roster-health';
 
 const palette = {
   ink: '#17221f',
@@ -25,6 +27,7 @@ type Group = 'core' | 'developing' | 'rotational';
 type Filter = 'all' | Group;
 type Player = {
   name: string;
+  number?: number;
   group: Group;
   general_positions: string[];
   primary_positions: string[];
@@ -97,15 +100,22 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
   const [positionPicker, setPositionPicker] = useState<PositionPickerState>(null);
   const [positionRows, setPositionRows] = useState(() => formationPositionRows(fallbackFormation));
   const [formation, setFormation] = useState(fallbackFormation);
+  const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
+  const [selectedHealth, setSelectedHealth] = useState<PositionHealth | null>(null);
+  const [healthDismissed, setHealthDismissed] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerNumber, setNewPlayerNumber] = useState('');
+  const [editingNumber, setEditingNumber] = useState<string | null>(null);
   const filteredPlayers = useMemo(
     () => (filter === 'all' ? players : players.filter((player) => player.group === filter))
       .slice()
       .sort((first, second) => displayPlayerName(first.name).localeCompare(displayPlayerName(second.name), undefined, { sensitivity: 'base' })),
     [filter, players],
   );
+  const health = useMemo(() => positionHealth(formation, players), [formation, players]);
 
   useEffect(() => subscribeToTeamChanges(() => setTeamChangeVersion((version) => version + 1)), []);
 
@@ -114,6 +124,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
     setLoading(true);
     setError(null);
     setPositionPicker(null);
+    setHealthDismissed(false);
     setPositionRows([]);
 
     async function loadTeamData() {
@@ -128,6 +139,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         setPlayers(rosterPayload.players as Player[]);
         const currentFormation = seasonPayload.formation ?? fallbackFormation;
         setFormation(currentFormation);
+        setHasGoalkeeper(GAME_FORMATS[seasonPayload.game_format]?.has_goalkeeper ?? true);
         setPositionRows(formationPositionRows(currentFormation));
       } catch (requestError) {
         if (!active) return;
@@ -148,6 +160,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
     setPlayers((current) => current.map((player) => player.name === name ? { ...player, ...changes } : player));
     setMessage(null);
     setError(null);
+    setHealthDismissed(false);
   }
 
   function toggleGoalkeeper(name: string) {
@@ -171,7 +184,7 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         return row ? generalGroups.includes(row.label) : false;
       });
     const allowedPositions = group === 'general_positions'
-      ? [ANY_POSITION, 'D', 'M', 'F']
+      ? [ANY_POSITION, 'D', 'M', 'F', ...(hasGoalkeeper ? ['GK'] : [])]
       : group === 'backup_positions'
         ? ['D', 'M', 'F', ...formationPositions]
         : [ANY_POSITION, ...primaryFormationPositions];
@@ -198,8 +211,14 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         ? [...positions, 'GK']
         : positions,
       };
+      if (positionPicker.group === 'general_positions') {
+        changes.primary_positions = positionPicker.positions.includes('GK')
+          ? [...player.primary_positions.filter((position) => position.toUpperCase() !== 'GK'), 'GK']
+          : player.primary_positions.filter((position) => position.toUpperCase() !== 'GK');
+      }
       const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
       setPlayers(updatedPlayers);
+      setHealthDismissed(false);
     setPositionPicker(null);
       void saveRoster(updatedPlayers, false);
   }
@@ -219,6 +238,34 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
     } finally {
       setSaving(false);
     }
+  }
+
+  async function addPlayer() {
+      const name = newPlayerName.trim();
+      if (!name || players.some((player) => player.name.toLowerCase() === name.toLowerCase())) return;
+      const parsedNumber = newPlayerNumber === '' ? undefined : Math.max(0, Math.min(99, Number(newPlayerNumber)));
+      const nextPlayers = [...players, {
+        name,
+        number: parsedNumber,
+        group: 'rotational' as const,
+        general_positions: [ANY_POSITION],
+        primary_positions: [ANY_POSITION],
+        backup_positions: [],
+        excluded_positions: [],
+      }];
+      setPlayers(nextPlayers);
+      setNewPlayerName('');
+      setNewPlayerNumber('');
+      await saveRoster(nextPlayers, false);
+    }
+
+  async function savePlayerNumber(name: string, raw: string) {
+      const digits = raw.replace(/\D/g, '').slice(0, 2);
+      const parsed = digits === '' ? undefined : Number(digits);
+      const nextPlayers = players.map((player) => player.name === name ? { ...player, number: parsed === undefined ? undefined : Math.min(99, parsed) } : player);
+      setPlayers(nextPlayers);
+      setEditingNumber(null);
+      await saveRoster(nextPlayers, false);
   }
 
   const positionsNeedReview = !rosterMatchesFormation(formation, players as Player[]);
@@ -272,6 +319,13 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 <Text style={styles.warningText}>Your formation changed. Update player positions to match the current formation.</Text>
               </View>
             )}
+            {!healthDismissed && (
+              <PositionHealthPanel
+                health={health}
+                onSelect={setSelectedHealth}
+                onDismiss={() => setHealthDismissed(true)}
+              />
+            )}
 
             <Text style={styles.filterLabel}>Filter by:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
@@ -297,6 +351,12 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
               <Text style={styles.resultCount}>{filteredPlayers.length} shown</Text>
             </View>
 
+            <View style={styles.addPlayerCard}>
+              <TextInput value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={() => void addPlayer()} placeholder="Player name" placeholderTextColor={palette.muted} style={[styles.addInput, styles.addNameInput]} returnKeyType="done" />
+              <TextInput value={newPlayerNumber} onChangeText={(value) => setNewPlayerNumber(value.replace(/\D/g, '').slice(0, 2))} placeholder="#" placeholderTextColor={palette.muted} keyboardType="number-pad" style={[styles.addInput, styles.numberInput]} />
+              <Pressable onPress={() => void addPlayer()} disabled={!newPlayerName.trim() || saving} style={styles.addButton}><Text style={styles.addButtonText}>Add</Text></Pressable>
+            </View>
+
             {loading ? <Text style={styles.helperText}>Loading season roster...</Text> : players.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyText}>{error ?? 'No players were returned.'}</Text>
@@ -309,7 +369,16 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
                 return (
                   <View key={player.name} style={[styles.playerRow, index === filteredPlayers.length - 1 && styles.lastRow]}>
                     <View style={styles.avatarColumn}>
-                      <Text style={styles.playerName} numberOfLines={2}>{displayPlayerName(player.name)}</Text>
+                      <View style={styles.nameLine}>
+                        <Text style={styles.playerName} numberOfLines={2}>{displayPlayerName(player.name)}</Text>
+                        {editingNumber === player.name ? (
+                          <TextInput autoFocus defaultValue={player.number === undefined ? '' : String(player.number)} onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)} keyboardType="number-pad" style={styles.numberEdit} />
+                        ) : (
+                          <Pressable onPress={() => setEditingNumber(player.name)} accessibilityLabel={`Edit jersey number for ${player.name}`}>
+                            <Text style={styles.numberBadge}>{player.number === undefined ? '#' : `#${player.number}`}</Text>
+                          </Pressable>
+                        )}
+                      </View>
                       <Pressable
                         onPress={() => toggleGoalkeeper(player.name)}
                         style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
@@ -364,12 +433,12 @@ export default function RosterScreen({ embedded = false }: { embedded?: boolean 
         } : current)}
         onFinish={finishPositionPicker}
       />
+      <PositionHealthModal health={selectedHealth} onClose={() => setSelectedHealth(null)} />
     </>
   );
 }
 
 function PositionField({ label, value, onPress }: { label: string; value: string[]; onPress: () => void }) {
-    <Text style={styles.positionValueText} numberOfLines={1}>{value.includes(ANY_POSITION) ? 'Any' : value.join(', ') || 'None'}</Text>
   return (
     <Pressable style={styles.positionField} onPress={onPress} accessibilityRole="button">
       <Text style={styles.positionFieldLabel}>{label}</Text>
@@ -460,6 +529,74 @@ function PositionPickerModal({
     </Modal>
   );
 }
+
+const healthColors: Record<PositionHealth['status'], { background: string; border: string; text: string; icon: string }> = {
+  red: { background: '#fde4dc', border: '#d96f4c', text: '#8f3928', icon: '🔴' },
+  yellow: { background: '#fff1c9', border: '#d7a72b', text: '#795b08', icon: '🟡' },
+  green: { background: '#dcebe2', border: '#19634b', text: '#19634b', icon: '🟢' },
+};
+
+function PositionHealthPanel({ health, onSelect, onDismiss }: { health: PositionHealth[]; onSelect: (value: PositionHealth) => void; onDismiss: () => void }) {
+  return (
+    <View style={styles.healthCard}>
+      <View style={styles.healthHeader}>
+        <View>
+          <Text style={styles.healthTitle}>Position coverage</Text>
+          <Text style={styles.healthSubtitle}>Primary, general, and backup positions</Text>
+        </View>
+        <Pressable onPress={onDismiss} accessibilityLabel="Dismiss position coverage">
+          <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={17} tintColor={palette.muted} />
+        </Pressable>
+      </View>
+      <View style={styles.healthRows}>
+        {health.map((item) => {
+          const colors = healthColors[item.status];
+          return (
+            <Pressable key={item.group} onPress={() => onSelect(item)} style={[styles.healthRow, { backgroundColor: colors.background, borderColor: colors.border }]} accessibilityRole="button">
+              <Text style={[styles.healthRowLabel, { color: colors.text }]}>{item.label}</Text>
+              <Text style={[styles.healthRowCount, { color: colors.text }]}>{item.eligible.length} players {colors.icon}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function PositionHealthModal({ health, onClose }: { health: PositionHealth | null; onClose: () => void }) {
+  if (!health) return null;
+  const colors = healthColors[health.status];
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.healthModal}>
+          <View style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalEyebrow}>POSITION COVERAGE</Text>
+              <Text style={styles.modalTitle}>{health.label}</Text>
+            </View>
+            <Pressable onPress={onClose} accessibilityLabel="Close position coverage details" style={styles.modalCloseButton}>
+              <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={19} tintColor={palette.ink} />
+            </Pressable>
+          </View>
+          <Text style={[styles.healthDetailCount, { color: colors.text }]}>{health.eligible.length} players {colors.icon}</Text>
+          {(['primary', 'general', 'backup'] as const).map((category) => (
+            <View key={category} style={styles.healthDetailGroup}>
+              <Text style={styles.healthDetailLabel}>{category === 'primary' ? 'Primary' : category === 'general' ? 'General' : 'Backup'}</Text>
+              <Text style={styles.healthDetailNames}>{health[category].join(', ') || 'None'}</Text>
+            </View>
+          ))}
+          <Text style={styles.healthTip}>{positionHealthMessage(health)}</Text>
+          <Pressable onPress={onClose} style={styles.finishButton} accessibilityRole="button">
+            <Text style={styles.finishButtonText}>DONE</Text>
+            <SymbolView name={{ ios: 'checkmark', android: 'check', web: 'check' }} size={19} tintColor={palette.panel} />
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
@@ -519,6 +656,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 18,
   },
+  healthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
+  healthHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  healthTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  healthSubtitle: { color: palette.muted, fontSize: 11, marginTop: 3 },
+  healthRows: { gap: 7, marginTop: 12 },
+  healthRow: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 40, paddingHorizontal: 11 },
+  healthRowLabel: { fontSize: 12, fontWeight: '900', textTransform: 'uppercase' },
+  healthRowCount: { fontSize: 12, fontWeight: '800' },
+  healthModal: { backgroundColor: palette.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 18, paddingBottom: 24 },
+  healthDetailCount: { fontSize: 15, fontWeight: '900', marginTop: 18 },
+  healthDetailGroup: { borderBottomColor: palette.line, borderBottomWidth: 1, paddingVertical: 12 },
+  healthDetailLabel: { color: palette.coral, fontSize: 11, fontWeight: '900', letterSpacing: 1.1, textTransform: 'uppercase' },
+  healthDetailNames: { color: palette.ink, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  healthTip: { color: palette.muted, fontSize: 13, lineHeight: 19, marginVertical: 16 },
   filters: { gap: 8, paddingBottom: 22 },
   filterLabel: { color: palette.muted, fontSize: 12, fontWeight: '800', marginBottom: 8, textTransform: 'uppercase' },
   filterButton: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 9 },
@@ -538,6 +689,15 @@ const styles = StyleSheet.create({
   gkButtonTextSelected: { color: palette.panel },
   playerCopy: { flex: 1, marginLeft: 12 },
   playerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  nameLine: { alignItems: 'center', flexDirection: 'row', flex: 1 },
+  numberBadge: { backgroundColor: palette.greenSoft, borderRadius: 6, color: palette.green, fontSize: 11, fontWeight: '800', marginLeft: 6, paddingHorizontal: 5, paddingVertical: 3 },
+  numberEdit: { borderColor: palette.green, borderRadius: 6, borderWidth: 1, color: palette.ink, fontSize: 12, marginLeft: 6, paddingHorizontal: 4, paddingVertical: 2, width: 38 },
+  addPlayerCard: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, flexDirection: 'row', gap: 7, marginBottom: 14, padding: 10 },
+  addInput: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 8, borderWidth: 1, color: palette.ink, minHeight: 40, paddingHorizontal: 9 },
+  addNameInput: { flex: 1 },
+  numberInput: { width: 42 },
+  addButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 8, justifyContent: 'center', minHeight: 40, paddingHorizontal: 12 },
+  addButtonText: { color: palette.panel, fontSize: 12, fontWeight: '800' },
   groupPicker: { flexDirection: 'row', gap: 6, marginTop: 8 },
   groupOption: { backgroundColor: '#f1eee5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
   groupOptionText: { color: palette.muted, fontSize: 10, fontWeight: '800', textTransform: 'capitalize' },

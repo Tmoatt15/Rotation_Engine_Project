@@ -113,7 +113,11 @@ export default function GameScreen() {
           setSecondHalfGK(null);
         }
       })
-      .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load roster.'))
+      .catch(() => {
+        setTeamId(null);
+        setTeamName(null);
+        setError(null);
+      })
         .finally(() => setLoadingRoster(false));
   }
 
@@ -247,6 +251,25 @@ export default function GameScreen() {
     setShowCapacityWarning(false);
     setDisableMaximumLimits(false);
     requestGameNumberConfirmation();
+  }
+
+  if (!loadingRoster && !teamId) {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.container}>
+          <SafeAreaView style={styles.safeArea}>
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Create a team to start building schedules.</Text>
+              <Pressable onPress={() => router.navigate('/team-create')} style={styles.primaryAction} accessibilityRole="button">
+                <Text style={styles.primaryButtonText}>Create team</Text>
+                <SymbolView name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} size={20} tintColor={palette.panel} />
+              </Pressable>
+            </View>
+          </SafeAreaView>
+        </View>
+      </>
+    );
   }
 
   return (
@@ -455,6 +478,9 @@ export default function GameScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
+  emptyCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, margin: 16, padding: 18 },
+  emptyTitle: { color: palette.ink, fontSize: 18, fontWeight: '800', lineHeight: 25, marginBottom: 18 },
+  primaryButtonText: { color: palette.panel, fontSize: 14, fontWeight: '800' },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
   header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 },
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
