@@ -503,6 +503,10 @@ function chooseFieldPlayers(game: Game, roster: Player[], group: PositionGroup, 
 
 type PlannedGroups = Record<'D' | 'M' | 'F', string[][]>;
 type FieldGroup = 'D' | 'M' | 'F';
+type PlannedGroupsResult = {
+  planned: PlannedGroups;
+  lateArrivalConstraints: LateArrivalConstraints;
+};
 type LateArrivalConstraints = {
   byBlock: Array<Map<FieldGroup, Set<string>>>;
   byPlayer: Map<string, Set<string>>;
@@ -837,9 +841,17 @@ function findCombination<T>(items: T[], size: number, isValid: (choice: T[]) => 
   return search(0, size, []);
 }
 
-function planPositionGroups(game: Game, roster: Player[], formation: FormationCounts, goalkeeperNames: string[], startBlock: number, goalkeeperTotalBlocks = new Map<string, number>()): PlannedGroups {
+function planPositionGroups(game: Game, roster: Player[], formation: FormationCounts, goalkeeperNames: string[], startBlock: number, goalkeeperTotalBlocks = new Map<string, number>()): PlannedGroupsResult {
   const positions = (['D', 'M', 'F'] as const).filter((position) => formation[position] > 0);
   const plans: PlannedGroups = { D: Array.from({ length: game.total_blocks }, () => []), M: Array.from({ length: game.total_blocks }, () => []), F: Array.from({ length: game.total_blocks }, () => []) };
+  const lateArrivalConstraints = emptyLateArrivalConstraints(game.total_blocks);
+  const registerArrivalBlockPlacement = (group: FieldGroup, blockIndex: number, names: string[]): void => {
+    for (const change of game.availability_changes) {
+      if (change.action === 'available' && blockIndex === change.block && names.includes(change.player)) {
+        addLateArrivalConstraint(lateArrivalConstraints, change.player, blockIndex, group);
+      }
+    }
+  };
   const reserved = goalkeeperNames.map((name) => new Set(name ? [name] : []));
   const assignedGoalkeepers = new Set(goalkeeperNames.filter(Boolean));
   const goalkeeperFieldTargets = new Map<string, number>();
@@ -1299,6 +1311,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       });
       const chosen = choices[0] ?? [];
       plans[position][blockIndex] = chosen.map((player) => player.name);
+      registerArrivalBlockPlacement(position, blockIndex, plans[position][blockIndex]);
       for (const player of chosen) {
         reserved[blockIndex].add(player.name); rawCounts.set(player.name, (rawCounts.get(player.name) ?? 0) + 1); fieldCounts.set(player.name, (fieldCounts.get(player.name) ?? 0) + 1);
         const half = blockHalf(blockIndex, game.total_blocks); const counts = halfCounts.get(player.name) ?? [0, 0] as [number, number]; counts[half] += 1; halfCounts.set(player.name, counts);
@@ -1318,7 +1331,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const candidates = eligiblePlayers(roster, position).filter((player) => player.available);
     return slots.every((slot) => candidates.length >= formation[position] && candidates.every((player) => canCoverSlot(player, slot, position)));
   });
-  if (symmetricShortageCandidates && plansComplete && allAvailableFieldPlayersCore) return plans;
+  if (symmetricShortageCandidates && plansComplete && allAvailableFieldPlayersCore) return { planned: plans, lateArrivalConstraints };
   if (symmetricShortageCandidates && allFieldPlayersFlexible
     && mixedQuotaGroups.has('core') && mixedQuotaGroups.has('rotational') && mixedQuotaGroups.has('developing')) {
     const candidates = fieldCandidates;
@@ -1345,7 +1358,12 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         }
       }
     }
-    return plans;
+    for (const position of positions) {
+      for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks; blockIndex += 1) {
+        registerArrivalBlockPlacement(position, blockIndex, plans[position][blockIndex]);
+      }
+    }
+    return { planned: plans, lateArrivalConstraints };
   }
 
   const repairCoreReservations = (start: number, end: number): void => {
@@ -2451,7 +2469,12 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       }
     }
   }
-  return plans;
+  for (const position of positions) {
+    for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks; blockIndex += 1) {
+      registerArrivalBlockPlacement(position, blockIndex, plans[position][blockIndex]);
+    }
+  }
+  return { planned: plans, lateArrivalConstraints };
 }
 
 export function buildTimeline(game: Game, roster: Player[], startBlock = 1, frozenTimeline: ScheduleBlock[] = [], quotaFeasibility?: QuotaFeasibilityMetadata, goalkeeperTotalBlocks = new Map<string, number>()): RotationResult {
@@ -2466,14 +2489,9 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     goalkeepers.push(goalkeeper);
   }
   const assignedGoalkeeperNames = new Set(goalkeepers.flatMap((player) => player ? [player.name] : []));
-  const lateArrivalConstraints = emptyLateArrivalConstraints(game.total_blocks);
-  const planned = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock, goalkeeperTotalBlocks);
-  for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available')) {
-    const blockIndex = change.block;
-    for (const group of FIELD_GROUPS) {
-      if (planned[group][blockIndex]?.includes(change.player)) addLateArrivalConstraint(lateArrivalConstraints, change.player, blockIndex, group);
-    }
-  }
+  const plannedResult = planPositionGroups(game, roster, formation, goalkeepers.map((player) => player?.name ?? ''), startBlock, goalkeeperTotalBlocks);
+  const planned = plannedResult.planned;
+  const lateArrivalConstraints = plannedResult.lateArrivalConstraints;
   if (startBlock > 1) {
     const plannedCount = (name: string): number => FIELD_GROUPS.reduce((total, group) => total + planned[group].filter((names) => names.includes(name)).length, 0);
     for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
