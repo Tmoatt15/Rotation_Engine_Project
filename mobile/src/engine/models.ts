@@ -92,6 +92,25 @@ export interface AvailabilityChange {
   maximum_blocks?: number;
 }
 
+export type LateArrivalApprovalScope = 'one_block' | 'entire_half';
+
+export interface LateArrivalApprovalRequest {
+  player: string;
+  scope: LateArrivalApprovalScope;
+  block?: number;
+  half?: 0 | 1;
+  reason?: string;
+}
+
+export interface LateArrivalApprovalResult {
+  request: LateArrivalApprovalRequest;
+  approved: boolean;
+  affected_blocks: number[];
+  warnings: string[];
+  candidates?: string[];
+  prompt?: string;
+}
+
 export interface ReplacementCredit {
   player: string;
   block: number;
@@ -124,6 +143,9 @@ export interface GameInput {
   allow_emergency_assignments?: boolean;
   allow_emergency_positions?: boolean;
   disable_maximum_limits?: boolean;
+  is_late_arrival_regen?: boolean;
+  late_arrival_approval?: LateArrivalApprovalRequest;
+  approved_player_name?: string;
   season_player_blocks?: Record<string, number>;
   season_position_starts?: Record<string, Record<string, number>>;
   season_goalkeeper_starts?: Record<string, number>;
@@ -157,6 +179,9 @@ export interface Game extends Required<
   season_position_starts?: Record<string, Record<string, number>>;
   season_goalkeeper_starts?: Record<string, number>;
   allow_emergency_positions?: boolean;
+  is_late_arrival_regen?: boolean;
+  late_arrival_approval?: LateArrivalApprovalRequest;
+  approved_player_name?: string;
 }
 
 export interface GoalkeeperSummary {
@@ -209,6 +234,11 @@ export interface RotationResult {
   metadata: RotationMetadata;
   movement_metrics?: MovementMetrics;
   starting_position_counts?: Record<string, Record<string, number>>;
+  late_arrival_approval?: LateArrivalApprovalResult;
+  needs_coach_approval?: boolean;
+  approval_candidates?: string[];
+  recommended_approval_player?: string;
+  approval_scope?: LateArrivalApprovalScope;
 }
 
 export interface PositionRow {
@@ -253,6 +283,8 @@ export interface LiveSchedule {
   team_id?: string;
   team_name?: string;
   game_number: number;
+  first_half_gk?: string | null;
+  second_half_gk?: string | null;
   block_start_minutes?: number[];
   block_lengths_minutes?: number[];
   substitution_alert?: SubstitutionAlert;
@@ -264,6 +296,7 @@ export interface LiveSchedule {
   completed_blocks?: number[];
   live_returned_players?: Array<{ player: string; blockIndex: number }>;
   live_availability_history?: AvailabilityHistory[];
+  late_arrival_approval?: LateArrivalApprovalResult;
   movement_metrics?: MovementMetrics;
   warnings?: string[];
   errors?: string[];

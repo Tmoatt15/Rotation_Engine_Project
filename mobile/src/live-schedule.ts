@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 export { buildAfterGameReport, canonicalFieldAssignments } from './report-utils';
 export type { AfterGameReport, AvailabilityHistory, LivePositionOverride, PlayerGameReport, ScheduleBlock } from './report-utils';
 import type { AfterGameReport, AvailabilityHistory, LivePositionOverride, ScheduleBlock } from './report-utils';
+import type { LateArrivalApprovalResult } from './engine/models';
 
 export type PositionRow = { label: string; positions: string[] };
 export type LiveSchedule = {
@@ -27,7 +28,13 @@ export type LiveSchedule = {
   live_availability_history?: AvailabilityHistory[];
   live_position_overrides?: LivePositionOverride[];
   errors?: string[];
+  warnings?: string[];
   structural_errors?: string[];
+  late_arrival_approval?: LateArrivalApprovalResult;
+  needs_coach_approval?: boolean;
+  approval_candidates?: string[];
+  recommended_approval_player?: string;
+  approval_scope?: 'one_block' | 'entire_half';
   blocks: ScheduleBlock[];
 };
 

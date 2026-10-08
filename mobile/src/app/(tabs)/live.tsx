@@ -172,10 +172,14 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [lateStartBlock, setLateStartBlock] = useState(1);
   const [lateTargetBlocks, setLateTargetBlocks] = useState(1);
   const [lateTakeoverGk, setLateTakeoverGk] = useState(false);
+  const [lateApprovalScope, setLateApprovalScope] = useState<'one_block' | 'entire_half' | null>(null);
+  const [approvalCandidates, setApprovalCandidates] = useState<string[]>([]);
+  const [approvedPlayerName, setApprovedPlayerName] = useState<string | null>(null);
   const [lateError, setLateError] = useState<string | null>(null);
   const [lateSaving, setLateSaving] = useState(false);
   const [lateArrivedNames, setLateArrivedNames] = useState<string[]>([]);
   const [availablePlayerNames, setAvailablePlayerNames] = useState<string[]>([]);
+  const [liveWarnings, setLiveWarnings] = useState<string[]>([]);
   const warnedBlocks = useRef(new Set<string>());
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentAvailablePlayerNames = availablePlayerNames.length ? availablePlayerNames : (schedule?.available_player_names ?? []);
@@ -200,6 +204,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setReturnedPlayers(schedule.live_returned_players ?? []);
       setPositionOverrides(schedule.live_position_overrides ?? []);
       setAvailablePlayerNames(schedule.available_player_names ?? []);
+      setLiveWarnings(schedule.warnings ?? []);
     }
   }, [schedule]);
 
@@ -288,6 +293,9 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateStartBlock(nextBlock + 1);
     setLateTargetBlocks(Math.max(1, Math.ceil(((schedule?.blocks.length ?? 1) - nextBlock) / 2)));
     setLateTakeoverGk(false);
+    setLateApprovalScope(null);
+    setApprovalCandidates([]);
+    setApprovedPlayerName(null);
     setLateError(null);
     setShowLateArrival(true);
   }
@@ -300,12 +308,29 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateError(null);
     try {
       const availableNames = [...new Set([...currentAvailablePlayerNames, arrivingPlayer])];
-      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined) });
+      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks as unknown as import('@/engine/models').ScheduleBlock[] }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined), ...(lateApprovalScope ? { approval: { player: arrivingPlayer, scope: lateApprovalScope, block: lateStartBlock, half: lateStartBlock > Math.ceil(schedule.blocks.length / 2) ? 1 : 0, reason: 'Late arrival exception requested in live mode' } } : {}), ...(approvedPlayerName ? { approvedPlayerName } : {}) });
+      if (nextSchedule.needs_coach_approval && approvedPlayerName) {
+        setApprovalCandidates([]);
+        setApprovedPlayerName(null);
+        setLateError('Unable to generate a complete rotation with that approval.');
+        return;
+      }
+      if (nextSchedule.needs_coach_approval) {
+        setApprovalCandidates(nextSchedule.approval_candidates ?? []);
+        setApprovedPlayerName(nextSchedule.recommended_approval_player ?? nextSchedule.approval_candidates?.[0] ?? null);
+        setLateApprovalScope(nextSchedule.approval_scope ?? 'entire_half');
+        setLateError(nextSchedule.late_arrival_approval?.prompt ?? 'A coach approval is needed before applying this late arrival.');
+        return;
+      }
       const nextBlocks = nextSchedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] }));
-      setLiveBlocks(nextBlocks);
+      setLiveBlocks(nextBlocks as unknown as ScheduleBlock[]);
       setAvailablePlayerNames(nextSchedule.available_player_names ?? availableNames);
-      await setAcceptedSchedule({ ...schedule, ...nextSchedule, blocks: nextBlocks, completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
+      const nextWarnings = [...new Set([...(schedule.warnings ?? []), ...(nextSchedule.warnings ?? [])])];
+      setLiveWarnings(nextWarnings);
+      await setAcceptedSchedule({ ...schedule, ...nextSchedule, warnings: nextWarnings, blocks: nextBlocks as unknown as ScheduleBlock[], completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
       setLateArrivedNames((names) => [...names, arrivingPlayer]);
+      setApprovalCandidates([]);
+      setApprovedPlayerName(null);
       setShowLateArrival(false);
     } catch (error) {
       setLateError(error instanceof Error ? error.message : 'The future rotation could not be updated.');
@@ -430,7 +455,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLiveBlocks(nextBlocks);
     setPositionOverrides(nextOverrides);
     setPendingSwap(null);
-    await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, live_returned_players: returnedPlayers });
+    await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, warnings: liveWarnings, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, live_returned_players: returnedPlayers });
   }
 
   function openUnavailable(blockIndex: number) {
@@ -452,6 +477,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     await setAcceptedSchedule({
       ...schedule,
       blocks: liveBlocks,
+      warnings: liveWarnings,
       live_availability: availabilityRecords,
       live_availability_history: availabilityHistory,
       live_position_overrides: positionOverrides,
@@ -467,6 +493,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     await setAcceptedSchedule({
       ...schedule,
       blocks: liveBlocks,
+      warnings: liveWarnings,
       live_availability: availabilityRecords,
       live_availability_history: availabilityHistory,
       live_position_overrides: positionOverrides,
@@ -577,6 +604,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     await setAcceptedSchedule({
       ...schedule,
       blocks: nextBlocks,
+      warnings: liveWarnings,
       live_availability: nextAvailabilityRecords,
       live_availability_history: nextAvailabilityHistory,
       live_position_overrides: positionOverrides,
@@ -618,6 +646,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
               </Pressable>
             </View>
             {!isEndOfGame && <Pressable onPress={openLateArrival} style={styles.lateArrivalButton} accessibilityRole="button"><SymbolView name={{ ios: 'person.badge.plus', android: 'person_add', web: 'person_add' }} size={16} tintColor={palette.green} /><Text style={styles.lateArrivalText}>ADD PLAYER</Text></Pressable>}
+            {liveWarnings.length > 0 && <View style={styles.liveWarningBanner}><Text style={styles.liveWarningTitle}>ROTATION NOTES</Text>{liveWarnings.slice(-3).map((warning) => <Text key={warning} style={styles.liveWarningText}>{warning}</Text>)}</View>}
 
             <View style={styles.blockHeading}>
               <View>
@@ -860,9 +889,24 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
               <>
                 <View style={styles.stepperRow}><Text style={styles.stepperLabel}>START BLOCK</Text><View style={styles.stepper}><Pressable onPress={() => setLateStartBlock((value) => Math.max(activeBlock + 2, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateStartBlock}</Text><Pressable onPress={() => setLateStartBlock((value) => Math.min(schedule.blocks.length, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
                 <View style={styles.stepperRow}><Text style={styles.stepperLabel}>BLOCKS TO PLAY</Text><View style={styles.stepper}><Pressable onPress={() => setLateTargetBlocks((value) => Math.max(0, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateTargetBlocks}</Text><Pressable onPress={() => setLateTargetBlocks((value) => Math.min(schedule.blocks.length - lateStartBlock + 1, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
+                {!lateApprovalScope ? <Pressable onPress={() => setLateApprovalScope('one_block')} style={styles.approvalOptIn}><Text style={styles.approvalOptInText}>REQUEST EXCEPTION APPROVAL</Text></Pressable> : <>
+                  <Text style={styles.stepperLabel}>APPROVAL SCOPE</Text>
+                  <View style={styles.scopeChoices}>
+                    <Pressable onPress={() => setLateApprovalScope('one_block')} style={[styles.scopeButton, lateApprovalScope === 'one_block' && styles.scopeButtonSelected]}><Text style={styles.scopeButtonTitle}>One block</Text><Text style={styles.scopeButtonDetail}>Review this substitution</Text></Pressable>
+                    <Pressable onPress={() => setLateApprovalScope('entire_half')} style={[styles.scopeButton, lateApprovalScope === 'entire_half' && styles.scopeButtonSelected]}><Text style={styles.scopeButtonTitle}>Entire half</Text><Text style={styles.scopeButtonDetail}>Review the remaining half</Text></Pressable>
+                  </View>
+                </>}
+                {approvalCandidates.length > 0 && <View style={styles.approvalPanel}>
+                  <Text style={styles.approvalPanelTitle}>COACH APPROVAL NEEDED</Text>
+                  <Text style={styles.modalDetail}>The normal rotation could not be completed. Recommended: {displayPlayerName(approvedPlayerName ?? approvalCandidates[0])}.</Text>
+                  <Text style={styles.approvalPanelLabel}>CHOOSE DIFFERENT</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {approvalCandidates.map((candidate) => <Pressable key={candidate} onPress={() => setApprovedPlayerName(candidate)} style={[styles.candidateButton, approvedPlayerName === candidate && styles.scopeButtonSelected]}><Text style={styles.candidateButtonText}>{displayPlayerName(candidate)}</Text></Pressable>)}
+                  </ScrollView>
+                </View>}
                 {lateStartBlock === halftimeIndex + 1 && latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper in the second half</Text></Pressable>}
                 {lateError && <Text style={styles.timeError}>{lateError}</Text>}
-                <View style={styles.modalActions}><Pressable onPress={() => setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>BACK</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : 'DONE'}</Text></Pressable></View>
+                <View style={styles.modalActions}><Pressable onPress={() => approvalCandidates.length > 0 ? (setApprovalCandidates([]), setApprovedPlayerName(null), setLateApprovalScope(null), setLateError('Unable to generate a complete rotation without coach approval.')) : setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>{approvalCandidates.length > 0 ? 'CANCEL' : 'BACK'}</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : approvalCandidates.length > 0 ? 'CONFIRM' : 'DONE'}</Text></Pressable></View>
               </>
             )}
             {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={[styles.cancelButtonText, styles.lateCancelText]}>CANCEL</Text></Pressable>}
@@ -933,6 +977,9 @@ const styles = StyleSheet.create({
   latePlayerName: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   lateCancel: { alignSelf: 'stretch', borderColor: palette.coral, flex: 0, marginTop: 10 },
   lateCancelText: { color: palette.coral },
+  liveWarningBanner: { backgroundColor: '#fff1dc', borderColor: '#e8bd82', borderRadius: 10, borderWidth: 1, marginBottom: 12, padding: 10 },
+  liveWarningTitle: { color: '#8a5a18', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  liveWarningText: { color: '#684719', fontSize: 12, marginTop: 4 },
   stepperRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14 },
   stepperLabel: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   stepper: { alignItems: 'center', flexDirection: 'row', gap: 12 },
@@ -993,6 +1040,14 @@ const styles = StyleSheet.create({
   overrideNotice: { backgroundColor: '#f8e5b2', borderRadius: 11, color: '#76591a', fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 14, padding: 12 },
   scopeChoices: { gap: 9, marginTop: 18 },
   scopeButton: { backgroundColor: palette.greenSoft, borderColor: palette.green, borderRadius: 11, borderWidth: 1, padding: 13 },
+  scopeButtonSelected: { backgroundColor: '#b9d9c4', borderWidth: 2 },
+  approvalOptIn: { alignSelf: 'flex-start', borderColor: palette.green, borderRadius: 9, borderWidth: 1, marginBottom: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  approvalOptInText: { color: palette.green, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  approvalPanel: { backgroundColor: '#fff1dc', borderColor: '#e8bd82', borderRadius: 10, borderWidth: 1, marginBottom: 10, padding: 10 },
+  approvalPanelTitle: { color: '#8a5a18', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  approvalPanelLabel: { color: palette.muted, fontSize: 10, fontWeight: '900', marginTop: 8 },
+  candidateButton: { backgroundColor: palette.panel, borderColor: palette.green, borderRadius: 9, borderWidth: 1, marginRight: 6, marginTop: 6, paddingHorizontal: 10, paddingVertical: 7 },
+  candidateButtonText: { color: palette.green, fontSize: 12, fontWeight: '800' },
   scopeButtonTitle: { color: palette.green, fontSize: 13, fontWeight: '900' },
   scopeButtonDetail: { color: palette.muted, fontSize: 11, marginTop: 3 },
   overrideWarningText: { color: palette.coral, fontSize: 10, fontWeight: '800', marginTop: 3 },

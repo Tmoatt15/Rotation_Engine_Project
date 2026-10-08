@@ -13,6 +13,8 @@ export const GK_TARGET = 0.8;
 export const HARD_MAXIMUM = 0.8;
 export const GK_FIELD_MINIMUM = 0.2;
 export const GK_FIELD_MAXIMUM = 0.3;
+export const LATE_ARRIVAL_GK_FIELD_MINIMUM = 0.3;
+export const LATE_ARRIVAL_GK_FIELD_MAXIMUM = 0.4;
 
 const GROUP_HARD_MINIMUM: Record<string, number> = { core: CORE_MIN, core_a: CORE_MIN, core_b: CORE_MIN, rotational: ROTATIONAL_MIN, developing: DEVELOPMENTAL_MIN, developmental: DEVELOPMENTAL_MIN };
 
@@ -278,16 +280,16 @@ export function blocksForPercentage(totalBlocks: number, percentage: number, min
   return Math.max(minimum, targetBlocksForPercentage(totalBlocks, percentage));
 }
 
-export function applyBlockLimits(player: Player, totalBlocks: number): void {
+export function applyBlockLimits(player: Player, totalBlocks: number, lateArrivalRegen = false): void {
   player.hard_minimum_blocks = minimumBlocksForPercentage(totalBlocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
   player.hard_maximum_blocks = maximumFieldBlocksForPlayer(player, totalBlocks);
   player.max_blocks_per_half = isDedicatedGoalkeeper(player)
     ? Math.max(1, Math.ceil(totalBlocks / 2))
     : Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));
-  player.gk_field_minimum_blocks = minimumBlocksForPercentage(totalBlocks, GK_FIELD_MINIMUM);
+  player.gk_field_minimum_blocks = minimumBlocksForPercentage(totalBlocks, lateArrivalRegen ? LATE_ARRIVAL_GK_FIELD_MINIMUM : GK_FIELD_MINIMUM);
   player.gk_field_maximum_blocks = Math.max(
     player.gk_field_minimum_blocks,
-    intendedMaximumBlocksForPercentage(totalBlocks, GK_FIELD_MAXIMUM),
+    intendedMaximumBlocksForPercentage(totalBlocks, lateArrivalRegen ? LATE_ARRIVAL_GK_FIELD_MAXIMUM : GK_FIELD_MAXIMUM),
   );
 }
 
@@ -330,7 +332,7 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     else { result.errors.push(`Unknown group for player ${player.name}`); }
     if (game.quota_exempt_players.has(player.name)) { target = 0; minimum = 0; maximum = game.total_blocks; }
     player.target_blocks = target; player.minimum_blocks = minimum; player.maximum_blocks = game.quota_exempt_players.has(player.name) ? game.total_blocks : maximum + (game.replacement_bonuses[player.name] ?? 0);
-    applyBlockLimits(player, game.total_blocks);
+    applyBlockLimits(player, game.total_blocks, game.is_late_arrival_regen);
     if (game.disable_maximum_limits) applyMaximumOverride(player, game.total_blocks);
     if (game.quota_exempt_players.has(player.name)) { player.hard_minimum_blocks = 0; player.hard_maximum_blocks = game.total_blocks; player.gk_field_minimum_blocks = 0; player.gk_field_maximum_blocks = game.total_blocks; }
     else player.hard_maximum_blocks = Math.min(game.total_blocks, player.hard_maximum_blocks + (game.replacement_bonuses[player.name] ?? 0));

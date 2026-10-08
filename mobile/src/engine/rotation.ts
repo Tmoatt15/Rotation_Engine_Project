@@ -1,4 +1,4 @@
-import type { AvailabilityChange, Game, GameInput, Player, PlayerInput, PositionGroup, RotationResult, ScheduleBlock } from './models';
+import type { AvailabilityChange, Game, GameInput, LateArrivalApprovalRequest, LateArrivalApprovalResult, Player, PlayerInput, PositionGroup, RotationResult, ScheduleBlock } from './models';
 import { computeBlockTargets } from './quotas';
 import { assignExactSlots, buildTimeline, calculateMovementMetrics, completeExactAssignmentExists, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus } from './surplus';
@@ -30,8 +30,50 @@ function prepareGame(input: Game | GameInput): Game {
   }
   const hasGoalkeeper = game.has_goalkeeper ?? formatGoalkeeperSetting ?? true;
   return {
-    ...game, game_format: game.game_format, has_goalkeeper: hasGoalkeeper, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
+    ...game, game_format: game.game_format, has_goalkeeper: hasGoalkeeper, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, is_late_arrival_regen: game.is_late_arrival_regen ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
+}
+
+function approvalResult(request: LateArrivalApprovalRequest, timeline: ScheduleBlock[], errors: string[], roster: Player[]): LateArrivalApprovalResult {
+  const halfLength = Math.ceil(timeline.length / 2);
+  const affectedBlocks = request.scope === 'one_block'
+    ? (request.block ? [request.block] : [])
+    : Array.from({ length: halfLength }, (_, index) => (request.half ?? 0) * halfLength + index + 1)
+      .filter((block) => block <= timeline.length);
+  const playerAppears = affectedBlocks.filter((blockNumber) => {
+    const block = timeline[blockNumber - 1];
+    return Boolean(block && [block.GK, ...block.D, ...block.M, ...block.F].includes(request.player));
+  });
+  const warnings = errors.filter((error) => error.toLowerCase().includes(request.player.toLowerCase()));
+  const candidates = [...new Set(affectedBlocks.flatMap((blockNumber) => {
+    const block = timeline[blockNumber - 1];
+    return block ? [block.GK, ...block.D, ...block.M, ...block.F] : [];
+  }))].filter((name) => name && name !== request.player && roster.some((player) => player.name === name));
+  if (playerAppears.length !== affectedBlocks.length) {
+    warnings.push(`${request.player} is not assigned in every approved ${request.scope === 'one_block' ? 'block' : 'half'} block.`);
+  }
+
+  const uniqueWarnings = [...new Set(warnings)];
+  return {
+    request,
+    approved: affectedBlocks.length > 0 && playerAppears.length === affectedBlocks.length && uniqueWarnings.length === 0,
+    affected_blocks: affectedBlocks,
+    warnings: uniqueWarnings,
+    ...(uniqueWarnings.length ? { candidates, prompt: `Review the ${request.scope === 'one_block' ? 'block' : 'half'} exception before applying it.` } : {}),
+  };
+}
+
+function approvalCandidates(roster: Player[], timeline: ScheduleBlock[], arrival: AvailabilityChange): string[] {
+  const halfStart = arrival.block < Math.ceil(timeline.length / 2) ? 0 : Math.ceil(timeline.length / 2);
+  const halfEnd = arrival.block < Math.ceil(timeline.length / 2) ? Math.ceil(timeline.length / 2) : timeline.length;
+  return roster
+    .filter((player) => player.available && player.name !== arrival.player && !player.primary_positions.includes('GK'))
+    .map((player) => ({
+      name: player.name,
+      appearances: timeline.slice(halfStart, halfEnd).filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(player.name)).length,
+    }))
+    .sort((left, right) => left.appearances - right.appearances || left.name.localeCompare(right.name))
+    .map((candidate) => candidate.name);
 }
 
 function prepareRoster(roster: Player[]): Player[] { return roster.map((player) => player.position_usage && player.blocks_by_half ? player : createPlayer(player)); }
@@ -47,9 +89,13 @@ function startingPositionCounts(timeline: ScheduleBlock[]): Record<string, Recor
 function finalizeResult(game: Game, roster: Player[], timeline: RotationResult): RotationResult {
   const formation = parseFormation(game.formation);
   const slots = formationSlots(formation);
+  const validationErrors = validateTimeline(roster, timeline.timeline, formation, slots, game.total_blocks, game)
+    .filter((error) => !game.disable_maximum_limits
+      || error.includes('total blocks')
+      || error.includes('GK field maximum'));
   return {
     ...timeline,
-    errors: [...new Set([...timeline.errors, ...validateTimeline(roster, timeline.timeline, formation, slots, game.total_blocks)])],
+    errors: [...new Set([...timeline.errors, ...validationErrors])],
     warnings: [...new Set([...timeline.warnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])],
     movement_metrics: calculateMovementMetrics(timeline.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments),
     starting_position_counts: startingPositionCounts(timeline.timeline),
@@ -67,8 +113,8 @@ export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Play
 
 export const generateSchedule = runRotationEngine;
 
-export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[], availablePlayerNames?: string[]): RotationResult {
-  const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
+export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[], availablePlayerNames?: string[], isLateArrivalRegen = false, approvedPlayerName?: string): RotationResult {
+  const game = prepareGame({ ...gameInput, is_late_arrival_regen: isLateArrivalRegen, approved_player_name: approvedPlayerName }); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
   if (availablePlayerNames) {
     const availableNames = new Set(availablePlayerNames);
     roster.forEach((player) => { player.available = availableNames.has(player.name); });
@@ -149,7 +195,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     const appearances = (): number => timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(player.name)).length;
     while (appearances() > change.target_blocks!) {
       let replaced = false;
-      for (let blockIndex = 0; blockIndex < timeline.timeline.length - 1 && !replaced; blockIndex += 1) {
+      for (let blockIndex = 0; blockIndex < timeline.timeline.length && !replaced; blockIndex += 1) {
         if (blockIndex === change.block) continue;
         const block = timeline.timeline[blockIndex];
         const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
@@ -174,11 +220,67 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       }
       if (!replaced) break;
     }
+    while (appearances() < change.target_blocks!) {
+      let placed = false;
+      for (let blockIndex = Math.max(0, change.block); blockIndex < timeline.timeline.length && !placed; blockIndex += 1) {
+        const block = timeline.timeline[blockIndex];
+        const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
+        if (assigned.has(player.name) || block.GK === player.name) continue;
+        for (const group of ['D', 'M', 'F'] as const) {
+          const replacementIndex = block[group].findIndex((name) => name !== player.name
+            && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name));
+          if (replacementIndex < 0 || !eligiblePlayers(roster, group).some((item) => item.name === player.name)) continue;
+          const next = block[group].map((name, index) => index === replacementIndex ? player.name : name);
+          if (!completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group)) continue;
+          block[group] = next;
+          Object.assign(block.positions, assignExactSlots(roster, next, formationSlots(parseFormation(game.formation))[group], group, block.positions, game.season_position_starts));
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) break;
+    }
+  }
+  if (approvedPlayerName && game.late_arrival_approval) {
+    const request = game.late_arrival_approval;
+    const halfLength = Math.ceil(game.total_blocks / 2);
+    const targetBlocks = request.scope === 'one_block'
+      ? (request.block ? [request.block] : [])
+      : Array.from({ length: halfLength }, (_, index) => (request.half ?? 0) * halfLength + index + 1)
+        .filter((block) => block <= timeline.timeline.length);
+    const approvedPlayer = roster.find((player) => player.name === approvedPlayerName);
+    if (approvedPlayer) {
+      for (const blockNumber of targetBlocks) {
+        const block = timeline.timeline[blockNumber - 1];
+        if (!block || [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedPlayerName)) continue;
+        const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
+        let applied = false;
+        for (const group of ['D', 'M', 'F'] as const) {
+          if (!eligiblePlayers(roster, group).some((item) => item.name === approvedPlayerName)) continue;
+          const replacementIndex = block[group].findIndex((name) => {
+            if (name === approvedPlayerName || assigned.has(approvedPlayerName)) return false;
+            const next = block[group].map((candidate, index) => index === block[group].indexOf(name) ? approvedPlayerName : candidate);
+            return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
+          });
+          if (replacementIndex < 0) continue;
+          const next = block[group].map((name, index) => index === replacementIndex ? approvedPlayerName : name);
+          block[group] = next;
+          Object.assign(block.positions, assignExactSlots(roster, next, formationSlots(parseFormation(game.formation))[group], group, block.positions, game.season_position_starts));
+          applied = true;
+          break;
+        }
+        if (!applied) continue;
+      }
+    }
   }
   const latePlayerNames = new Set(changes.filter((change) => change.action === 'available' && change.target_blocks !== undefined).map((change) => change.player));
   replayTimeline(roster, timeline.timeline, game);
   const surplus = computeSurplus(game, roster);
-  const timelineErrors = timeline.errors.filter((error) => ![...latePlayerNames].some((name) => error.startsWith(`${name} exceeds `)));
+  const timelineErrors = timeline.errors
+    .filter((error) => ![...latePlayerNames].some((name) => error.startsWith(`${name} exceeds `)))
+    .filter((error) => !game.disable_maximum_limits
+      || error.includes('total blocks')
+      || error.includes('GK field maximum'));
   const placementErrors = changes
     .filter((change) => change.action === 'available' && change.target_blocks !== undefined)
     .flatMap((change) => {
@@ -194,6 +296,24 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       return errors;
     });
   const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timelineErrors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  if (game.late_arrival_approval) {
+    result.late_arrival_approval = approvalResult(game.late_arrival_approval, result.timeline, result.errors, roster);
+    result.warnings = [...new Set([...result.warnings, ...result.late_arrival_approval.warnings])];
+  }
+  const arrival = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
+  const hasStructuralFailure = result.errors.some((error) => /requires \d+ players|unassigned|cannot form a complete|assignment is missing/i.test(error));
+  const approvalFailed = result.late_arrival_approval && !result.late_arrival_approval.approved;
+  const approvalRequested = Boolean(game.late_arrival_approval);
+  if (game.is_late_arrival_regen && !approvedPlayerName && arrival && (hasStructuralFailure || placementErrors.length > 0 || approvalFailed)) {
+    const candidates = result.late_arrival_approval?.candidates ?? approvalCandidates(roster, timeline.timeline, arrival);
+    result.needs_coach_approval = true;
+    result.approval_candidates = candidates;
+    result.recommended_approval_player = candidates[0];
+    result.approval_scope = hasStructuralFailure ? 'entire_half' : 'one_block';
+    result.warnings = [...new Set([...result.warnings, result.late_arrival_approval?.prompt ?? 'A coach approval is needed before applying this late arrival.'])];
+    // Never persist a partially reconstructed schedule while waiting for approval.
+    result.timeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
+  }
   if (availablePlayerNames) result.available_player_names = roster.filter((player) => player.available).map((player) => player.name);
   return result;
 }
