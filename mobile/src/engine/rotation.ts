@@ -293,7 +293,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
               const rightCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(right.name)).length;
               const leftSurplus = leftPlayer ? leftCount - leftPlayer.target_blocks : leftCount;
               const rightSurplus = rightPlayer ? rightCount - rightPlayer.target_blocks : rightCount;
-              return rightSurplus - leftSurplus || rightCount - leftCount || left.name.localeCompare(right.name);
+              return leftSurplus - rightSurplus || leftCount - rightCount || left.name.localeCompare(right.name);
             });
           const replacementIndex = replacementCandidates.find(({ index }) => {
             const next = block[group].map((name, candidateIndex) => candidateIndex === index ? player.name : name);
@@ -328,11 +328,23 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
         let applied = false;
         for (const group of ['D', 'M', 'F'] as const) {
           if (!eligiblePlayers(roster, group).some((item) => item.name === approvedPlayerName)) continue;
-          const replacementIndex = block[group].findIndex((name) => {
-            if (name === approvedPlayerName || name === arrivingPlayerName || assigned.has(approvedPlayerName)) return false;
-            const next = block[group].map((candidate, index) => index === block[group].indexOf(name) ? approvedPlayerName : candidate);
+          const replacementCandidates = block[group]
+            .map((name, index) => ({ name, index }))
+            .filter(({ name }) => name !== approvedPlayerName && name !== arrivingPlayerName && !assigned.has(approvedPlayerName))
+            .sort((left, right) => {
+              const leftPlayer = roster.find((player) => player.name === left.name);
+              const rightPlayer = roster.find((player) => player.name === right.name);
+              const count = (name: string): number => timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(name)).length;
+              const leftCount = count(left.name);
+              const rightCount = count(right.name);
+              const leftTarget = leftPlayer?.target_blocks ?? leftPlayer?.hard_minimum_blocks ?? 0;
+              const rightTarget = rightPlayer?.target_blocks ?? rightPlayer?.hard_minimum_blocks ?? 0;
+              return (rightCount - rightTarget) - (leftCount - leftTarget) || rightCount - leftCount || right.name.localeCompare(left.name);
+            });
+          const replacementIndex = replacementCandidates.find(({ name, index }) => {
+            const next = block[group].map((candidate, candidateIndex) => candidateIndex === index ? approvedPlayerName : candidate);
             return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
-          });
+          })?.index ?? -1;
           if (replacementIndex < 0) continue;
           const next = block[group].map((name, index) => index === replacementIndex ? approvedPlayerName : name);
           block[group] = next;

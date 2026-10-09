@@ -4,18 +4,31 @@ import { CORE_MIN, DEVELOPMENTAL_MIN, ROTATIONAL_MIN, minimumBlocksForPercentage
 export function filterStaleQuotaWarnings(warnings: string[], blocks: ScheduleBlock[], roster: Player[]): string[] {
   const counts = new Map<string, number>();
   blocks.forEach((block) => [block.GK, ...block.D, ...block.M, ...block.F].forEach((name) => counts.set(name, (counts.get(name) ?? 0) + 1)));
-  return warnings.filter((warning) => {
-    const match = warning.match(/^(.+?) \((core|rotational|developmental)\) is under (?:target|minimum) by \d+ blocks\.$/);
-    if (!match) return true;
+  const selectedQuotaWarnings = new Map<string, { warning: string; priority: number }>();
+  const result: string[] = [];
+  warnings.forEach((warning) => {
+    const match = warning.match(/^(.+?) \((core|rotational|developmental)\) is under (target|minimum|max) by \d+ blocks\.$/);
+    if (!match) {
+      result.push(warning);
+      return;
+    }
+    if (match[3] === 'max') return;
     const player = roster.find((candidate) => candidate.name === match[1]);
-    if (!player) return true;
+    if (!player) {
+      result.push(warning);
+      return;
+    }
     const minimum = player.group.startsWith('core')
       ? minimumBlocksForPercentage(blocks.length, CORE_MIN)
       : player.group === 'rotational'
         ? minimumBlocksForPercentage(blocks.length, ROTATIONAL_MIN)
         : minimumBlocksForPercentage(blocks.length, DEVELOPMENTAL_MIN);
-    return (counts.get(player.name) ?? 0) < minimum;
+    if ((counts.get(player.name) ?? 0) >= minimum && match[3] === 'minimum') return;
+    const priority = match[3] === 'minimum' ? 2 : 1;
+    const current = selectedQuotaWarnings.get(player.name);
+    if (!current || priority > current.priority) selectedQuotaWarnings.set(player.name, { warning, priority });
   });
+  return [...result, ...[...selectedQuotaWarnings.values()].map(({ warning }) => warning)];
 }
 
 export function computeSurplus(game: Game, roster: Player[]): RotationResult {

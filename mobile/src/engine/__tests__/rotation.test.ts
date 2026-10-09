@@ -324,6 +324,11 @@ describe('goalkeeper and minimum protection', () => {
 
     expect(result.errors.filter((error) => error.includes('half maximum'))).toEqual([]);
     expect(result.timeline).toHaveLength(10);
+    for (const name of ['Cameron', 'Eitan']) {
+      const fieldBlocks = result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length;
+      expect(fieldBlocks, `${name} field blocks`).toBeGreaterThanOrEqual(2);
+      expect(fieldBlocks, `${name} field blocks`).toBeLessThanOrEqual(3);
+    }
   });
 
   it('uses the legacy single goalkeeper assignment for both halves', () => {
@@ -835,6 +840,7 @@ describe('goalkeeper and minimum protection', () => {
         const approvedName = regenerated.approval_candidates?.[0];
         if (!approvedName) throw new Error('Sid approval candidate missing');
         const approvedBefore = initial.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedName)).length;
+        const mahaswinBefore = initial.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes('Mahaswin')).length;
         const approved = regenerateSchedule(
           { ...game, late_arrival_approval: { player: latePlayer, scope: approvalCase, block: arrivalBlock } },
           players,
@@ -851,6 +857,7 @@ describe('goalkeeper and minimum protection', () => {
         expect(approved.timeline[arrivalBlock - 1].D.concat(approved.timeline[arrivalBlock - 1].M, approved.timeline[arrivalBlock - 1].F)).toContain(latePlayer);
         expect(approved.timeline[arrivalBlock - 1].bench).toHaveLength(6);
         expect(approved.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedName))).toHaveLength(approvedBefore + 1);
+        expect(approved.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes('Mahaswin'))).toHaveLength(mahaswinBefore);
       }
       return;
     }

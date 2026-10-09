@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createPlayer } from '../rotation';
-import { computeSurplus } from '../surplus';
+import { computeSurplus, filterStaleQuotaWarnings } from '../surplus';
 
 describe('rotation notes', () => {
   it('only reports under-target warnings for available players', () => {
@@ -46,5 +46,16 @@ describe('rotation notes', () => {
     const result = computeSurplus({ total_blocks: 10, formation: '4-3-3' }, [sawyer]);
 
     expect(result.warnings).not.toContain(expect.stringContaining('Sawyer'));
+  });
+
+  it('keeps only the most relevant quota warning per player', () => {
+    const mah = createPlayer({ name: 'Mahaswin', group: 'rotational', general_positions: ['M'], primary_positions: ['M'] });
+    const blocks = Array.from({ length: 10 }, () => ({ GK: 'GK', D: [], M: [], F: [], bench: [], positions: {} }));
+    const warnings = filterStaleQuotaWarnings([
+      'Mahaswin (rotational) is under max by 3 blocks.',
+      'Mahaswin (rotational) is under minimum by 1 blocks.',
+    ], blocks, [mah]);
+
+    expect(warnings).toEqual(['Mahaswin (rotational) is under minimum by 1 blocks.']);
   });
 });
