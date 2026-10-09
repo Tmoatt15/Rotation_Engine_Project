@@ -1064,6 +1064,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const intendedMaximum = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? player.gk_field_maximum_blocks : player.maximum_blocks;
     const intendedBandPriority = game.disable_maximum_limits || (fieldCounts.get(player.name) ?? 0) < intendedMaximum ? 0 : 1;
     const nonCore = !coreGroups.has(player.group);
+    const extraBlocks = Math.max(0, (fieldCounts.get(player.name) ?? 0) - fieldMinimum);
     const tier = deficit > 0
       ? assignedGoalkeepers.has(player.name) ? 0 : nonCore ? 1 : 2
       : assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? 5 : nonCore ? 3 : 4;
@@ -1080,7 +1081,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
                 : manualOverrideCount < game.total_blocks ? 5 : 6);
     return game.disable_maximum_limits
       ? [lateArrivalPriority, overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)]
-      : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fairnessRank(player, blockIndex)];
+      : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), deficit > 0 ? 0 : extraBlocks, intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fairnessRank(player, blockIndex)];
   };
   const comparePlayerKeys = (left: Player, right: Player, position: PositionGroup, blockIndex: number, previous: Set<string>): number => {
     const leftKey = playerKey(left, position, blockIndex, previous);
