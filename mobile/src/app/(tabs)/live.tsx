@@ -180,6 +180,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [showApprovalCandidates, setShowApprovalCandidates] = useState(false);
   const [lateError, setLateError] = useState<string | null>(null);
   const [lateSaving, setLateSaving] = useState(false);
+  const [continueBelowMinimum, setContinueBelowMinimum] = useState(false);
   const [lateArrivedNames, setLateArrivedNames] = useState<string[]>([]);
   const [availablePlayerNames, setAvailablePlayerNames] = useState<string[]>([]);
   const [liveWarnings, setLiveWarnings] = useState<string[]>([]);
@@ -302,6 +303,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setApprovedPlayerName(null);
     setShowApprovalCandidates(false);
     setLateError(null);
+    setContinueBelowMinimum(false);
     setShowLateArrival(true);
   }
 
@@ -313,7 +315,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLateError(null);
     try {
       const availableNames = [...new Set([...currentAvailablePlayerNames, arrivingPlayer])];
-      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks as unknown as import('@/engine/models').ScheduleBlock[] }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined), ...(lateApprovalScope ? { approval: { player: arrivingPlayer, scope: lateApprovalScope, block: lateStartBlock, half: lateStartBlock > Math.ceil(schedule.blocks.length / 2) ? 1 : 0, reason: 'Late arrival exception requested in live mode' } } : {}), ...(approvedPlayerName ? { approvedPlayerName } : {}) });
+      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks as unknown as import('@/engine/models').ScheduleBlock[] }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined), continueBelowMinimum, ...(lateApprovalScope ? { approval: { player: arrivingPlayer, scope: lateApprovalScope, block: lateStartBlock, half: lateStartBlock > Math.ceil(schedule.blocks.length / 2) ? 1 : 0, reason: 'Late arrival exception requested in live mode' } } : {}), ...(approvedPlayerName ? { approvedPlayerName } : {}) });
       if (nextSchedule.needs_coach_approval && approvedPlayerName) {
         setShowApprovalCandidates(true);
         setLateError('Unable to generate a complete rotation with that approval.');
@@ -325,6 +327,11 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
         setShowApprovalCandidates(false);
         setLateApprovalScope(nextSchedule.approval_scope ?? 'entire_half');
         setLateError(nextSchedule.late_arrival_approval?.prompt ?? 'A coach approval is needed before applying this late arrival.');
+        return;
+      }
+      if (nextSchedule.needs_minimum_warning && !continueBelowMinimum) {
+        setLateError(nextSchedule.minimum_warning ?? `Adding ${arrivingPlayer} would put a player below minimum.`);
+        setContinueBelowMinimum(true);
         return;
       }
       const nextBlocks = nextSchedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] }));
@@ -915,7 +922,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 </View>}
                 {lateStartBlock === halftimeIndex + 1 && latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper in the second half</Text></Pressable>}
                 {lateError && <Text style={styles.timeError}>{lateError}</Text>}
-                <View style={styles.modalActions}><Pressable onPress={() => approvalCandidates.length > 0 ? (setApprovalCandidates([]), setApprovedPlayerName(null), setLateApprovalScope(null), setShowApprovalCandidates(false), setLateError('Unable to generate a complete rotation without coach approval.')) : setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>{approvalCandidates.length > 0 ? 'CANCEL' : 'BACK'}</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : approvalCandidates.length > 0 ? 'CONFIRM' : 'DONE'}</Text></Pressable></View>
+                <View style={styles.modalActions}><Pressable onPress={() => approvalCandidates.length > 0 ? (setApprovalCandidates([]), setApprovedPlayerName(null), setLateApprovalScope(null), setShowApprovalCandidates(false), setLateError('Unable to generate a complete rotation without coach approval.')) : setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>{approvalCandidates.length > 0 ? 'CANCEL' : 'BACK'}</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : continueBelowMinimum ? 'CONTINUE ANYWAY' : approvalCandidates.length > 0 ? 'CONFIRM' : 'DONE'}</Text></Pressable></View>
               </>
             )}
             {!latePlayerName && <Pressable onPress={() => setShowLateArrival(false)} style={[styles.cancelButton, styles.lateCancel]}><Text style={[styles.cancelButtonText, styles.lateCancelText]}>CANCEL</Text></Pressable>}
