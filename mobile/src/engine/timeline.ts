@@ -618,7 +618,27 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
       }
       return false;
     };
-    if (fill(0)) return { groups, assignedCore };
+    if (fill(0)) {
+      for (const playerName of assignedCore) {
+        const player = roster.find((candidate) => candidate.name === playerName);
+        const desiredGroup = player?.general_positions.find((position): position is 'D' | 'M' | 'F' => ['D', 'M', 'F'].includes(position));
+        const currentGroup = FIELD_GROUPS.find((group) => groups[group].includes(playerName));
+        if (!player || !desiredGroup || !currentGroup || currentGroup === desiredGroup) continue;
+        const replacementIndex = groups[desiredGroup].findIndex((candidateName) => {
+          const candidate = roster.find((item) => item.name === candidateName);
+          return candidate !== undefined && !CORE_GROUPS.has(candidate.group);
+        });
+        if (replacementIndex < 0) continue;
+        const replacement = groups[desiredGroup][replacementIndex];
+        const desiredNames = groups[desiredGroup].map((name, index) => index === replacementIndex ? playerName : name);
+        const currentNames = groups[currentGroup].map((name) => name === playerName ? replacement : name);
+        if (!completeExactAssignmentExists(roster, desiredNames, slots[desiredGroup], desiredGroup)
+          || !completeExactAssignmentExists(roster, currentNames, slots[currentGroup], currentGroup)) continue;
+        groups[desiredGroup] = desiredNames;
+        groups[currentGroup] = currentNames;
+      }
+      return { groups, assignedCore };
+    }
     failedCompletions.add(assignmentKey);
     return null;
   };
