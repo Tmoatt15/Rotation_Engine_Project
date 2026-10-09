@@ -560,6 +560,77 @@ type EndpointLineup = {
   assignedCore: Set<string>;
 };
 
+function solveEndpointLineupDeterministic(
+  roster: Player[],
+  formation: FormationCounts,
+  goalkeeperName: string,
+  seasonStarts: Record<string, Record<string, number>> = {},
+  preferredNames = new Set<string>(),
+  endpoint: 'first' | 'last' = 'last',
+): EndpointLineup | null {
+  const slots = formationSlots(formation);
+  const fieldSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group].map((slot) => ({ group, slot })));
+  const corePlayers = roster.filter((player) => player.available && CORE_GROUPS.has(player.group) && player.name !== goalkeeperName);
+  const groups: Record<'D' | 'M' | 'F', string[]> = { D: [], M: [], F: [] };
+  const assignedCore = new Set<string>();
+  const occupiedSlots = new Set<string>();
+  const assignedNames = new Set<string>();
+
+  if (corePlayers.length > fieldSlots.length) return null;
+
+  const groupPreference = (player: Player): Array<'D' | 'M' | 'F'> => {
+    const concrete = player.general_positions.filter((position): position is 'D' | 'M' | 'F' => ['D', 'M', 'F'].includes(position));
+    return concrete.length ? concrete : ['D', 'M', 'F'];
+  };
+  const orderedSlotsFor = (player: Player): Array<{ group: 'D' | 'M' | 'F'; slot: string; tier: number }> => fieldSlots
+    .filter(({ slot, group }) => !occupiedSlots.has(slot) && endpointAssignmentTier(player, slot, group) !== null)
+    .map(({ group, slot }) => ({ group, slot, tier: endpointAssignmentTier(player, slot, group)! }))
+    .sort((left, right) => {
+      const tierDifference = left.tier - right.tier;
+      if (tierDifference) return tierDifference;
+      const groupDifference = groupPreference(player).indexOf(left.group) - groupPreference(player).indexOf(right.group);
+      return groupDifference || left.slot.localeCompare(right.slot);
+    });
+
+  const orderedCore = [...corePlayers].sort((left, right) => {
+    const leftOptions = fieldSlots.filter(({ slot, group }) => endpointAssignmentTier(left, slot, group) !== null).length;
+    const rightOptions = fieldSlots.filter(({ slot, group }) => endpointAssignmentTier(right, slot, group) !== null).length;
+    return leftOptions - rightOptions || left.name.localeCompare(right.name);
+  });
+  for (const player of orderedCore) {
+    const choice = orderedSlotsFor(player)[0];
+    if (!choice || groups[choice.group].length >= formation[choice.group]) return null;
+    groups[choice.group].push(player.name);
+    assignedCore.add(player.name);
+    assignedNames.add(player.name);
+    occupiedSlots.add(choice.slot);
+  }
+
+  const startsFor = (player: Player): number => Object.values(seasonStarts[player.name] ?? {}).reduce((sum, count) => sum + count, 0);
+  const nonCore = roster
+    .filter((player) => player.available && player.name !== goalkeeperName && !assignedNames.has(player.name))
+    .sort((left, right) => {
+      const leftHeadroom = Math.max(0, left.hard_maximum_blocks - left.block_count);
+      const rightHeadroom = Math.max(0, right.hard_maximum_blocks - right.block_count);
+      const rotationalDifference = Number(left.group !== 'rotational') - Number(right.group !== 'rotational');
+      return Number(preferredNames.has(right.name)) - Number(preferredNames.has(left.name))
+        || (endpoint === 'first'
+          ? startsFor(left) - startsFor(right) || rotationalDifference
+          : rotationalDifference || rightHeadroom - leftHeadroom)
+        || left.name.localeCompare(right.name);
+    });
+  for (const { group, slot } of fieldSlots) {
+    if (occupiedSlots.has(slot)) continue;
+    const candidate = nonCore.find((player) => !assignedNames.has(player.name) && endpointAssignmentTier(player, slot, group) !== null);
+    if (!candidate) return null;
+    groups[group].push(candidate.name);
+    assignedNames.add(candidate.name);
+    occupiedSlots.add(slot);
+  }
+  if (!FIELD_GROUPS.every((group) => groups[group].length === formation[group])) return null;
+  return { groups, assignedCore };
+}
+
 function endpointAssignmentTier(player: Player, slot: string, group: PositionGroup): 0 | 1 | 2 | null {
   if (exclusionBlocksSlot(player.forbidden_positions, slot)) return null;
   if (player.primary_positions.includes(slot) && player.primary_positions.some((position) => position.toUpperCase() !== ANY_POSITION)) return 0;
@@ -568,7 +639,15 @@ function endpointAssignmentTier(player: Player, slot: string, group: PositionGro
   return null;
 }
 
-function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalkeeperName: string, seasonStarts: Record<string, Record<string, number>> = {}, preferredNames = new Set<string>(), maxSearchNodes = 100_000): EndpointLineup | null {
+function solveEndpointLineup(
+  roster: Player[],
+  formation: FormationCounts,
+  goalkeeperName: string,
+  seasonStarts: Record<string, Record<string, number>> = {},
+  preferredNames = new Set<string>(),
+  maxSearchNodes = 100_000,
+  endpoint: 'first' | 'last' = 'last',
+): EndpointLineup | null {
   const slots = formationSlots(formation);
   const fieldSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group].map((slot) => ({ group, slot })));
   const corePlayers = roster.filter((player) => player.available && CORE_GROUPS.has(player.group) && player.name !== goalkeeperName);
@@ -600,14 +679,19 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
       .sort((left, right) => {
         const leftStarts = Object.values(seasonStarts[left.name] ?? {}).reduce((sum, count) => sum + count, 0);
         const rightStarts = Object.values(seasonStarts[right.name] ?? {}).reduce((sum, count) => sum + count, 0);
+        const leftHeadroom = Math.max(0, left.hard_maximum_blocks - left.block_count);
+        const rightHeadroom = Math.max(0, right.hard_maximum_blocks - right.block_count);
+        const leftRotational = left.group === 'rotational' ? 0 : 1;
+        const rightRotational = right.group === 'rotational' ? 0 : 1;
         return Number(preferredNames.has(right.name)) - Number(preferredNames.has(left.name))
-          || leftStarts - rightStarts
+          || (endpoint === 'first' ? leftStarts - rightStarts || leftRotational - rightRotational : leftRotational - rightRotational || rightHeadroom - leftHeadroom)
           || left.name.localeCompare(right.name);
       });
     const fill = (index: number): boolean => {
       searchNodes += 1;
       if (searchNodes > maxSearchNodes) return false;
-      if (index === remainingSlots.length) return FIELD_GROUPS.every((group) => groups[group].length === formation[group]
+      if (index === remainingSlots.length) return assignedCore.size === corePlayers.length
+        && FIELD_GROUPS.every((group) => groups[group].length === formation[group]
         && completeExactAssignmentExists(roster, groups[group], slots[group], group));
       const { group, slot } = remainingSlots[index];
       for (const player of nonCore) {
@@ -642,12 +726,12 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
     failedCompletions.add(assignmentKey);
     return null;
   };
-  const search = (index: number, usedSlots: Set<string>, assignment: Map<string, { group: PositionGroup; slot: string; tier: number }>): void => {
+  const search = (index: number, usedSlots: Set<string>, assignment: Map<string, { group: PositionGroup; slot: string; tier: number }>): boolean => {
     searchNodes += 1;
-    if (searchNodes > maxSearchNodes) return;
+    if (searchNodes > maxSearchNodes) return false;
     if (index === corePlayers.length) {
       const completed = completeAssignment(assignment);
-      if (!completed) return;
+      if (!completed) return false;
       let primary = 0; let general = 0; let backup = 0;
       for (const value of assignment.values()) {
         if (value.tier === 0) primary += 1;
@@ -656,7 +740,7 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
       }
       const score: [number, number, number, number, string] = [assignment.size, primary, general, -backup, [...assignment.keys()].sort().join('|')];
       if (!best || compare(score, best.score) < 0) best = { ...completed, score };
-      return;
+      return true;
     }
     const player = corePlayers[index];
     const choices: Array<{ group: 'D' | 'M' | 'F'; slot: string; tier: 0 | 1 | 2 }> = [];
@@ -664,12 +748,12 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
       const tier = endpointAssignmentTier(player, slot, group);
       if (tier !== null && !usedSlots.has(slot)) choices.push({ group, slot, tier });
     }
-    for (const choice of choices) {
+    for (const choice of choices.sort((left, right) => left.tier - right.tier || left.group.localeCompare(right.group) || left.slot.localeCompare(right.slot))) {
       usedSlots.add(choice.slot); assignment.set(player.name, choice);
-      search(index + 1, usedSlots, assignment);
+      if (search(index + 1, usedSlots, assignment)) return true;
       assignment.delete(player.name); usedSlots.delete(choice.slot);
     }
-    search(index + 1, usedSlots, assignment);
+    return false;
   };
   search(0, new Set<string>(), new Map());
   return best ? { groups: best.groups, assignedCore: best.assignedCore } : null;
@@ -2200,13 +2284,13 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   for (const blockIndex of endpointBlocks) {
     if (blockIndex < Math.max(0, startBlock - 1) || blockIndex >= game.total_blocks) continue;
     const preferredNames = new Set(flatMapCompat(positions, (position) => plans[position][blockIndex]));
-    const solved = solveEndpointLineup(
+    const solved = solveEndpointLineupDeterministic(
       roster,
       formation,
       goalkeeperNames[blockIndex],
       game.season_position_starts,
       preferredNames,
-      startBlock > 1 ? 2_500 : 1_000,
+      blockIndex === 0 ? 'first' : 'last',
     );
     if (!solved) continue;
     endpointSolutions.set(blockIndex, solved);
@@ -2516,13 +2600,13 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   // reserved core player while trimming assignments to maximum limits.
   for (const blockIndex of endpointBlocks) {
     if (blockIndex < Math.max(0, startBlock - 1) || blockIndex >= game.total_blocks) continue;
-    const solved = solveEndpointLineup(
+    const solved = solveEndpointLineupDeterministic(
       roster,
       formation,
       goalkeeperNames[blockIndex],
       game.season_position_starts,
       new Set(flatMapCompat(positions, (position) => plans[position][blockIndex])),
-      startBlock > 1 ? 2_500 : 1_000,
+      blockIndex === 0 ? 'first' : 'last',
     );
     if (!solved) continue;
     plans.D[blockIndex] = solved.groups.D;

@@ -159,6 +159,18 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   }, [teamChangeVersion]));
 
   function updateGroup(name: string, group: Group) {
+    if (group === 'core') {
+      const fieldCapacity = positionRows.reduce((total, row) => total + row.exactPositions.filter((position) => position.toUpperCase() !== 'GK').length, 0);
+      const currentCoreFieldPlayers = players.filter((player) => player.group === 'core' && !isGoalkeeperAllowed(player)).length;
+      const selectedPlayer = players.find((player) => player.name === name);
+      if (selectedPlayer && selectedPlayer.group !== 'core' && !isGoalkeeperAllowed(selectedPlayer) && currentCoreFieldPlayers >= fieldCapacity) {
+        Alert.alert(
+          'Core player limit reached',
+          `Core is limited to ${fieldCapacity} field players. To add ${selectedPlayer.name} as core, move another core player to Rotational first.`,
+        );
+        return;
+      }
+    }
     const nextPlayers = players.map((player) => player.name === name ? { ...player, group } : player);
     setPlayers(nextPlayers);
     setMessage(null);
