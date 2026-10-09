@@ -66,5 +66,28 @@ export function computeSurplus(game: Game, roster: Player[], timeline: ScheduleB
   for (const [minimum, players] of [...belowMinimum.entries()].sort(([left], [right]) => left - right)) {
     result.warnings.push(`Below minimum (${minimum}): ${players.sort((left, right) => left.name.localeCompare(right.name)).map(({ name, count }) => `${name} (${count})`).join(', ')}`);
   }
+  const adjustedMinimums = new Map<string, number>();
+  for (const player of roster) {
+    const originalMinimum = player.group.startsWith('core')
+      ? minimumBlocksForPercentage(game.total_blocks, CORE_MIN)
+      : player.group === 'rotational'
+        ? minimumBlocksForPercentage(game.total_blocks, ROTATIONAL_MIN)
+        : minimumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MIN);
+    if (player.available && player.minimum_blocks < originalMinimum) {
+      const label = player.group.startsWith('core') ? 'core' : player.group === 'rotational' ? 'rotational' : 'developing';
+      const key = `${label}:${player.minimum_blocks}:${originalMinimum}`;
+      adjustedMinimums.set(key, (adjustedMinimums.get(key) ?? 0) + 1);
+    }
+  }
+  if (adjustedMinimums.size) {
+    const summary = [...adjustedMinimums.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, count]) => {
+        const [label, adjusted, original] = key.split(':');
+        return `${label} minimum ${adjusted} (was ${original}) for ${count} players`;
+      })
+      .join(', ');
+    result.warnings.push(`Minimums adjusted for roster size: ${summary}.`);
+  }
   return result;
 }

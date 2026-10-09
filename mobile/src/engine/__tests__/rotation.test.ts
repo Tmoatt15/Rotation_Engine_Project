@@ -1874,7 +1874,9 @@ describe('ten-game season availability simulation', () => {
     expect(result.timeline).toHaveLength(10);
     expect(Math.max(...corePlayers.map(fieldBlocks))).toBeLessThanOrEqual(7);
     expect(rotationalShortfalls.length).toBeGreaterThan(0);
-    expect(result.warnings.some((warning) => /^Below minimum \(5\): .+\(\d+\)/.test(warning))).toBe(true);
+    expect(result.warnings.some((warning) => /^Below minimum \(\d+\): .+\(\d+\)/.test(warning))).toBe(true);
+    expect(result.warnings.some((warning) => warning.startsWith('Roster minimums exceed capacity (113 needed, 100 available). Adjusted minimums:'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.startsWith('Minimums adjusted for roster size:'))).toBe(true);
   });
 
   it('protects the Test 6.0 defensive minimum for Yash', () => {

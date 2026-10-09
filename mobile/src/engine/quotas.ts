@@ -348,6 +348,43 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
   const rosterMinimumRequirement = roster
     .filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name))
     .reduce((total, player) => total + minimumFor(player), 0);
+  const shortagePlayers = roster.filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name));
+  let shortfall = Math.max(0, rosterMinimumRequirement - quotaFeasibility.legalAvailableCapacity);
+  const shortageTiers: Array<{ groups: string[]; floor: number }> = [
+    { groups: ['core', 'core_a', 'core_b'], floor: minimumBlocksForPercentage(game.total_blocks, ROTATIONAL_MIN) },
+    { groups: ['rotational'], floor: minimumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MIN) },
+    { groups: ['developing', 'developmental'], floor: 4 },
+  ];
+  for (const tier of shortageTiers) {
+    const candidates = shortagePlayers.filter((player) => tier.groups.includes(player.group)).sort((left, right) => left.name.localeCompare(right.name));
+    while (shortfall > 0 && candidates.some((player) => player.minimum_blocks > tier.floor)) {
+      for (const player of candidates) {
+        if (shortfall <= 0) break;
+        if (player.minimum_blocks <= tier.floor) continue;
+        player.minimum_blocks -= 1;
+        player.hard_minimum_blocks = player.minimum_blocks;
+        shortfall -= 1;
+      }
+    }
+  }
+  const adjustedMinimums = shortagePlayers
+    .filter((player) => player.minimum_blocks < minimumFor(player))
+    .reduce((groups, player) => {
+      const label = player.group.startsWith('core') ? 'core' : player.group === 'rotational' ? 'rotational' : 'developing';
+      const key = `${label}:${player.minimum_blocks}:${minimumFor(player)}`;
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+      return groups;
+    }, new Map<string, number>());
+  if (adjustedMinimums.size) {
+    const summary = [...adjustedMinimums.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, count]) => {
+        const [label, adjusted, original] = key.split(':');
+        return `${count} ${label} at ${adjusted} blocks (was ${original})`;
+      })
+      .join(', ');
+    result.warnings.push(`Roster minimums exceed capacity (${rosterMinimumRequirement} needed, ${quotaFeasibility.legalAvailableCapacity} available). Adjusted minimums: ${summary}.`);
+  }
   if (rosterMinimumRequirement > quotaFeasibility.legalAvailableCapacity) {
     result.warnings.push(`Below minimum (capacity): minimums require ${rosterMinimumRequirement} player-blocks, but only ${quotaFeasibility.legalAvailableCapacity} are available; shortfall will be distributed fairly.`);
   }
