@@ -246,6 +246,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     const player = byName.get(change.player);
     if (!player) continue;
     const appearances = (): number => timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(player.name)).length;
+    const blockCount = (name: string): number => timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(name)).length;
     while (appearances() > change.target_blocks!) {
       let replaced = false;
       for (let blockIndex = 0; blockIndex < timeline.timeline.length && !replaced; blockIndex += 1) {
@@ -257,7 +258,8 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
           if (playerIndex < 0) continue;
           const replacement = roster
             .filter((candidate) => candidate.available && !assigned.has(candidate.name) && candidate.name !== player.name
-              && timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(candidate.name)).length < candidate.hard_maximum_blocks
+              && blockCount(candidate.name) > candidate.minimum_blocks
+              && blockCount(candidate.name) < candidate.hard_maximum_blocks
               && eligiblePlayers(roster, group).some((item) => item.name === candidate.name))
             .sort((left, right) => left.field_blocks - right.field_blocks || left.name.localeCompare(right.name))
             .find((candidate) => {
@@ -284,6 +286,10 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
             .map((name, index) => ({ name, index }))
             .filter(({ name }) => name !== player.name
               && name !== approvedPlayerName
+              && (() => {
+                const donor = byName.get(name);
+                return donor !== undefined && blockCount(name) > donor.minimum_blocks;
+              })()
               && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name))
             .sort((left, right) => {
               if (!approvedPlayerName) return left.index - right.index;
@@ -330,7 +336,14 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
           if (!eligiblePlayers(roster, group).some((item) => item.name === approvedPlayerName)) continue;
           const replacementCandidates = block[group]
             .map((name, index) => ({ name, index }))
-            .filter(({ name }) => name !== approvedPlayerName && name !== arrivingPlayerName && !assigned.has(approvedPlayerName))
+            .filter(({ name }) => {
+              const donor = roster.find((player) => player.name === name);
+              return name !== approvedPlayerName
+                && name !== arrivingPlayerName
+                && donor !== undefined
+                && count(name) > donor.minimum_blocks
+                && !assigned.has(approvedPlayerName);
+            })
             .sort((left, right) => {
               const leftPlayer = roster.find((player) => player.name === left.name);
               const rightPlayer = roster.find((player) => player.name === right.name);
