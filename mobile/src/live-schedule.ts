@@ -35,6 +35,8 @@ export type LiveSchedule = {
   approval_candidates?: string[];
   recommended_approval_player?: string;
   approval_scope?: 'one_block' | 'entire_half';
+  needs_minimum_warning?: boolean;
+  minimum_warning?: string;
   blocks: ScheduleBlock[];
 };
 

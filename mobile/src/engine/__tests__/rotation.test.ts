@@ -739,7 +739,18 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.errors.filter((error) => /exceeds hard maximum|under minimum|under target/.test(error))).toEqual([]);
     expect(regenerated.errors.filter((error) => error.includes('under minimum'))).toEqual([]);
     expect(regenerated.needs_coach_approval).not.toBe(true);
+    expect(regenerated.errors.some((error) => error.startsWith('Block 1:') && error.includes('endpoint'))).toBe(false);
+    expect(regenerated.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })))
+      .toEqual(initial.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })));
     expect(fieldBlocks).toHaveLength(3);
+    if (latePlayer === 'Sid') {
+      const count = (timeline: typeof initial.timeline, name: string): number => timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(name)).length;
+      const reductions = rosterInputs
+        .map((player) => ({ name: player.name, reduction: count(initial.timeline, player.name) - count(regenerated.timeline, player.name) }))
+        .filter(({ reduction }) => reduction > 0);
+      expect(reductions.every(({ reduction }) => reduction === 1)).toBe(true);
+      expect(reductions.reduce((total, { reduction }) => total + reduction, 0)).toBe(3);
+    }
     expect(regenerated.timeline[4].D.concat(regenerated.timeline[4].M, regenerated.timeline[4].F)).toContain(latePlayer);
   });
 
@@ -814,6 +825,10 @@ describe('goalkeeper and minimum protection', () => {
     const fieldBlocks = regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer));
     const errors = regenerated.errors.filter((error) => !error.includes('under minimum') && !error.includes('under target'));
 
+    if (latePlayer === 'Sid' && arrivalBlock === 5) {
+      expect(regenerated.needs_coach_approval).toBeFalsy();
+    }
+
     const caseKey = `${latePlayer}:${arrivalBlock}`;
     const approvalCase = latePlayer === 'Blake' && arrivalBlock === 3
       ? 'entire_half'
@@ -824,11 +839,9 @@ describe('goalkeeper and minimum protection', () => {
           : latePlayer === 'Jonathan' && arrivalBlock === 5
             ? 'one_block'
             : latePlayer === 'Hanshith' && arrivalBlock === 5
-              ? 'one_block'
-              : latePlayer === 'Sid' && arrivalBlock === 5
                 ? 'one_block'
-              : latePlayer === 'Max' && arrivalBlock === 5
-                ? 'one_block'
+                : latePlayer === 'Max' && arrivalBlock === 5
+                  ? 'one_block'
                 : null;
     if (approvalCase) {
       // Update 5: constrained late arrivals require explicit coach approval

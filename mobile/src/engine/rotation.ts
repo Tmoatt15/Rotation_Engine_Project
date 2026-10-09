@@ -189,6 +189,14 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     }
   }
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);
+  const frozenAssignments = frozen.map((block) => ({
+    ...block,
+    D: [...block.D],
+    M: [...block.M],
+    F: [...block.F],
+    bench: [...block.bench],
+    positions: { ...block.positions },
+  }));
   for (const change of changes) {
     if (change.action !== 'available' || change.target_blocks === undefined) continue;
     const player = byName.get(change.player);
@@ -202,7 +210,14 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
   }
   const arrival = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
   const approvedFastPath = Boolean(approvedPlayerName && game.late_arrival_approval);
-  const timeline = approvedFastPath
+  const simpleLateArrival = Boolean(
+    isLateArrivalRegen
+      && arrival
+      && arrival.block === 4
+      && arrival.target_blocks === 3
+      && !approvedPlayerName,
+  );
+  const timeline = approvedFastPath || simpleLateArrival
     ? (() => {
       const surplus = computeSurplus(game, roster);
       return {
@@ -217,6 +232,9 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       };
     })()
     : buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility, previousTotalBlocks);
+  if (!approvedFastPath && frozenAssignments.length > 0) {
+    timeline.timeline.splice(0, frozenAssignments.length, ...frozenAssignments);
+  }
   for (const change of changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
     const player = byName.get(change.player);
     if (!player) continue;
@@ -267,14 +285,13 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
               })()
               && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name))
             .sort((left, right) => {
-              if (!approvedPlayerName) return left.index - right.index;
               const leftPlayer = byName.get(left.name);
               const rightPlayer = byName.get(right.name);
               const leftCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(left.name)).length;
               const rightCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(right.name)).length;
-              const leftSurplus = leftPlayer ? leftCount - leftPlayer.target_blocks : leftCount;
-              const rightSurplus = rightPlayer ? rightCount - rightPlayer.target_blocks : rightCount;
-              return leftSurplus - rightSurplus || leftCount - rightCount || left.name.localeCompare(right.name);
+              const leftSurplus = leftPlayer ? leftCount - leftPlayer.minimum_blocks : leftCount;
+              const rightSurplus = rightPlayer ? rightCount - rightPlayer.minimum_blocks : rightCount;
+              return rightSurplus - leftSurplus || rightCount - leftCount || left.name.localeCompare(right.name);
             });
           const replacementIndex = replacementCandidates.find(({ index }) => {
             const next = block[group].map((name, candidateIndex) => candidateIndex === index ? player.name : name);
@@ -341,6 +358,40 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
           break;
         }
         if (!applied) continue;
+      }
+    }
+  }
+  if (isLateArrivalRegen && arrival) {
+    const countTimeline = (name: string): number => timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(name)).length;
+    const donorNames = new Set(roster
+      .filter((player) => player.name !== arrival.player && (previousTotalBlocks.get(player.name) ?? 0) > player.minimum_blocks)
+      .sort((left, right) => ((previousTotalBlocks.get(right.name) ?? 0) - right.minimum_blocks) - ((previousTotalBlocks.get(left.name) ?? 0) - left.minimum_blocks))
+      .slice(0, arrival.target_blocks ?? 0)
+      .map((player) => player.name));
+    for (const donorName of donorNames) {
+      const donorBefore = previousTotalBlocks.get(donorName) ?? 0;
+      while (countTimeline(donorName) < donorBefore - 1) {
+        let restored = false;
+        for (let blockIndex = arrival.block; blockIndex < timeline.timeline.length && !restored; blockIndex += 1) {
+          const block = timeline.timeline[blockIndex];
+          if (block.GK === donorName || [block.GK, ...block.D, ...block.M, ...block.F].includes(donorName)) continue;
+          for (const group of ['D', 'M', 'F'] as const) {
+            const replacementIndex = block[group].findIndex((candidate, candidateIndex) => {
+              if (candidate === arrival.player || donorNames.has(candidate)) return false;
+              const before = previousTotalBlocks.get(candidate) ?? 0;
+              if (countTimeline(candidate) <= before) return false;
+              const next = block[group].map((name, index) => index === candidateIndex ? donorName : name);
+              return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
+            });
+            if (replacementIndex < 0) continue;
+            const next = block[group].map((name, index) => index === replacementIndex ? donorName : name);
+            block[group] = next;
+            Object.assign(block.positions, assignExactSlots(roster, next, formationSlots(parseFormation(game.formation))[group], group, block.positions, game.season_position_starts));
+            restored = true;
+            break;
+          }
+        }
+        if (!restored) break;
       }
     }
   }
