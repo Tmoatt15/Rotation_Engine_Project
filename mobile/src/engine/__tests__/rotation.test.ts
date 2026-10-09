@@ -1856,6 +1856,7 @@ describe('ten-game season availability simulation', () => {
     }, players);
     const fieldBlocks = (name: string): number => result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length;
 
+    expect(Object.values(result.timeline[0].positions)).toContain('Alvin');
     expect(fieldBlocks('Sawyer')).toBeLessThanOrEqual(8);
     expect(fieldBlocks('Artur')).toBeLessThanOrEqual(8);
     expect(fieldBlocks('Jonathan')).toBeLessThanOrEqual(8);
@@ -1914,6 +1915,9 @@ describe('ten-game season availability simulation', () => {
       }, players);
       expect(availablePlayerNames.length).toBe(11 + ((gameNumber - 1) % 9));
       expect(result.timeline).toHaveLength(10);
+      if (availablePlayerNames.includes('Alvin')) {
+        expect(Object.values(result.timeline[0].positions)).toContain('Alvin');
+      }
       result.timeline.forEach((block) => {
         const assignedNames = Object.values(block.positions).filter((name) => !['UNASSIGNED', 'NO GK AVAILABLE'].includes(name));
         expect(new Set(assignedNames).size).toBe(assignedNames.length);
