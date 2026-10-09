@@ -743,6 +743,14 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })))
       .toEqual(initial.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })));
     expect(fieldBlocks).toHaveLength(3);
+    if (latePlayer === 'Sid') {
+      const count = (timeline: typeof initial.timeline, name: string): number => timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(name)).length;
+      const reductions = rosterInputs
+        .map((player) => ({ name: player.name, reduction: count(initial.timeline, player.name) - count(regenerated.timeline, player.name) }))
+        .filter(({ reduction }) => reduction > 0);
+      expect(reductions.every(({ reduction }) => reduction === 1)).toBe(true);
+      expect(reductions.reduce((total, { reduction }) => total + reduction, 0)).toBe(3);
+    }
     expect(regenerated.timeline[4].D.concat(regenerated.timeline[4].M, regenerated.timeline[4].F)).toContain(latePlayer);
   });
 
