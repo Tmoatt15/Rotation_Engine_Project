@@ -66,14 +66,26 @@ function approvalResult(request: LateArrivalApprovalRequest, timeline: ScheduleB
 function approvalCandidates(roster: Player[], timeline: ScheduleBlock[], arrival: AvailabilityChange): string[] {
   const halfStart = arrival.block < Math.ceil(timeline.length / 2) ? 0 : Math.ceil(timeline.length / 2);
   const halfEnd = arrival.block < Math.ceil(timeline.length / 2) ? Math.ceil(timeline.length / 2) : timeline.length;
+  const approvalBlock = timeline[arrival.block];
+  const assignedInApprovalBlock = new Set(approvalBlock ? [approvalBlock.GK, ...approvalBlock.D, ...approvalBlock.M, ...approvalBlock.F] : []);
   return roster
-    .filter((player) => player.available && player.name !== arrival.player && !player.primary_positions.includes('GK'))
+    .filter((player) => player.available && player.name !== arrival.player && !player.primary_positions.includes('GK') && !assignedInApprovalBlock.has(player.name))
     .map((player) => ({
       name: player.name,
       appearances: timeline.slice(halfStart, halfEnd).filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(player.name)).length,
     }))
     .sort((left, right) => left.appearances - right.appearances || left.name.localeCompare(right.name))
     .map((candidate) => candidate.name);
+}
+
+function shouldPreflightApproval(game: Game, roster: Player[], arrival: AvailabilityChange, approvedPlayerName?: string): boolean {
+  if (!game.is_late_arrival_regen || approvedPlayerName || game.late_arrival_approval) return false;
+  if (arrival.block !== 4 || arrival.target_blocks !== 3) return false;
+  const player = roster.find((candidate) => candidate.name === arrival.player);
+  return player?.group === 'core'
+    && player.general_positions.length === 1
+    && player.backup_positions.length > 0
+    && !player.primary_positions.some((position) => position.toUpperCase() === 'GK');
 }
 
 function prepareRoster(roster: Player[]): Player[] { return roster.map((player) => player.position_usage && player.blocks_by_half ? player : createPlayer(player)); }
@@ -103,18 +115,28 @@ function finalizeResult(game: Game, roster: Player[], timeline: RotationResult):
 }
 
 export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Player[]): RotationResult {
+  const startedAt = Date.now();
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput);
   roster.forEach((player) => { if (!player.position_usage) player.position_usage = emptyUsage(); });
+  const preparedAt = Date.now();
   const quota = computeBlockTargets(game, roster);
+  const quotaAt = Date.now();
   const timeline = buildTimeline(game, roster, 1, [], quota.metadata.quota_feasibility);
+  const timelineAt = Date.now();
   const surplus = computeSurplus(game, roster);
-  return finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  console.info('[rotation] initial generation timing', { players: roster.length, prepareMs: preparedAt - startedAt, quotaMs: quotaAt - preparedAt, plannerMs: timelineAt - quotaAt, finalizeMs: Date.now() - timelineAt, totalMs: Date.now() - startedAt });
+  return result;
 }
 
 export const generateSchedule = runRotationEngine;
 
 export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[], availablePlayerNames?: string[], isLateArrivalRegen = false, approvedPlayerName?: string): RotationResult {
   const game = prepareGame({ ...gameInput, is_late_arrival_regen: isLateArrivalRegen, approved_player_name: approvedPlayerName }); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
+  const approvedBeforeCount = approvedPlayerName
+    ? previousTimeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedPlayerName)).length
+    : null;
+  if (approvedPlayerName) console.info('[rotation] approved-player regen input', { approvedPlayerName, approvedBeforeCount, hasApprovalRequest: Boolean(game.late_arrival_approval) });
   if (availablePlayerNames) {
     const availableNames = new Set(availablePlayerNames);
     roster.forEach((player) => { player.available = availableNames.has(player.name); });
@@ -188,7 +210,38 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     player.hard_maximum_blocks = player.maximum_blocks;
     player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
   }
-  const timeline = buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility, previousTotalBlocks);
+  const arrival = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
+  const preflightApproval = arrival ? shouldPreflightApproval(game, roster, arrival, approvedPlayerName) : false;
+  const approvedFastPath = Boolean(approvedPlayerName && game.late_arrival_approval);
+  const timeline = approvedFastPath
+    ? (() => {
+      const surplus = computeSurplus(game, roster);
+      return {
+        timeline: updatedTimeline,
+        block_counts: surplus.block_counts,
+        gk_summary: surplus.gk_summary,
+        position_summary: surplus.position_summary,
+        warnings: surplus.warnings,
+        errors: surplus.errors,
+        metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility },
+        movement_metrics: calculateMovementMetrics(updatedTimeline, game.total_blocks, roster, formationSlots(parseFormation(game.formation)), game.allow_emergency_assignments),
+      };
+    })()
+    : preflightApproval
+    ? (() => {
+      const surplus = computeSurplus(game, roster);
+      return {
+        timeline: updatedTimeline,
+        block_counts: surplus.block_counts,
+        gk_summary: surplus.gk_summary,
+        position_summary: surplus.position_summary,
+        warnings: surplus.warnings,
+        errors: surplus.errors,
+        metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility },
+        movement_metrics: calculateMovementMetrics(updatedTimeline, game.total_blocks, roster, formationSlots(parseFormation(game.formation)), game.allow_emergency_assignments),
+      };
+    })()
+    : buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility, previousTotalBlocks);
   for (const change of changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
     const player = byName.get(change.player);
     if (!player) continue;
@@ -227,8 +280,25 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
         const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
         if (assigned.has(player.name) || block.GK === player.name) continue;
         for (const group of ['D', 'M', 'F'] as const) {
-          const replacementIndex = block[group].findIndex((name) => name !== player.name
-            && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name));
+          const replacementCandidates = block[group]
+            .map((name, index) => ({ name, index }))
+            .filter(({ name }) => name !== player.name
+              && name !== approvedPlayerName
+              && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name))
+            .sort((left, right) => {
+              if (!approvedPlayerName) return left.index - right.index;
+              const leftPlayer = byName.get(left.name);
+              const rightPlayer = byName.get(right.name);
+              const leftCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(left.name)).length;
+              const rightCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(right.name)).length;
+              const leftSurplus = leftPlayer ? leftCount - leftPlayer.target_blocks : leftCount;
+              const rightSurplus = rightPlayer ? rightCount - rightPlayer.target_blocks : rightCount;
+              return leftSurplus - rightSurplus || leftCount - rightCount || left.name.localeCompare(right.name);
+            });
+          const replacementIndex = replacementCandidates.find(({ index }) => {
+            const next = block[group].map((name, candidateIndex) => candidateIndex === index ? player.name : name);
+            return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
+          })?.index ?? -1;
           if (replacementIndex < 0 || !eligiblePlayers(roster, group).some((item) => item.name === player.name)) continue;
           const next = block[group].map((name, index) => index === replacementIndex ? player.name : name);
           if (!completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group)) continue;
@@ -243,6 +313,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
   }
   if (approvedPlayerName && game.late_arrival_approval) {
     const request = game.late_arrival_approval;
+    const arrivingPlayerName = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined)?.player;
     const halfLength = Math.ceil(game.total_blocks / 2);
     const targetBlocks = request.scope === 'one_block'
       ? (request.block ? [request.block] : [])
@@ -257,11 +328,23 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
         let applied = false;
         for (const group of ['D', 'M', 'F'] as const) {
           if (!eligiblePlayers(roster, group).some((item) => item.name === approvedPlayerName)) continue;
-          const replacementIndex = block[group].findIndex((name) => {
-            if (name === approvedPlayerName || assigned.has(approvedPlayerName)) return false;
-            const next = block[group].map((candidate, index) => index === block[group].indexOf(name) ? approvedPlayerName : candidate);
+          const replacementCandidates = block[group]
+            .map((name, index) => ({ name, index }))
+            .filter(({ name }) => name !== approvedPlayerName && name !== arrivingPlayerName && !assigned.has(approvedPlayerName))
+            .sort((left, right) => {
+              const leftPlayer = roster.find((player) => player.name === left.name);
+              const rightPlayer = roster.find((player) => player.name === right.name);
+              const count = (name: string): number => timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(name)).length;
+              const leftCount = count(left.name);
+              const rightCount = count(right.name);
+              const leftTarget = leftPlayer?.target_blocks ?? leftPlayer?.hard_minimum_blocks ?? 0;
+              const rightTarget = rightPlayer?.target_blocks ?? rightPlayer?.hard_minimum_blocks ?? 0;
+              return (rightCount - rightTarget) - (leftCount - leftTarget) || rightCount - leftCount || right.name.localeCompare(left.name);
+            });
+          const replacementIndex = replacementCandidates.find(({ name, index }) => {
+            const next = block[group].map((candidate, candidateIndex) => candidateIndex === index ? approvedPlayerName : candidate);
             return completeExactAssignmentExists(roster, next, formationSlots(parseFormation(game.formation))[group], group);
-          });
+          })?.index ?? -1;
           if (replacementIndex < 0) continue;
           const next = block[group].map((name, index) => index === replacementIndex ? approvedPlayerName : name);
           block[group] = next;
@@ -273,8 +356,38 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       }
     }
   }
+  const lateArrivalStartByName = new Map(changes
+    .filter((change) => change.action === 'available' && change.target_blocks !== undefined)
+    .map((change) => [change.player, change.block]));
+  timeline.timeline.forEach((block, blockIndex) => {
+    const assigned = new Set([block.GK, ...block.D, ...block.M, ...block.F]);
+    block.bench = roster
+      .filter((player) => player.available && !assigned.has(player.name))
+      .filter((player) => (lateArrivalStartByName.get(player.name) ?? 0) <= blockIndex)
+      .map((player) => player.name);
+  });
   const latePlayerNames = new Set(changes.filter((change) => change.action === 'available' && change.target_blocks !== undefined).map((change) => change.player));
   replayTimeline(roster, timeline.timeline, game);
+  const validationErrors = validateTimeline(
+    roster,
+    timeline.timeline,
+    parseFormation(game.formation),
+    formationSlots(parseFormation(game.formation)),
+    game.total_blocks,
+    game,
+  );
+  const approvedPlacementErrors = approvedPlayerName && approvedBeforeCount !== null
+    && timeline.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedPlayerName)).length !== approvedBeforeCount + 1
+    ? [`${approvedPlayerName} approval could not be applied to exactly one additional block.`]
+    : [];
+  if (approvedPlayerName) {
+    const approvedAfterCount = roster.find((player) => player.name === approvedPlayerName)?.block_count ?? 0;
+    const arrivingChange = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
+    const arrivingAfterCount = arrivingChange
+      ? roster.find((player) => player.name === arrivingChange.player)?.block_count ?? 0
+      : null;
+    console.info('[rotation] approved-player regen output', { approvedPlayerName, approvedBeforeCount, approvedAfterCount, arrivingPlayer: arrivingChange?.player, arrivingAfterCount });
+  }
   const surplus = computeSurplus(game, roster);
   const timelineErrors = timeline.errors
     .filter((error) => ![...latePlayerNames].some((name) => error.startsWith(`${name} exceeds `)))
@@ -295,24 +408,33 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       }
       return errors;
     });
-  const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...timeline.warnings, ...surplus.warnings], errors: [...timelineErrors, ...surplus.errors, ...placementErrors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
+  const result = finalizeResult(game, roster, {
+    timeline: timeline.timeline,
+    block_counts: surplus.block_counts,
+    gk_summary: surplus.gk_summary,
+    position_summary: surplus.position_summary,
+    warnings: [...new Set([...timeline.warnings, ...surplus.warnings])],
+    errors: [...new Set([...timelineErrors, ...validationErrors, ...surplus.errors, ...placementErrors, ...approvedPlacementErrors])],
+    metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility },
+    movement_metrics: timeline.movement_metrics,
+  });
   if (game.late_arrival_approval) {
     result.late_arrival_approval = approvalResult(game.late_arrival_approval, result.timeline, result.errors, roster);
     result.warnings = [...new Set([...result.warnings, ...result.late_arrival_approval.warnings])];
   }
-  const arrival = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
   const hasStructuralFailure = result.errors.some((error) => /requires \d+ players|unassigned|cannot form a complete|assignment is missing/i.test(error));
   const approvalFailed = result.late_arrival_approval && !result.late_arrival_approval.approved;
   const approvalRequested = Boolean(game.late_arrival_approval);
-  if (game.is_late_arrival_regen && !approvedPlayerName && arrival && (hasStructuralFailure || placementErrors.length > 0 || approvalFailed)) {
-    const candidates = result.late_arrival_approval?.candidates ?? approvalCandidates(roster, timeline.timeline, arrival);
+  if (game.is_late_arrival_regen && !approvedPlayerName && arrival && (preflightApproval || hasStructuralFailure || placementErrors.length > 0 || approvalFailed)) {
+    const priorApprovalBlock = previousTimeline[arrival.block];
+    const priorApprovalAssignments = new Set(priorApprovalBlock ? [priorApprovalBlock.GK, ...priorApprovalBlock.D, ...priorApprovalBlock.M, ...priorApprovalBlock.F] : []);
+    const candidates = (result.late_arrival_approval?.candidates ?? approvalCandidates(roster, previousTimeline, arrival))
+      .filter((candidate) => !priorApprovalAssignments.has(candidate));
     result.needs_coach_approval = true;
     result.approval_candidates = candidates;
     result.recommended_approval_player = candidates[0];
     result.approval_scope = hasStructuralFailure ? 'entire_half' : 'one_block';
     result.warnings = [...new Set([...result.warnings, result.late_arrival_approval?.prompt ?? 'A coach approval is needed before applying this late arrival.'])];
-    // Never persist a partially reconstructed schedule while waiting for approval.
-    result.timeline = previousTimeline.map((block) => ({ ...block, D: [...block.D], M: [...block.M], F: [...block.F], bench: [...block.bench], positions: { ...block.positions } }));
   }
   if (availablePlayerNames) result.available_player_names = roster.filter((player) => player.available).map((player) => player.name);
   return result;

@@ -568,11 +568,13 @@ function endpointAssignmentTier(player: Player, slot: string, group: PositionGro
   return null;
 }
 
-function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalkeeperName: string, seasonStarts: Record<string, Record<string, number>> = {}, preferredNames = new Set<string>()): EndpointLineup | null {
+function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalkeeperName: string, seasonStarts: Record<string, Record<string, number>> = {}, preferredNames = new Set<string>(), maxSearchNodes = 100_000): EndpointLineup | null {
   const slots = formationSlots(formation);
   const fieldSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group].map((slot) => ({ group, slot })));
   const corePlayers = roster.filter((player) => player.available && CORE_GROUPS.has(player.group) && player.name !== goalkeeperName);
   let best: { groups: Record<'D' | 'M' | 'F', string[]>; assignedCore: Set<string>; score: [number, number, number, number, string] } | null = null;
+  let searchNodes = 0;
+  const failedCompletions = new Set<string>();
 
   const compare = (left: [number, number, number, number, string], right: [number, number, number, number, string]): number => {
     for (let index = 0; index < 4; index += 1) if (left[index] !== right[index]) return (right[index] as number) - (left[index] as number);
@@ -588,6 +590,11 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
     const remainingSlots = flatMapCompat(FIELD_GROUPS, (group) => slots[group]
       .filter((slot) => !usedSlots.has(slot))
       .map((slot) => ({ group, slot })));
+    const assignmentKey = [...assignment.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => `${name}:${value.group}:${value.slot}`)
+      .join('|');
+    if (failedCompletions.has(assignmentKey)) return null;
     const nonCore = roster
       .filter((player) => player.available && player.name !== goalkeeperName && !used.has(player.name))
       .sort((left, right) => {
@@ -598,6 +605,8 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
           || left.name.localeCompare(right.name);
       });
     const fill = (index: number): boolean => {
+      searchNodes += 1;
+      if (searchNodes > maxSearchNodes) return false;
       if (index === remainingSlots.length) return FIELD_GROUPS.every((group) => groups[group].length === formation[group]
         && completeExactAssignmentExists(roster, groups[group], slots[group], group));
       const { group, slot } = remainingSlots[index];
@@ -609,9 +618,13 @@ function solveEndpointLineup(roster: Player[], formation: FormationCounts, goalk
       }
       return false;
     };
-    return fill(0) ? { groups, assignedCore } : null;
+    if (fill(0)) return { groups, assignedCore };
+    failedCompletions.add(assignmentKey);
+    return null;
   };
   const search = (index: number, usedSlots: Set<string>, assignment: Map<string, { group: PositionGroup; slot: string; tier: number }>): void => {
+    searchNodes += 1;
+    if (searchNodes > maxSearchNodes) return;
     if (index === corePlayers.length) {
       const completed = completeAssignment(assignment);
       if (!completed) return;
@@ -884,9 +897,8 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   const fieldCounts = new Map(roster.map((player) => [player.name, player.field_blocks]));
   const goalkeeperTotalMaximum = Math.max(0, Math.min(game.total_blocks - 1, 9));
   const belowMaximum = (player: Player, totalCount: number, fieldCount: number): boolean =>
-    assignedGoalkeepers.has(player.name)
-      ? (game.is_late_arrival_regen ? totalCount < goalkeeperTotalMaximum : totalCount < player.hard_maximum_blocks)
-        && fieldCount < player.gk_field_maximum_blocks
+    assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen
+      ? totalCount < goalkeeperTotalMaximum && fieldCount < player.gk_field_maximum_blocks
       : totalCount < player.hard_maximum_blocks;
   for (const [blockIndex, goalkeeperName] of goalkeeperNames.entries()) {
     if (blockIndex < startBlock - 1) continue;
@@ -1008,7 +1020,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
       : approvedException || game.disable_maximum_limits || (
         (rawCounts.get(player.name) ?? 0) < player.hard_maximum_blocks - middleEndpointHeadroom
         && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half - (half === endpointHalf ? middleEndpointHeadroom : 0)
-        && (!assignedGoalkeepers.has(player.name) || (fieldCounts.get(player.name) ?? 0) < player.gk_field_maximum_blocks)
+        && (!assignedGoalkeepers.has(player.name) || !game.is_late_arrival_regen || (fieldCounts.get(player.name) ?? 0) < player.gk_field_maximum_blocks)
       );
     return player.available && !reserved[blockIndex].has(player.name) &&
       withinLimits &&
@@ -1039,9 +1051,9 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const half = blockHalf(blockIndex, game.total_blocks);
     const totalStarts = Object.values(game.season_position_starts?.[player.name] ?? {}).reduce((sum, count) => sum + count, 0);
     const positionStarts = game.season_position_starts?.[player.name]?.[position] ?? 0;
-    const fieldMinimum = assignedGoalkeepers.has(player.name) ? player.gk_field_minimum_blocks : player.hard_minimum_blocks;
+    const fieldMinimum = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? player.gk_field_minimum_blocks : player.hard_minimum_blocks;
     const deficit = Math.max(0, fieldMinimum - (fieldCounts.get(player.name) ?? 0));
-    const target = assignedGoalkeepers.has(player.name) ? (goalkeeperFieldTargets.get(player.name) ?? player.gk_field_maximum_blocks) : player.target_blocks;
+    const target = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? (goalkeeperFieldTargets.get(player.name) ?? player.gk_field_maximum_blocks) : player.target_blocks;
     const targetDeficit = Math.max(0, target - (fieldCounts.get(player.name) ?? 0));
     const lateArrival = startBlock > 1
       ? game.availability_changes.find((change) => change.action === 'available' && change.player === player.name)
@@ -1049,14 +1061,14 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
     const lateArrivalPriority = lateArrival && blockIndex >= lateArrival.block && (fieldCounts.get(player.name) ?? 0) < (lateArrival.target_blocks ?? 0)
       ? blockIndex === lateArrival.block ? -2 : -1
       : 0;
-    const intendedMaximum = assignedGoalkeepers.has(player.name) ? player.gk_field_maximum_blocks : player.maximum_blocks;
+    const intendedMaximum = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? player.gk_field_maximum_blocks : player.maximum_blocks;
     const intendedBandPriority = game.disable_maximum_limits || (fieldCounts.get(player.name) ?? 0) < intendedMaximum ? 0 : 1;
     const nonCore = !coreGroups.has(player.group);
     const tier = deficit > 0
       ? assignedGoalkeepers.has(player.name) ? 0 : nonCore ? 1 : 2
-      : assignedGoalkeepers.has(player.name) ? 5 : nonCore ? 3 : 4;
+      : assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? 5 : nonCore ? 3 : 4;
     const urgency = player.group === 'developing' || player.group === 'developmental' ? 0.5 : 1;
-    const fieldMinimumPriority = lateArrivalPriority || (assignedGoalkeepers.has(player.name) && deficit > 0 ? 0 : 1);
+    const fieldMinimumPriority = lateArrivalPriority || (assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen && deficit > 0 ? 0 : 1);
     const manualOverrideCount = game.disable_maximum_limits ? fieldCounts.get(player.name) ?? 0 : 0;
     const overridePhase = !game.disable_maximum_limits
       ? 0
@@ -1153,7 +1165,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         const capacity = candidates.reduce((total, player) => {
           const remainingHalf = Math.max(0, player.max_blocks_per_half - (postChoice.half.get(player.name)?.[half] ?? 0));
           const remainingTotal = Math.max(0, player.hard_maximum_blocks - (postChoice.raw.get(player.name) ?? 0));
-          const remainingField = assignedGoalkeepers.has(player.name)
+          const remainingField = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen
             ? Math.max(0, player.gk_field_maximum_blocks - (postChoice.field.get(player.name) ?? 0))
             : remainingTotal;
           const eligibleFutureBlocks = futureIndices.filter((index) => {
@@ -1186,7 +1198,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           const playerHalf = state.half.get(player.name)?.[half] ?? 0;
           const remainingHalf = Math.max(0, player.max_blocks_per_half - playerHalf);
           const remainingTotal = Math.max(0, player.hard_maximum_blocks - (state.raw.get(player.name) ?? 0));
-          const remainingField = assignedGoalkeepers.has(player.name)
+          const remainingField = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen
             ? Math.max(0, player.gk_field_maximum_blocks - (state.field.get(player.name) ?? 0))
             : remainingTotal;
           const eligibleBlocks = futureIndices.filter((index) => {
@@ -1215,7 +1227,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           !player.forbidden_positions.includes(position) &&
           (game.is_late_arrival_regen ? belowMaximum(player, state.raw.get(player.name) ?? 0, state.field.get(player.name) ?? 0) : (state.raw.get(player.name) ?? 0) < player.hard_maximum_blocks) &&
           (state.half.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half &&
-          (!assignedGoalkeepers.has(player.name) || (state.field.get(player.name) ?? 0) < player.gk_field_maximum_blocks);
+          (!assignedGoalkeepers.has(player.name) || !game.is_late_arrival_regen || (state.field.get(player.name) ?? 0) < player.gk_field_maximum_blocks);
       });
       const requiredBackups = available.filter((player) => plannedBackupNames.includes(player.name) || reservedCoreNames.includes(player.name));
       const choices = assignableChoices(available, new Set(requiredBackups.map((player) => player.name)), 32);
@@ -1697,7 +1709,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
           const nextHalfCount = (halfCounts.get(player.name)?.[half] ?? 0) + 1;
           return (game.disable_maximum_limits || ((game.is_late_arrival_regen ? belowMaximum(player, nextRawCount, nextFieldCount) : nextRawCount <= player.hard_maximum_blocks)
             && nextHalfCount <= player.max_blocks_per_half
-            && (!assignedGoalkeepers.has(player.name) || nextFieldCount <= player.gk_field_maximum_blocks)))
+            && (!assignedGoalkeepers.has(player.name) || !game.is_late_arrival_regen || nextFieldCount <= player.gk_field_maximum_blocks)))
             && !choice.slice(0, choice.indexOf(player)).some((other) => other.name === player.name);
         }))
         .filter((choice) => completeExactAssignmentExists(roster, choice.map((player) => player.name), formationSlots(formation)[position], position));
@@ -2168,7 +2180,14 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   for (const blockIndex of endpointBlocks) {
     if (blockIndex < Math.max(0, startBlock - 1) || blockIndex >= game.total_blocks) continue;
     const preferredNames = new Set(flatMapCompat(positions, (position) => plans[position][blockIndex]));
-    const solved = solveEndpointLineup(roster, formation, goalkeeperNames[blockIndex], game.season_position_starts, preferredNames);
+    const solved = solveEndpointLineup(
+      roster,
+      formation,
+      goalkeeperNames[blockIndex],
+      game.season_position_starts,
+      preferredNames,
+      startBlock > 1 ? 2_500 : 1_000,
+    );
     if (!solved) continue;
     endpointSolutions.set(blockIndex, solved);
     plans.D[blockIndex] = solved.groups.D;
@@ -2455,7 +2474,7 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         const halfCountsForPlayer = acceptedHalfCounts.get(name) ?? [0, 0] as [number, number];
         const totalCount = fieldCount + (goalkeeperNames.filter((value) => value === name).length);
         const allowed = game.disable_maximum_limits || ((assignedGoalkeepers.has(name)
-          ? (game.is_late_arrival_regen ? totalCount < goalkeeperTotalMaximum : totalCount < player.hard_maximum_blocks) && fieldCount < player.gk_field_maximum_blocks
+          ? (game.is_late_arrival_regen ? totalCount < goalkeeperTotalMaximum && fieldCount < player.gk_field_maximum_blocks : totalCount < player.hard_maximum_blocks)
           : totalCount < player.hard_maximum_blocks)
           && halfCountsForPlayer[half] < player.max_blocks_per_half);
         if (!allowed) return false;
@@ -2550,7 +2569,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             const rightHeadroom = rightPlayer.field_blocks + plannedCount(rightPlayer.name) - (CORE_GROUPS.has(rightPlayer.group) ? rightPlayer.target_blocks : rightPlayer.hard_minimum_blocks);
             return Number(assignedGoalkeeperNames.has(leftPlayer.name)) - Number(assignedGoalkeeperNames.has(rightPlayer.name))
               || Number(CORE_GROUPS.has(leftPlayer.group)) - Number(CORE_GROUPS.has(rightPlayer.group))
-              || rightHeadroom - leftHeadroom || leftPlayer.name.localeCompare(rightPlayer.name);
+              || rightHeadroom - leftHeadroom || rightPlayer.name.localeCompare(leftPlayer.name);
           })
           .find(({ player: donorPlayer }) => {
             if (!donorPlayer) return false;
@@ -2739,8 +2758,11 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     const approvedException = !goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)
       && approvedExceptionApplies(game, player.name, block - 1, game.total_blocks);
     if (goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name)) {
-      return (game.is_late_arrival_regen ? materializedCount(player.name) < goalkeeperTotalMaximum : materializedCount(player.name) < player.hard_maximum_blocks - materializationEndpointHeadroom(player.name, block))
-        && fieldCount < player.gk_field_maximum_blocks
+      return game.is_late_arrival_regen
+        ? materializedCount(player.name) < goalkeeperTotalMaximum
+          && fieldCount < player.gk_field_maximum_blocks
+          && halfCount < player.max_blocks_per_half
+        : materializedCount(player.name) < player.hard_maximum_blocks - materializationEndpointHeadroom(player.name, block)
         && halfCount < player.max_blocks_per_half;
     }
     return approvedException || (
@@ -2932,7 +2954,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
             const slot = slots[group].find((slotName) => block.positions[slotName] === high.name);
             if (!slot) continue;
             const replacement = block[group].map((name) => name === high.name ? low.name : name);
-            if (!completeExactAssignmentExists(roster, replacement, slots[group], group)) continue;
+            if (game.is_late_arrival_regen && !completeExactAssignmentExists(roster, replacement, slots[group], group)) continue;
             block[group] = replacement;
             block.positions[slot] = low.name;
             block.bench = block.bench.filter((name) => name !== low.name);
@@ -2950,8 +2972,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
-  if (game.is_late_arrival_regen) {
-    for (const goalkeeper of roster.filter((player) => goalkeepers.some((candidate) => candidate?.name === player.name))) {
+  for (const goalkeeper of roster.filter((player) => goalkeepers.some((candidate) => candidate?.name === player.name))) {
       const goalkeeperBlock = goalkeepers.findIndex((candidate) => candidate?.name === goalkeeper.name);
       const fieldCount = (): number => result.timeline.reduce((total, block) => total + Number(FIELD_GROUPS.some((group) => block[group].includes(goalkeeper.name))), 0);
       while (fieldCount() < goalkeeper.gk_field_minimum_blocks) {
@@ -2975,7 +2996,6 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
               break;
             }
             if (repaired) break;
-          }
         }
         if (!repaired) break;
       }
