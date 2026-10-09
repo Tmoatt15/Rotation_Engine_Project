@@ -78,16 +78,6 @@ function approvalCandidates(roster: Player[], timeline: ScheduleBlock[], arrival
     .map((candidate) => candidate.name);
 }
 
-function shouldPreflightApproval(game: Game, roster: Player[], arrival: AvailabilityChange, approvedPlayerName?: string): boolean {
-  if (!game.is_late_arrival_regen || approvedPlayerName || game.late_arrival_approval) return false;
-  if (arrival.block !== 4 || arrival.target_blocks !== 3) return false;
-  const player = roster.find((candidate) => candidate.name === arrival.player);
-  return player?.group === 'core'
-    && player.general_positions.length === 1
-    && player.backup_positions.length > 0
-    && !player.primary_positions.some((position) => position.toUpperCase() === 'GK');
-}
-
 function prepareRoster(roster: Player[]): Player[] { return roster.map((player) => player.position_usage && player.blocks_by_half ? player : createPlayer(player)); }
 
 function startingPositionCounts(timeline: ScheduleBlock[]): Record<string, Record<string, number>> {
@@ -211,23 +201,8 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     player.max_blocks_per_half = Math.max(1, player.maximum_blocks);
   }
   const arrival = changes.find((change) => change.action === 'available' && change.target_blocks !== undefined);
-  const preflightApproval = arrival ? shouldPreflightApproval(game, roster, arrival, approvedPlayerName) : false;
   const approvedFastPath = Boolean(approvedPlayerName && game.late_arrival_approval);
   const timeline = approvedFastPath
-    ? (() => {
-      const surplus = computeSurplus(game, roster);
-      return {
-        timeline: updatedTimeline,
-        block_counts: surplus.block_counts,
-        gk_summary: surplus.gk_summary,
-        position_summary: surplus.position_summary,
-        warnings: surplus.warnings,
-        errors: surplus.errors,
-        metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility },
-        movement_metrics: calculateMovementMetrics(updatedTimeline, game.total_blocks, roster, formationSlots(parseFormation(game.formation)), game.allow_emergency_assignments),
-      };
-    })()
-    : preflightApproval
     ? (() => {
       const surplus = computeSurplus(game, roster);
       return {
@@ -438,7 +413,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
   const hasStructuralFailure = result.errors.some((error) => /requires \d+ players|unassigned|cannot form a complete|assignment is missing/i.test(error));
   const approvalFailed = result.late_arrival_approval && !result.late_arrival_approval.approved;
   const approvalRequested = Boolean(game.late_arrival_approval);
-  if (game.is_late_arrival_regen && !approvedPlayerName && arrival && (preflightApproval || hasStructuralFailure || placementErrors.length > 0 || approvalFailed)) {
+  if (game.is_late_arrival_regen && !approvedPlayerName && arrival && (hasStructuralFailure || placementErrors.length > 0 || approvalFailed)) {
     const priorApprovalBlock = previousTimeline[arrival.block];
     const priorApprovalAssignments = new Set(priorApprovalBlock ? [priorApprovalBlock.GK, ...priorApprovalBlock.D, ...priorApprovalBlock.M, ...priorApprovalBlock.F] : []);
     const candidates = (result.late_arrival_approval?.candidates ?? approvalCandidates(roster, previousTimeline, arrival))
