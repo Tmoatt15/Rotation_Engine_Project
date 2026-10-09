@@ -4,7 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 
 import PositionAssignmentScreen from '../position-assignment';
-import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
+import { blockDurationSummary, calculateBlockDurations, GAME_FORMATS, MAX_GAME_LENGTH_MINUTES, MAX_TOTAL_BLOCKS, MIN_GAME_LENGTH_MINUTES, MIN_TOTAL_BLOCKS, nearestValidBlockCount, validBlockCounts, FORMATIONS_BY_FORMAT } from '@/engine/season';
 import type { GameFormat, SeasonSettings, SubstitutionAlert } from '@/engine/models';
 import { formationPositionRows } from '@/position-validation';
 import { getActiveTeam, getRoster, getSeasonSettings, notifyTeamChanged, updateRoster, updateSeasonSettings } from '@/services/team-service';
@@ -17,6 +17,18 @@ const alerts: Array<{ value: SubstitutionAlert; label: string }> = [
   { value: 'vibrate', label: 'Vibrate' },
   { value: 'flash_and_vibrate', label: 'Flash + Vibrate' },
 ];
+const blockStep = (gameLength: number, blocks: number, direction: -1 | 1): number => {
+  const counts = validBlockCounts(gameLength);
+  const index = counts.indexOf(blocks);
+  return counts[Math.max(0, Math.min(counts.length - 1, (index < 0 ? counts.indexOf(nearestValidBlockCount(gameLength, blocks)) : index) + direction))] ?? blocks;
+};
+
+function withBlockSettings(value: SeasonSettings, gameLength: number, requestedBlocks: number): SeasonSettings {
+  const normalizedLength = Math.max(MIN_GAME_LENGTH_MINUTES, Math.min(MAX_GAME_LENGTH_MINUTES, Math.round(gameLength)));
+  const total_blocks = nearestValidBlockCount(normalizedLength, requestedBlocks);
+  const block_durations = calculateBlockDurations(normalizedLength, total_blocks);
+  return { ...value, game_length_minutes: normalizedLength, total_blocks, block_length_minutes: block_durations[0], block_durations, block_seconds: block_durations.map((minutes) => minutes * 60), base_block_seconds: block_durations[0] * 60 };
+}
 
 export default function RosterTab() {
   const [settings, setSettings] = useState<SeasonSettings | null>(null);
@@ -66,7 +78,7 @@ export default function RosterTab() {
         return { ...player, primary_positions: primary, backup_positions: backup };
       });
       await updateRoster(team.id, remapped);
-      const saved = await updateSeasonSettings(team.id, draft);
+      const saved = await updateSeasonSettings(team.id, withBlockSettings(draft, draft.game_length_minutes, draft.total_blocks));
       notifyTeamChanged();
       if (unmappablePlayers.length) {
         const names = unmappablePlayers.length === 1
@@ -121,6 +133,10 @@ export default function RosterTab() {
 function SeasonForm({ value, onChange, onCancel, onSave, saving }: { value: SeasonSettings; onChange: (value: SeasonSettings) => void; onCancel: () => void; onSave: () => void; saving: boolean }) {
   const formations = FORMATIONS_BY_FORMAT[value.game_format];
   const update = (changes: Partial<SeasonSettings>) => onChange({ ...value, ...changes });
+  const durations = calculateBlockDurations(value.game_length_minutes, value.total_blocks);
+  const setGameLength = (gameLength: number) => onChange(withBlockSettings(value, gameLength, value.total_blocks));
+  const setBlocks = (totalBlocks: number) => onChange(withBlockSettings(value, value.game_length_minutes, totalBlocks));
+  const setMinutesPerBlock = (minutes: number) => setBlocks(nearestValidBlockCount(value.game_length_minutes, Math.round(value.game_length_minutes / Math.max(1, minutes))));
   return (
     <View style={styles.form}>
       <Text style={styles.label}>Format</Text>
@@ -128,8 +144,11 @@ function SeasonForm({ value, onChange, onCancel, onSave, saving }: { value: Seas
       <Text style={styles.label}>Formation</Text>
       <View style={styles.options}>{formations.map((formation) => <Pressable key={formation} onPress={() => update({ formation })} style={[styles.option, value.formation === formation && styles.selected]}><Text style={value.formation === formation ? styles.selectedText : styles.optionText}>{formation}</Text></Pressable>)}</View>
       <NumberField label="Games in Season" value={value.total_games} onChange={(total_games) => update({ total_games })} />
-      <NumberField label="Game Length (minutes)" value={value.game_length_minutes} onChange={(game_length_minutes) => update({ game_length_minutes })} />
-      <NumberField label="Substitution Blocks" value={value.total_blocks} onChange={(total_blocks) => update({ total_blocks })} />
+      <NumberField label="Game Length (minutes)" value={value.game_length_minutes} onChange={setGameLength} min={MIN_GAME_LENGTH_MINUTES} max={MAX_GAME_LENGTH_MINUTES} />
+      <Stepper label="Blocks" value={value.total_blocks} canDecrease={value.total_blocks > MIN_TOTAL_BLOCKS} canIncrease={value.total_blocks < Math.min(MAX_TOTAL_BLOCKS, Math.max(...validBlockCounts(value.game_length_minutes)))} onDecrease={() => setBlocks(blockStep(value.game_length_minutes, value.total_blocks, -1))} onIncrease={() => setBlocks(blockStep(value.game_length_minutes, value.total_blocks, 1))} />
+      <Stepper label="Min / block" value={value.block_length_minutes} canDecrease={value.block_length_minutes > 1} canIncrease={value.block_length_minutes < Math.floor(value.game_length_minutes / MIN_TOTAL_BLOCKS)} onDecrease={() => setMinutesPerBlock(value.block_length_minutes - 1)} onIncrease={() => setMinutesPerBlock(value.block_length_minutes + 1)} />
+      <Text style={styles.durationSummary}>{blockDurationSummary(durations)}</Text>
+      <BlockDurationBar durations={durations} />
       <Text style={styles.label}>Alert method</Text>
       <View style={styles.options}>{alerts.map((alert) => <Pressable key={alert.value} onPress={() => update({ substitution_alert: alert.value })} style={[styles.option, value.substitution_alert === alert.value && styles.selected]}><Text style={value.substitution_alert === alert.value ? styles.selectedText : styles.optionText}>{alert.label}</Text></Pressable>)}</View>
       <NumberField label="Warning timing (seconds)" value={value.substitution_warning_seconds} onChange={(substitution_warning_seconds) => update({ substitution_warning_seconds: Math.max(15, Math.min(60, substitution_warning_seconds)) as 15 | 30 | 60 })} />
@@ -138,8 +157,17 @@ function SeasonForm({ value, onChange, onCancel, onSave, saving }: { value: Seas
   );
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return <View><Text style={styles.label}>{label}</Text><TextInput value={String(value)} onChangeText={(text) => onChange(Number(text.replace(/\D/g, '')) || 0)} keyboardType="number-pad" style={styles.numberInput} /></View>;
+function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number }) {
+  return <View><Text style={styles.label}>{label}</Text><TextInput value={String(value)} onChangeText={(text) => { const parsed = Number(text.replace(/\D/g, '')); onChange(Math.max(min ?? 0, Math.min(max ?? Number.MAX_SAFE_INTEGER, parsed || 0))); }} keyboardType="number-pad" style={styles.numberInput} /></View>;
+}
+
+function Stepper({ label, value, onDecrease, onIncrease, canDecrease, canIncrease }: { label: string; value: number; onDecrease: () => void; onIncrease: () => void; canDecrease: boolean; canIncrease: boolean }) {
+  return <View><Text style={styles.label}>{label}</Text><View style={styles.stepper}><Pressable disabled={!canDecrease} onPress={onDecrease} style={[styles.stepperButton, !canDecrease && styles.disabled]}><Text style={styles.stepperButtonText}>−</Text></Pressable><Text style={styles.stepperValue}>{value}</Text><Pressable disabled={!canIncrease} onPress={onIncrease} style={[styles.stepperButton, !canIncrease && styles.disabled]}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>;
+}
+
+function BlockDurationBar({ durations }: { durations: number[] }) {
+  const minimum = Math.min(...durations);
+  return <View style={styles.durationBar}>{durations.map((duration, index) => <View key={`${index + 1}-${duration}`} style={[styles.durationSegment, { flex: duration }, duration > minimum && styles.durationSegmentBonus]}><Text style={styles.durationSegmentText}>{duration}</Text></View>)}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -167,6 +195,16 @@ const styles = StyleSheet.create({
   optionText: { color: palette.muted, fontSize: 11, fontWeight: '700' },
   selectedText: { color: palette.panel, fontSize: 11, fontWeight: '800' },
   numberInput: { borderColor: palette.line, borderRadius: 7, borderWidth: 1, color: palette.ink, marginTop: 5, padding: 8 },
+  stepper: { alignItems: 'center', flexDirection: 'row', gap: 12, marginTop: 5 },
+  stepperButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 7, height: 34, justifyContent: 'center', width: 42 },
+  stepperButtonText: { color: palette.panel, fontSize: 22, fontWeight: '800' },
+  stepperValue: { color: palette.ink, fontSize: 18, fontWeight: '800', minWidth: 40, textAlign: 'center' },
+  disabled: { opacity: 0.35 },
+  durationSummary: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  durationBar: { flexDirection: 'row', gap: 2, height: 38, marginTop: 8 },
+  durationSegment: { alignItems: 'center', backgroundColor: palette.line, justifyContent: 'center', minWidth: 12 },
+  durationSegmentBonus: { backgroundColor: palette.coral },
+  durationSegmentText: { color: palette.ink, fontSize: 10, fontWeight: '800' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 14 },
   cancel: { alignItems: 'center', borderColor: palette.line, borderRadius: 8, borderWidth: 1, flex: 1, padding: 10 },
   save: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 8, flex: 1, padding: 10 },

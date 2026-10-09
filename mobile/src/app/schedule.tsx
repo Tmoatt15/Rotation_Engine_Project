@@ -360,19 +360,21 @@ export default function ScheduleScreen() {
                 </Pressable>
                 {blocks.map((block, index) => {
                   const blockNumber = index + 1;
+                  const secondHalfIndex = Math.ceil(blocks.length / 2);
+                  const secondHalfBlock = secondHalfIndex + 1;
                   const blockTitle = blockNumber === 1
                     ? 'Game Starters'
-                    : blockNumber === 6
+                    : blockNumber === secondHalfBlock
                       ? 'Second Half Starters'
                       : `Block ${blockNumber}`;
                   const substitutionTime = schedule.block_start_minutes?.[index];
-                  const halftimeStart = schedule.block_start_minutes?.[5] ?? 0;
-                  const displayedSubstitutionTime = blockNumber > 6 && substitutionTime !== undefined
+                  const halftimeStart = schedule.block_start_minutes?.[secondHalfIndex] ?? 0;
+                  const displayedSubstitutionTime = blockNumber > secondHalfBlock && substitutionTime !== undefined
                     ? substitutionTime - halftimeStart
                     : substitutionTime;
                   return (
                     <View key={`block-${blockNumber}`}>
-                      {blockNumber === 6 && (
+                      {blockNumber === secondHalfBlock && (
                         <View style={styles.halftimeDivider}>
                           <View style={styles.halftimeLine} />
                           <Text style={styles.halftimeText}>HALFTIME</Text>
@@ -382,7 +384,7 @@ export default function ScheduleScreen() {
                       <View style={styles.blockCard}>
                       <View style={styles.blockHeader}>
                           <Text style={styles.blockTitle}>{blockTitle}</Text>
-                          {displayedSubstitutionTime !== undefined && blockNumber !== 1 && blockNumber !== 6 && <View style={styles.blockTiming}>
+                          {displayedSubstitutionTime !== undefined && blockNumber !== 1 && blockNumber !== secondHalfBlock && <View style={styles.blockTiming}>
                             <SymbolView name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} size={15} tintColor={palette.green} />
                             <Text style={styles.blockTimingText}>{formatSubstitutionTime(displayedSubstitutionTime)}</Text>
                           </View>}

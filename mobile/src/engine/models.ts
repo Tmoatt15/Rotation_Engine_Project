@@ -70,6 +70,7 @@ export interface SeasonSettings {
   substitution_warning_seconds: 15 | 30 | 60;
   base_block_seconds?: number;
   block_seconds?: number[];
+  block_durations?: number[];
   players_on_field?: number;
   has_goalkeeper?: boolean;
 }

@@ -1,6 +1,6 @@
 import { formationSlots, parseFormation } from '@/engine/timeline';
 import { createPlayer, generateSchedule, regenerateSchedule } from '@/engine/rotation';
-import { SeasonSetup } from '@/engine/season';
+import { blockStartMinutes, SeasonSetup } from '@/engine/season';
 import type { AfterGameReport, LateArrivalApprovalRequest, LiveSchedule, SavedSchedule, SeasonRosterPlayer } from '@/engine/models';
 import { getDatabase } from '@/storage/database';
 import { deleteSchedule, listSchedules, renameSchedule, saveSchedule } from '@/storage/schedules';
@@ -51,7 +51,7 @@ export async function generateLocalSchedule(input: { teamId: string; gameNumber:
   if (goalkeeperErrors.length) throw new Error(goalkeeperErrors.join(' '));
   assertCompleteSchedule(result.errors);
   const blockLengths = setup.block_lengths_minutes;
-  const blockStarts = blockLengths.reduce<number[]>((starts, length) => [...starts, (starts[starts.length - 1] ?? 0) + (starts.length ? length : 0)], []);
+  const blockStarts = blockStartMinutes(blockLengths);
   const structuralErrors = summarizeStructuralErrors(input.gameNumber, result.errors.filter((error) => !error.includes('exceeds') && !error.includes('under target') && !error.includes('under minimum')));
   return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, available_player_names: input.availablePlayerNames, core_player_names: roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings: result.warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated' };
 }
@@ -69,7 +69,7 @@ export async function regenerateLateArrivalSchedule(input: { teamId: string; gam
   const goalkeeperErrors = result.errors.filter((error) => error.toLowerCase().includes('goalkeeper'));
   if (goalkeeperErrors.length) throw new Error(goalkeeperErrors.join(' '));
   const blockLengths = setup.block_lengths_minutes;
-  const blockStarts = blockLengths.reduce<number[]>((starts, length) => [...starts, (starts[starts.length - 1] ?? 0) + (starts.length ? length : 0)], []);
+  const blockStarts = blockStartMinutes(blockLengths);
   const structuralErrors = summarizeStructuralErrors(input.gameNumber, result.errors.filter((error) => !error.includes('exceeds') && !error.includes('under target') && !error.includes('under minimum')));
   const minimumErrors = result.errors.filter((error) => error.toLowerCase().includes('under minimum'));
   if (result.needs_coach_approval && !input.continueBelowMinimum) {

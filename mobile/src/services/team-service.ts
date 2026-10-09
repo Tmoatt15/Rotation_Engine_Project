@@ -18,10 +18,10 @@ export function notifyTeamChanged(): void {
 }
 
 const DEFAULT_SETTINGS: SeasonSettings = {
-  game_length_minutes: 70,
+  game_length_minutes: 50,
   game_format: '11v11',
   total_blocks: 10,
-  block_length_minutes: 7,
+  block_length_minutes: 5,
   formation: '4-4-2',
   total_games: 1,
   substitution_alert: 'flash_and_vibrate',

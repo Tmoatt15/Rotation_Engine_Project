@@ -3,7 +3,7 @@ import { computeBlockTargets } from './quotas';
 import { assignExactSlots, buildTimeline, calculateMovementMetrics, completeExactAssignmentExists, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
 import { computeSurplus, filterStaleQuotaWarnings } from './surplus';
 import { eligiblePlayers } from './positional';
-import { GAME_FORMATS } from './season';
+import { FORMATIONS_BY_FORMAT, GAME_FORMATS, MAX_TOTAL_BLOCKS, MIN_TOTAL_BLOCKS } from './season';
 
 const emptyUsage = () => ({ GK: 0, D: 0, M: 0, F: 0 });
 
@@ -28,10 +28,29 @@ function prepareGame(input: Game | GameInput): Game {
   if (formatGoalkeeperSetting !== undefined && game.has_goalkeeper !== undefined && formatGoalkeeperSetting !== game.has_goalkeeper) {
     throw new Error(`has_goalkeeper conflicts with game_format ${game.game_format}.`);
   }
+  if (game.game_format !== undefined) {
+    if (!Number.isInteger(game.total_blocks) || game.total_blocks < MIN_TOTAL_BLOCKS || game.total_blocks > MAX_TOTAL_BLOCKS || game.total_blocks % 2 !== 0) {
+      throw new Error(`Number of blocks must be an even number from ${MIN_TOTAL_BLOCKS} to ${MAX_TOTAL_BLOCKS}.`);
+    }
+    if (!FORMATIONS_BY_FORMAT[game.game_format].includes(game.formation)) {
+      throw new Error(`Formation ${game.formation} is not available for ${game.game_format}. Choose: ${FORMATIONS_BY_FORMAT[game.game_format].join(', ')}.`);
+    }
+  }
   const hasGoalkeeper = game.has_goalkeeper ?? formatGoalkeeperSetting ?? true;
   return {
     ...game, game_format: game.game_format, has_goalkeeper: hasGoalkeeper, gk_assignment: game.gk_assignment ?? null, first_half_gk: game.first_half_gk ?? null, second_half_gk: game.second_half_gk ?? null, season_total_games: game.season_total_games ?? 1, season_game_number: game.season_game_number ?? 1, season_seed: game.season_seed ?? 2026, allow_emergency_assignments: game.allow_emergency_assignments ?? game.allow_emergency_positions ?? false, disable_maximum_limits: game.disable_maximum_limits ?? false, is_late_arrival_regen: game.is_late_arrival_regen ?? false, season_player_blocks: game.season_player_blocks ?? {}, season_position_starts: game.season_position_starts ?? {}, season_goalkeeper_starts: game.season_goalkeeper_starts ?? {}, core_high_names: game.core_high_names ?? null, replacement_credits: game.replacement_credits ?? [], replacement_bonuses: game.replacement_bonuses ?? {}, availability_changes: game.availability_changes ?? [], quota_exempt_players: game.quota_exempt_players ?? new Set<string>(), timeline: game.timeline ?? [],
   };
+}
+
+function validateCoreCapacity(game: Game, roster: Player[]): void {
+  if (!game.game_format) return;
+  const format = GAME_FORMATS[game.game_format];
+  const corePlayers = roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group));
+  const coreGoalkeepers = corePlayers.filter((player) => player.primary_positions.some((position) => position.toUpperCase() === 'GK'));
+  const coreFieldPlayers = corePlayers.filter((player) => player.general_positions.some((position) => ['D', 'M', 'F', 'ANY'].includes(position.toUpperCase())));
+  const fieldLimit = format.players_on_field - (format.has_goalkeeper ? 1 : 0);
+  if (coreGoalkeepers.length > 1) throw new Error(`Core is limited to ${fieldLimit} field players and 1 core goalkeeper for ${game.game_format}; found ${coreGoalkeepers.length} core goalkeepers.`);
+  if (coreFieldPlayers.length > fieldLimit) throw new Error(`Core is limited to ${fieldLimit} field players and 1 core goalkeeper for ${game.game_format}; found ${coreFieldPlayers.length} core field players.`);
 }
 
 function approvalResult(request: LateArrivalApprovalRequest, timeline: ScheduleBlock[], errors: string[], roster: Player[]): LateArrivalApprovalResult {
@@ -130,6 +149,7 @@ function finalizeResult(game: Game, roster: Player[], timeline: RotationResult):
 export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Player[]): RotationResult {
   const startedAt = Date.now();
   const game = prepareGame(gameInput); const roster = prepareRoster(rosterInput);
+  validateCoreCapacity(game, roster);
   roster.forEach((player) => { if (!player.position_usage) player.position_usage = emptyUsage(); });
   const preparedAt = Date.now();
   const quota = computeBlockTargets(game, roster);
@@ -146,6 +166,7 @@ export const generateSchedule = runRotationEngine;
 
 export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Player[], previousTimeline: ScheduleBlock[], changes: AvailabilityChange[], availablePlayerNames?: string[], isLateArrivalRegen = false, approvedPlayerName?: string): RotationResult {
   const game = prepareGame({ ...gameInput, is_late_arrival_regen: isLateArrivalRegen, approved_player_name: approvedPlayerName }); const roster = prepareRoster(rosterInput); const byName = new Map(roster.map((player) => [player.name, player]));
+  validateCoreCapacity(game, roster);
   const approvedBeforeCount = approvedPlayerName
     ? previousTimeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedPlayerName)).length
     : null;
