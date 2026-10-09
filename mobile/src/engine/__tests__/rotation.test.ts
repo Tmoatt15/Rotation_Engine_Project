@@ -763,7 +763,11 @@ describe('goalkeeper and minimum protection', () => {
     const initial = generateSchedule(game, rosterInputs.filter((player) => !unavailableNames.has(player.name)).map(createPlayer));
     const players = rosterInputs.map(createPlayer);
     const availableNames = rosterInputs.filter((player) => !unavailableNames.has(player.name) || player.name === latePlayer).map((player) => player.name);
+    const startedAt = performance.now();
     const regenerated = regenerateSchedule(game, players, initial.timeline, [{ player: latePlayer, action: 'available', block: arrivalBlock - 1, target_blocks: targetBlocks, minimum_blocks: targetBlocks, maximum_blocks: targetBlocks }], availableNames, true);
+    if (latePlayer === 'Sid' && arrivalBlock === 5) {
+      expect(performance.now() - startedAt).toBeLessThan(5000);
+    }
     const fieldBlocks = regenerated.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(latePlayer));
     expect(initial.errors).toEqual([]);
     expect(regenerated.errors).not.toContain(expect.stringContaining(`${latePlayer} could not be placed in block ${arrivalBlock}`));
@@ -814,6 +818,8 @@ describe('goalkeeper and minimum protection', () => {
             ? 'one_block'
             : latePlayer === 'Hanshith' && arrivalBlock === 5
               ? 'one_block'
+              : latePlayer === 'Sid' && arrivalBlock === 5
+                ? 'one_block'
               : latePlayer === 'Max' && arrivalBlock === 5
                 ? 'one_block'
                 : null;
@@ -824,6 +830,28 @@ describe('goalkeeper and minimum protection', () => {
       expect(regenerated.approval_candidates?.length).toBeGreaterThan(0);
       expect(regenerated.approval_scope).toBe(approvalCase);
       expect(regenerated.timeline.every((block) => block.D.length === 4 && block.M.length === 3 && block.F.length === 3)).toBe(true);
+      if (latePlayer === 'Sid' && arrivalBlock === 5) {
+        const approvedStartedAt = performance.now();
+        const approvedName = regenerated.approval_candidates?.[0];
+        if (!approvedName) throw new Error('Sid approval candidate missing');
+        const approvedBefore = initial.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedName)).length;
+        const approved = regenerateSchedule(
+          { ...game, late_arrival_approval: { player: latePlayer, scope: approvalCase, block: arrivalBlock } },
+          players,
+          initial.timeline,
+          [{ player: latePlayer, action: 'available', block: arrivalBlock - 1, target_blocks: targetBlocks, minimum_blocks: targetBlocks, maximum_blocks: targetBlocks }],
+          availableNames,
+          true,
+          approvedName,
+        );
+        expect(performance.now() - approvedStartedAt).toBeLessThan(5000);
+        expect(approved.timeline).toHaveLength(game.total_blocks);
+        expect(approved.needs_coach_approval).not.toBe(true);
+        expect(approved.timeline.slice(0, arrivalBlock - 1).every((block) => !block.bench.includes(latePlayer) && block.bench.length === 5)).toBe(true);
+        expect(approved.timeline[arrivalBlock - 1].D.concat(approved.timeline[arrivalBlock - 1].M, approved.timeline[arrivalBlock - 1].F)).toContain(latePlayer);
+        expect(approved.timeline[arrivalBlock - 1].bench).toHaveLength(6);
+        expect(approved.timeline.filter((block) => [block.GK, ...block.D, ...block.M, ...block.F].includes(approvedName))).toHaveLength(approvedBefore + 1);
+      }
       return;
     }
     const passed = errors.length === 0 && fieldBlocks.length === targetBlocks;
@@ -2090,5 +2118,25 @@ describe('ten-game season availability simulation', () => {
     expect(strict.timeline.every((block) => block.M.length === 0)).toBe(true);
     expect(production.movement_metrics?.emergency_assignments ?? 0).toBeGreaterThan(0);
     expect(production.timeline.flatMap((block) => [block.D, block.M, block.F].flat())).not.toContain('GK');
+  });
+
+  it('keeps initial generation under five seconds with sixteen available players', () => {
+    const unavailableNames = new Set(['Blake', 'Frank', 'Sid']);
+    const players = coachAssignedSeasonBackups(seasonSimulationRoster())
+      .filter((player) => !unavailableNames.has(player.name))
+      .map(createPlayer);
+    const startedAt = performance.now();
+    const result = generateSchedule({
+      game_format: '11v11',
+      has_goalkeeper: true,
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      allow_emergency_assignments: true,
+    }, players);
+
+    expect(performance.now() - startedAt).toBeLessThan(5000);
+    expect(result.timeline).toHaveLength(10);
   });
 });

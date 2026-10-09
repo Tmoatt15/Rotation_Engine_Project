@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { calculateMovementMetrics } from '@/engine/timeline';
 import { createPlayer } from '@/engine/rotation';
+import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player } from '@/engine/models';
 import { setAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { saveLocalSchedule } from '@/services/schedule-service';
@@ -154,8 +155,12 @@ export default function ScheduleScreen() {
     [schedule],
   );
   const otherWarnings = useMemo(
-    () => (schedule?.warnings ?? []).filter((warning) => !/^Please assign \d+ more /.test(warning)),
-    [schedule],
+    () => filterStaleQuotaWarnings(
+      (schedule?.warnings ?? []).filter((warning) => !/^Please assign \d+ more /.test(warning)),
+      blocks as unknown as import('@/engine/models').ScheduleBlock[],
+      roster,
+    ),
+    [blocks, roster, schedule],
   );
   const playerBlockCounts = useMemo(
     () => countPlayerBlocks(schedule?.available_player_names ?? [], blocks),
