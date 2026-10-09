@@ -2492,6 +2492,23 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   }
   refreshPlanningCounts();
   for (let blockIndex = Math.max(0, startBlock - 1); blockIndex < game.total_blocks; blockIndex += 1) repairShortBlock(blockIndex);
+  // Re-lock endpoints after quota repairs. Those repairs may remove a
+  // reserved core player while trimming assignments to maximum limits.
+  for (const blockIndex of endpointBlocks) {
+    if (blockIndex < Math.max(0, startBlock - 1) || blockIndex >= game.total_blocks) continue;
+    const solved = solveEndpointLineup(
+      roster,
+      formation,
+      goalkeeperNames[blockIndex],
+      game.season_position_starts,
+      new Set(flatMapCompat(positions, (position) => plans[position][blockIndex])),
+      startBlock > 1 ? 2_500 : 1_000,
+    );
+    if (!solved) continue;
+    plans.D[blockIndex] = solved.groups.D;
+    plans.M[blockIndex] = solved.groups.M;
+    plans.F[blockIndex] = solved.groups.F;
+  }
   if (startBlock > 1 && !game.disable_maximum_limits) {
     const plannedCount = (name: string): number => FIELD_GROUPS.reduce((total, group) => total + plans[group].filter((names) => names.includes(name)).length, 0);
     for (const change of game.availability_changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
@@ -2978,7 +2995,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       const fieldCount = (): number => result.timeline.reduce((total, block) => total + Number(FIELD_GROUPS.some((group) => block[group].includes(goalkeeper.name))), 0);
       while (fieldCount() < goalkeeper.gk_field_minimum_blocks) {
         let repaired = false;
-        for (let blockIndex = 0; blockIndex < result.timeline.length && !repaired; blockIndex += 1) {
+        for (let blockIndex = 1; blockIndex < result.timeline.length - 1 && !repaired; blockIndex += 1) {
           if (blockIndex === goalkeeperBlock) continue;
           const block = result.timeline[blockIndex];
           if ([block.GK, ...flatMapCompat(FIELD_GROUPS, (group) => block[group])].includes(goalkeeper.name)) continue;

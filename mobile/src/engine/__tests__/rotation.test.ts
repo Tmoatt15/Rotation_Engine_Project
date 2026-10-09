@@ -1324,6 +1324,7 @@ describe('quota fairness and controlled coverage', () => {
     const result = generateSchedule({ total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan' }, players);
 
     expect(result.errors).toEqual([]);
+    expect(result.timeline[0].D).toContain('Alvin');
   });
 
   it('generates a later season game with prior history and mixed eligibility', () => {
