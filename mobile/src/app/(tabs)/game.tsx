@@ -62,6 +62,7 @@ function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlo
         && !player.forbidden_positions.includes(position))
     : [];
   const availableCount = blockCapacity ? eligibleForBlock.length : 0;
+  if (blockCapacity && availableCount >= Number(blockCapacity[3])) return null;
   const detail = blockCapacity
     ? `Block ${blockCapacity[1]} needs ${blockCapacity[3]} ${blockCapacity[3] === '1' ? noun : `${noun}s`} but ${availableCount} eligible ${availableCount === 1 ? noun : `${noun}s`} are available.`
     : `The available roster cannot cover every ${noun} slot within playing-time limits.`;
@@ -249,6 +250,9 @@ export default function GameScreen() {
         setCapacityDeficits([]);
         setShowCapacityWarning(true);
       } else {
+        setPositionShortage(null);
+        setCapacityWarnings([]);
+        setCapacityDeficits([]);
         setError(message);
       }
     } finally {
