@@ -48,6 +48,29 @@ describe('rotation notes', () => {
     expect(result.warnings).not.toContain(expect.stringContaining('Sawyer'));
   });
 
+  it('removes stale core target warnings at seven or more blocks', () => {
+    const roster = ['Jonathan', 'Max', 'Sawyer'].map((name) => createPlayer({
+      name,
+      group: 'core',
+      general_positions: ['D'],
+      primary_positions: ['D'],
+    }));
+    const blocks = Array.from({ length: 10 }, (_, index) => ({
+      GK: 'GK',
+      D: index < 7 ? ['Jonathan'] : [],
+      M: index < 8 ? ['Max'] : [],
+      F: index < 8 ? ['Sawyer'] : [],
+      bench: [],
+      positions: {},
+    }));
+
+    expect(filterStaleQuotaWarnings([
+      'Jonathan (core) is under target by 3 blocks.',
+      'Max (core) is under target by 4 blocks.',
+      'Sawyer (core) is under target by 4 blocks.',
+    ], blocks, roster)).toEqual([]);
+  });
+
   it('keeps only the most relevant quota warning per player', () => {
     const mah = createPlayer({ name: 'Mahaswin', group: 'rotational', general_positions: ['M'], primary_positions: ['M'] });
     const blocks = Array.from({ length: 10 }, () => ({ GK: 'GK', D: [], M: [], F: [], bench: [], positions: {} }));

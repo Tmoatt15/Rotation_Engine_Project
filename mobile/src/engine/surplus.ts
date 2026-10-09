@@ -23,7 +23,9 @@ export function filterStaleQuotaWarnings(warnings: string[], blocks: ScheduleBlo
       : player.group === 'rotational'
         ? minimumBlocksForPercentage(blocks.length, ROTATIONAL_MIN)
         : minimumBlocksForPercentage(blocks.length, DEVELOPMENTAL_MIN);
+    const target = player.target_blocks > 0 ? player.target_blocks : minimum;
     if ((counts.get(player.name) ?? 0) >= minimum && match[3] === 'minimum') return;
+    if ((counts.get(player.name) ?? 0) >= target && match[3] === 'target') return;
     const priority = match[3] === 'minimum' ? 2 : 1;
     const current = selectedQuotaWarnings.get(player.name);
     if (!current || priority > current.priority) selectedQuotaWarnings.set(player.name, { warning, priority });
