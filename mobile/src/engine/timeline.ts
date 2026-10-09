@@ -3095,6 +3095,78 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
+  const fairnessFieldCount = (name: string): number => result.timeline.reduce((total, candidateBlock) =>
+    total + Number(FIELD_GROUPS.some((fieldGroup) => candidateBlock[fieldGroup].includes(name))), 0);
+  const fairnessMinimum = (player: Player): number =>
+    assignedGoalkeeperNames.has(player.name) ? player.gk_field_minimum_blocks : player.minimum_blocks;
+  const initialFairnessExcess = new Map(roster.map((player) => [
+    player.name,
+    Math.max(0, fairnessFieldCount(player.name) - fairnessMinimum(player)),
+  ]));
+  let crossPositionChanged = true;
+  while (crossPositionChanged) {
+    crossPositionChanged = false;
+    const overMinimum = roster
+      .filter((player) => player.available && !assignedGoalkeeperNames.has(player.name)
+        && fairnessFieldCount(player.name) > fairnessMinimum(player))
+      .sort((left, right) => (initialFairnessExcess.get(right.name) ?? 0) - (initialFairnessExcess.get(left.name) ?? 0)
+        || fairnessFieldCount(right.name) - fairnessFieldCount(left.name)
+        || left.name.localeCompare(right.name));
+    const underMinimum = roster
+      .filter((player) => player.available && !assignedGoalkeeperNames.has(player.name)
+        && fairnessFieldCount(player.name) < fairnessMinimum(player))
+      .sort((left, right) => fairnessFieldCount(left.name) - fairnessFieldCount(right.name) || left.name.localeCompare(right.name));
+    for (const over of overMinimum) {
+      if (crossPositionChanged) break;
+      const sourceGroups = FIELD_GROUPS.filter((group) => result.timeline.some((block) => block[group].includes(over.name)));
+      for (const under of underMinimum) {
+        if (crossPositionChanged) break;
+        for (const source of sourceGroups) {
+          if (crossPositionChanged) break;
+          const targetGroups = FIELD_GROUPS.filter((group) => group !== source && canCoverGroup(game, roster, over.name, group));
+          for (const target of targetGroups) {
+            if (!canCoverGroup(game, roster, under.name, target)) continue;
+            for (let blockIndex = 1; blockIndex < result.timeline.length - 1; blockIndex += 1) {
+              const block = result.timeline[blockIndex];
+              if (block.GK === under.name || block.GK === over.name) continue;
+              if (!block[source].includes(over.name) || block[target].includes(under.name)) continue;
+              const assigned = new Set(flatMapCompat(FIELD_GROUPS, (group) => block[group]));
+              if (assigned.has(under.name)) continue;
+              const bridge = block[target]
+                .map((name) => roster.find((player) => player.name === name))
+                .find((player): player is Player => Boolean(player)
+                  && player.name !== over.name
+                  && player.name !== under.name
+                  && canCoverGroup(game, roster, player.name, source));
+              if (!bridge) continue;
+              const sourceNames = block[source].map((name) => name === over.name ? bridge.name : name);
+              const targetNames = block[target].map((name) => name === bridge.name ? under.name : name);
+              if (!completeExactAssignmentExists(roster, sourceNames, slots[source], source)
+                || !completeExactAssignmentExists(roster, targetNames, slots[target], target)) continue;
+              block[source] = sourceNames;
+              block[target] = targetNames;
+              Object.assign(block.positions, assignExactSlots(roster, sourceNames, slots[source], source, block.positions, game.season_position_starts));
+              Object.assign(block.positions, assignExactSlots(roster, targetNames, slots[target], target, block.positions, game.season_position_starts));
+              block.bench = block.bench.filter((name) => name !== under.name);
+              if (!block.bench.includes(over.name)) block.bench.push(over.name);
+              const half = blockHalf(blockIndex, game.total_blocks);
+              over.block_count -= 1;
+              over.field_blocks -= 1;
+              over.blocks_by_half[half] -= 1;
+              over.position_usage[source] -= 1;
+              under.block_count += 1;
+              under.field_blocks += 1;
+              under.blocks_by_half[half] += 1;
+              under.position_usage[target] += 1;
+              crossPositionChanged = true;
+              break;
+            }
+            if (crossPositionChanged) break;
+          }
+        }
+      }
+    }
+  }
   result.movement_metrics = calculateMovementMetrics(result.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments);
   const finalValidationErrors = validateTimeline(roster, result.timeline, formation, slots, game.total_blocks, game);
   const finalEndpointNames = new Set([
