@@ -1325,6 +1325,11 @@ describe('quota fairness and controlled coverage', () => {
 
     expect(result.errors).toEqual([]);
     expect(result.timeline[0].D).toContain('Alvin');
+    expect(result.timeline[9].D).toHaveLength(4);
+    expect(result.timeline[9].M).toHaveLength(3);
+    expect(result.timeline[9].F).toHaveLength(3);
+    const endpointFieldPlayers = new Set([...result.timeline[9].D, ...result.timeline[9].M, ...result.timeline[9].F]);
+    ['Dane', 'Everett', 'Hanshith', 'Jonathan', 'Max', 'Sawyer'].forEach((name) => expect(endpointFieldPlayers).toContain(name));
   });
 
   it('generates a later season game with prior history and mixed eligibility', () => {
