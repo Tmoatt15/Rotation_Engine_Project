@@ -95,10 +95,23 @@ function finalizeResult(game: Game, roster: Player[], timeline: RotationResult):
     .filter((error) => !game.disable_maximum_limits
       || error.includes('total blocks')
       || error.includes('GK field maximum'));
+  const endpointNames = new Set([
+    ...timeline.timeline[0].D,
+    ...timeline.timeline[0].M,
+    ...timeline.timeline[0].F,
+    ...timeline.timeline[timeline.timeline.length - 1].D,
+    ...timeline.timeline[timeline.timeline.length - 1].M,
+    ...timeline.timeline[timeline.timeline.length - 1].F,
+  ]);
+  const allErrors = [...new Set([...timeline.errors, ...validationErrors])];
+  const endpointQuotaWarnings = allErrors.filter((error) => {
+    const match = error.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
+    return match !== null && endpointNames.has(match[1]);
+  });
   return {
     ...timeline,
-    errors: [...new Set([...timeline.errors, ...validationErrors])],
-    warnings: [...new Set([...timeline.warnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])],
+    errors: allErrors.filter((error) => !endpointQuotaWarnings.includes(error)),
+    warnings: [...new Set([...timeline.warnings, ...endpointQuotaWarnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])],
     movement_metrics: calculateMovementMetrics(timeline.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments),
     starting_position_counts: startingPositionCounts(timeline.timeline),
   };

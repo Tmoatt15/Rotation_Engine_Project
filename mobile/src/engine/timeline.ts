@@ -2801,7 +2801,9 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
           && (!(startBlock > 1 && block === game.total_blocks) || canCoverGroup(game, roster, player.name, group))
           && ((goalkeepers.some((goalkeeper) => goalkeeper?.name === player.name) && game.is_late_arrival_regen)
             ? belowMaterializationMaximum(player, block, half)
-            : game.disable_maximum_limits || belowMaterializationMaximum(player, block, half)));
+            : (block === game.total_blocks && planned[group][block - 1].includes(player.name))
+              || game.disable_maximum_limits
+              || belowMaterializationMaximum(player, block, half)));
       const requiredNames = [...(lateArrivalConstraints.byBlock[block - 1]?.get(group) ?? new Set<string>())];
       for (const requiredName of requiredNames) {
         if (chosen.some((player) => player.name === requiredName) || used.has(requiredName)) continue;
@@ -2843,7 +2845,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
           : validChoice ? [...chosen, ...validChoice] : undefined;
         if (additional) chosen = additional;
       }
-      assignment[group] = chosen.map((player) => player.name); chosen.forEach((player) => used.add(player.name));
+        assignment[group] = chosen.map((player) => player.name); chosen.forEach((player) => used.add(player.name));
       const exactAssignment = assignExactSlots(roster, assignment[group], slots[group], group, previousPositions, game.season_position_starts, emergency);
       Object.assign(assignment.positions, exactAssignment);
       if (Object.values(exactAssignment).some((name) => name === 'UNASSIGNED')) result.errors.push(`Block ${block}: ${group} players cannot form a complete legal exact-slot assignment.`);
@@ -3020,6 +3022,20 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     }
   }
   result.movement_metrics = calculateMovementMetrics(result.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments);
-  result.errors = [...new Set([...result.errors, ...validateTimeline(roster, result.timeline, formation, slots, game.total_blocks, game)])];
+  const finalValidationErrors = validateTimeline(roster, result.timeline, formation, slots, game.total_blocks, game);
+  const finalEndpointNames = new Set([
+    ...result.timeline[0].D,
+    ...result.timeline[0].M,
+    ...result.timeline[0].F,
+    ...result.timeline[result.timeline.length - 1].D,
+    ...result.timeline[result.timeline.length - 1].M,
+    ...result.timeline[result.timeline.length - 1].F,
+  ]);
+  const endpointQuotaWarnings = [...result.errors, ...finalValidationErrors].filter((error, index, errors) => {
+    const match = error.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
+    return match !== null && finalEndpointNames.has(match[1]) && errors.indexOf(error) === index;
+  });
+  result.warnings = [...new Set([...result.warnings, ...endpointQuotaWarnings])];
+  result.errors = [...new Set([...result.errors.filter((error) => !endpointQuotaWarnings.includes(error)), ...finalValidationErrors.filter((error) => !endpointQuotaWarnings.includes(error))])];
   return result;
 }
