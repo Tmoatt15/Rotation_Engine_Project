@@ -159,7 +159,7 @@ export function runRotationEngine(gameInput: Game | GameInput, rosterInput: Play
   const quotaAt = Date.now();
   const timeline = buildTimeline(game, roster, 1, [], quota.metadata.quota_feasibility);
   const timelineAt = Date.now();
-  const surplus = computeSurplus(game, roster);
+  const surplus = computeSurplus(game, roster, timeline.timeline);
   const result = finalizeResult(game, roster, { timeline: timeline.timeline, block_counts: surplus.block_counts, gk_summary: surplus.gk_summary, position_summary: surplus.position_summary, warnings: [...quota.warnings, ...timeline.warnings, ...surplus.warnings], errors: [...quota.errors, ...timeline.errors, ...surplus.errors], metadata: { ...surplus.metadata, quota_feasibility: quota.metadata.quota_feasibility }, movement_metrics: timeline.movement_metrics });
   console.info('[rotation] initial generation timing', { players: roster.length, prepareMs: preparedAt - startedAt, quotaMs: quotaAt - preparedAt, plannerMs: timelineAt - quotaAt, finalizeMs: Date.now() - timelineAt, totalMs: Date.now() - startedAt });
   return result;
@@ -266,7 +266,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
   );
   const timeline = approvedFastPath || simpleLateArrival
     ? (() => {
-      const surplus = computeSurplus(game, roster);
+      const surplus = computeSurplus(game, roster, updatedTimeline);
       return {
         timeline: updatedTimeline,
         block_counts: surplus.block_counts,
@@ -474,7 +474,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       : null;
     console.info('[rotation] approved-player regen output', { approvedPlayerName, approvedBeforeCount, approvedAfterCount, arrivingPlayer: arrivingChange?.player, arrivingAfterCount });
   }
-  const surplus = computeSurplus(game, roster);
+  const surplus = computeSurplus(game, roster, timeline.timeline);
   const timelineErrors = timeline.errors
     .filter((error) => ![...latePlayerNames].some((name) => error.startsWith(`${name} exceeds `)))
     .filter((error) => !game.disable_maximum_limits

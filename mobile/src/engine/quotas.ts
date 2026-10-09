@@ -345,6 +345,12 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     if (!isDedicatedGoalkeeper(player) && player.group !== 'rotational_gk') requestedFieldSlots += target;
   }
   result.metadata.quota_feasibility = quotaFeasibility;
+  const rosterMinimumRequirement = roster
+    .filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name))
+    .reduce((total, player) => total + minimumFor(player), 0);
+  if (rosterMinimumRequirement > quotaFeasibility.legalAvailableCapacity) {
+    result.warnings.push(`Below minimum (capacity): minimums require ${rosterMinimumRequirement} player-blocks, but only ${quotaFeasibility.legalAvailableCapacity} are available; shortfall will be distributed fairly.`);
+  }
   const fieldSlots = quotaFeasibility.legalAvailableCapacity;
   if (requestedFieldSlots > fieldSlots) result.warnings.push(`Requested field targets require ${requestedFieldSlots} slots, but the formation provides ${fieldSlots}; targets cannot all be met.`);
   for (const position of ['D', 'M', 'F'] as const) {

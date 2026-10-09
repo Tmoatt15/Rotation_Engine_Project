@@ -715,10 +715,10 @@ function reserveCoreBlocks(
         .filter((player) => !used.has(player.name)
           && generalPositionAllowsGroup(player, group)
           && !player.forbidden_positions.includes(group)
-          && (fieldCounts.get(player.name) ?? 0) < (isEndpoint
-            ? player.hard_maximum_blocks
-            : shortageMode
-              ? (goalkeeperNames.includes(player.name) ? player.gk_field_minimum_blocks : player.hard_minimum_blocks)
+          && (fieldCounts.get(player.name) ?? 0) < (shortageMode
+            ? (goalkeeperNames.includes(player.name) ? player.gk_field_minimum_blocks : player.hard_minimum_blocks)
+            : isEndpoint
+              ? player.hard_maximum_blocks
               : player.target_blocks)
           && (halfCounts.get(player.name)?.[half] ?? 0) < player.max_blocks_per_half)
         .sort((left, right) => {
@@ -993,8 +993,8 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
   };
   const fieldMinimumFor = (player: Player): number => assignedGoalkeepers.has(player.name) ? player.gk_field_minimum_blocks : player.hard_minimum_blocks;
   const shortageKey = (player: Player, previous: Set<string>, half: 0 | 1 = 0): [number, number, number, number, number, string] => [
-    halfCounts.get(player.name)?.[half] ?? 0,
     -Math.max(0, fieldMinimumFor(player) - (fieldCounts.get(player.name) ?? 0)),
+    halfCounts.get(player.name)?.[half] ?? 0,
     fieldCounts.get(player.name) ?? 0,
     groupUrgency(player),
     previous.has(player.name) ? 0 : 1,
@@ -3021,18 +3021,56 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
+  const liveFieldCount = (name: string): number => result.timeline.reduce((total, candidateBlock) => total + Number(FIELD_GROUPS.some((fieldGroup) => candidateBlock[fieldGroup].includes(name))), 0);
+  for (let blockIndex = 1; blockIndex < result.timeline.length - 1; blockIndex += 1) {
+    const block = result.timeline[blockIndex];
+    const half = blockHalf(blockIndex, game.total_blocks);
+    for (const group of FIELD_GROUPS) {
+      for (let playerIndex = 0; playerIndex < block[group].length; playerIndex += 1) {
+        const current = roster.find((player) => player.name === block[group][playerIndex]);
+        if (!current || liveFieldCount(current.name) <= (CORE_GROUPS.has(current.group) ? current.minimum_blocks : current.hard_maximum_blocks)) continue;
+        const replacement = roster
+          .filter((player) => player.available
+            && player.name !== block.GK
+            && block.bench.includes(player.name)
+            && (!CORE_GROUPS.has(current.group) || player.group === 'rotational')
+            && liveFieldCount(player.name) < player.minimum_blocks
+            && canCoverGroup(game, roster, player.name, group))
+          .sort((left, right) => (left.block_count - left.minimum_blocks) - (right.block_count - right.minimum_blocks)
+            || left.name.localeCompare(right.name))
+          .find((player) => {
+            const names = block[group].map((name, index) => index === playerIndex ? player.name : name);
+            return completeExactAssignmentExists(roster, names, slots[group], group);
+          });
+        if (!replacement) continue;
+        const names = block[group].map((name, index) => index === playerIndex ? replacement.name : name);
+        block[group] = names;
+        Object.assign(block.positions, assignExactSlots(roster, names, slots[group], group, block.positions, game.season_position_starts));
+        block.bench = block.bench.filter((name) => name !== replacement.name);
+        block.bench.push(current.name);
+        current.block_count -= 1;
+        current.field_blocks -= 1;
+        current.blocks_by_half[half] -= 1;
+        current.position_usage[group] -= 1;
+        replacement.block_count += 1;
+        replacement.field_blocks += 1;
+        replacement.blocks_by_half[half] += 1;
+        replacement.position_usage[group] += 1;
+      }
+    }
+  }
   for (const blockIndex of [0, result.timeline.length - 1]) {
     const block = result.timeline[blockIndex];
     const half = blockHalf(blockIndex, game.total_blocks);
     for (const group of FIELD_GROUPS) {
       for (let playerIndex = 0; playerIndex < block[group].length; playerIndex += 1) {
         const current = roster.find((player) => player.name === block[group][playerIndex]);
-        if (!current || CORE_GROUPS.has(current.group) || current.block_count <= current.hard_maximum_blocks) continue;
+        if (!current || liveFieldCount(current.name) <= (quotaFeasibility && !quotaFeasibility.minimumsFeasible && CORE_GROUPS.has(current.group) ? current.minimum_blocks : current.hard_maximum_blocks)) continue;
         const replacement = roster
           .filter((player) => player.available
             && player.name !== block.GK
             && block.bench.includes(player.name)
-            && player.block_count < player.minimum_blocks
+            && liveFieldCount(player.name) < player.minimum_blocks
             && canCoverGroup(game, roster, player.name, group))
           .sort((left, right) => (left.block_count - left.minimum_blocks) - (right.block_count - right.minimum_blocks)
             || left.name.localeCompare(right.name))

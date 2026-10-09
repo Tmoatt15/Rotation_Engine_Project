@@ -1848,6 +1848,35 @@ describe('ten-game season availability simulation', () => {
     expect(result.errors.filter((error) => error.includes('Eitan exceeds hard maximum'))).toEqual([]);
   });
 
+  it('fills minimums before higher-priority targets when field capacity is short', () => {
+    const coreNames = new Set(['Alvin', 'Artur', 'Blake', 'Dane', 'Everett', 'Hanshith', 'Jonathan', 'Max', 'Sid']);
+    const players = seasonSimulationRoster().map((player) => createPlayer({
+      ...player,
+      group: coreNames.has(player.name) ? 'core' : 'rotational',
+      ...(player.name === 'Cameron' || player.name === 'Eitan' ? {} : { general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] }),
+    }));
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      season_total_games: 1,
+      season_game_number: 1,
+      allow_emergency_assignments: true,
+      disable_maximum_limits: false,
+    }, players);
+    const fieldBlocks = (name: string): number => result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length;
+    const corePlayers = players.filter((player) => player.group === 'core').map((player) => player.name);
+    const rotationalShortfalls = players
+      .filter((player) => player.group === 'rotational')
+      .filter((player) => fieldBlocks(player.name) < 5);
+
+    expect(result.timeline).toHaveLength(10);
+    expect(Math.max(...corePlayers.map(fieldBlocks))).toBeLessThanOrEqual(7);
+    expect(rotationalShortfalls.length).toBeGreaterThan(0);
+    expect(result.warnings.some((warning) => /^Below minimum \(5\): .+\(\d+\)/.test(warning))).toBe(true);
+  });
+
   it('protects the Test 6.0 defensive minimum for Yash', () => {
     const rosterInputs = seasonSimulationRoster().map((player) => player.name === 'Blake'
       ? { ...player, backup_positions: ['F'] }
