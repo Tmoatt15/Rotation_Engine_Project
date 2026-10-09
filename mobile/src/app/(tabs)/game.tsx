@@ -8,6 +8,7 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { GAME_FORMATS } from '@/engine/season';
 import { createPlayer } from '@/engine/rotation';
 import { fieldCapacityByHalf, positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
+import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
@@ -37,7 +38,7 @@ function capacityPositionWords(position: PositionCapacityDeficit['position']): [
 
 type PositionShortage = { position: PositionCapacityDeficit['position']; detail: string; candidates: string[] };
 
-function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlocks: number, formation: string): PositionShortage | null {
+function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlocks: number, formation: string, assignments: { firstHalfGk?: string | null; secondHalfGk?: string | null } = {}): PositionShortage | null {
   const blockCapacity = message.match(/Block (\d+): ([DMF]) requires (\d+) players but (?:only )?(\d+) were assigned/);
   const exactAssignment = message.match(/Block (\d+): ([DMF]) players cannot form a complete legal exact-slot assignment/);
   const endpoint = message.match(/Block (\d+): core player (.+?) could not be assigned to the (first|last) block endpoint/);
@@ -46,10 +47,30 @@ function parsePositionShortage(message: string, roster: RosterPlayer[], totalBlo
   const position = (match[2] === 'D' || match[2] === 'M' || match[2] === 'F') ? match[2] : (roster.find((player) => player.name === match[2])?.general_positions ?? []).find((candidate) => ['D', 'M', 'F'].includes(candidate)) as PositionCapacityDeficit['position'] | undefined;
   if (!position) return null;
   const [noun] = capacityPositionWords(position);
+  const availableRoster = roster.map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
+  const activeGoalkeeper = blockCapacity
+    ? Number(blockCapacity[1]) <= Math.ceil(totalBlocks / 2) ? assignments.firstHalfGk : assignments.secondHalfGk
+    : null;
+  const eligibleForBlock = blockCapacity
+    ? [...new Map([
+      ...eligiblePlayers(availableRoster, position),
+      ...backupEligiblePlayers(availableRoster, position),
+    ].map((player) => [player.name, player] as const)).values()]
+      .filter((player) => player.available
+        && player.name !== activeGoalkeeper
+        && !(player.general_positions.length > 0 && player.general_positions.every((candidate) => candidate === 'GK'))
+        && !player.forbidden_positions.includes(position))
+    : [];
+  const availableCount = blockCapacity ? eligibleForBlock.length : 0;
   const detail = blockCapacity
-    ? `Block ${blockCapacity[1]} needs ${blockCapacity[3]} ${blockCapacity[3] === '1' ? noun : `${noun}s`} but only ${blockCapacity[4]} are available.`
+    ? `Block ${blockCapacity[1]} needs ${blockCapacity[3]} ${blockCapacity[3] === '1' ? noun : `${noun}s`} but ${availableCount} eligible ${availableCount === 1 ? noun : `${noun}s`} are available.`
     : `The available roster cannot cover every ${noun} slot within playing-time limits.`;
-  return { position, detail, candidates: positionCapacityCandidates(position, roster.map((player) => createPlayer(player as Parameters<typeof createPlayer>[0])), totalBlocks, formation) };
+  return {
+    position,
+    detail,
+    candidates: positionCapacityCandidates(position, availableRoster, totalBlocks, formation)
+      .filter((name) => name !== activeGoalkeeper),
+  };
 }
 
 export default function GameScreen() {
@@ -221,7 +242,7 @@ export default function GameScreen() {
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
       const availableRoster = rosterPlayers.filter((player) => !unavailable.has(player.name));
-      const shortage = parsePositionShortage(message, availableRoster, totalBlocks, formation);
+      const shortage = parsePositionShortage(message, availableRoster, totalBlocks, formation, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
       if (shortage) {
         setPositionShortage(shortage);
         setCapacityWarnings([]);
