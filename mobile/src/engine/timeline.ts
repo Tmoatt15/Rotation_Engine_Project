@@ -2874,7 +2874,8 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     if (!endpoint || endpoint[group].length !== formation[group]) continue;
     result.errors = result.errors.filter((error) => !error.startsWith(`Block ${game.total_blocks}: ${group} `));
   }
-  for (const blockIndex of new Set([0, game.total_blocks - 1])) {
+  const endpointBlocks = startBlock === 1 ? [0, game.total_blocks - 1] : [game.total_blocks - 1];
+  for (const blockIndex of new Set(endpointBlocks)) {
     const assignedFieldPlayers = new Set([
       ...result.timeline[blockIndex].D,
       ...result.timeline[blockIndex].M,
