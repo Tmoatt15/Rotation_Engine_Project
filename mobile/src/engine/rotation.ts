@@ -189,6 +189,14 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
     }
   }
   const frozen = updatedTimeline.slice(0, Math.max(0, earliest - 1)); replayTimeline(roster, frozen, game); const quota = computeBlockTargets(game, roster);
+  const frozenAssignments = frozen.map((block) => ({
+    ...block,
+    D: [...block.D],
+    M: [...block.M],
+    F: [...block.F],
+    bench: [...block.bench],
+    positions: { ...block.positions },
+  }));
   for (const change of changes) {
     if (change.action !== 'available' || change.target_blocks === undefined) continue;
     const player = byName.get(change.player);
@@ -217,6 +225,9 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
       };
     })()
     : buildTimeline(game, roster, Math.max(1, earliest), frozen, quota.metadata.quota_feasibility, previousTotalBlocks);
+  if (!approvedFastPath && frozenAssignments.length > 0) {
+    timeline.timeline.splice(0, frozenAssignments.length, ...frozenAssignments);
+  }
   for (const change of changes.filter((candidate) => candidate.action === 'available' && candidate.target_blocks !== undefined)) {
     const player = byName.get(change.player);
     if (!player) continue;
@@ -267,14 +278,13 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
               })()
               && !changes.some((candidate) => candidate.action === 'available' && candidate.block === blockIndex && candidate.player === name))
             .sort((left, right) => {
-              if (!approvedPlayerName) return left.index - right.index;
               const leftPlayer = byName.get(left.name);
               const rightPlayer = byName.get(right.name);
               const leftCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(left.name)).length;
               const rightCount = timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(right.name)).length;
-              const leftSurplus = leftPlayer ? leftCount - leftPlayer.target_blocks : leftCount;
-              const rightSurplus = rightPlayer ? rightCount - rightPlayer.target_blocks : rightCount;
-              return leftSurplus - rightSurplus || leftCount - rightCount || left.name.localeCompare(right.name);
+              const leftSurplus = leftPlayer ? leftCount - leftPlayer.minimum_blocks : leftCount;
+              const rightSurplus = rightPlayer ? rightCount - rightPlayer.minimum_blocks : rightCount;
+              return rightSurplus - leftSurplus || rightCount - leftCount || left.name.localeCompare(right.name);
             });
           const replacementIndex = replacementCandidates.find(({ index }) => {
             const next = block[group].map((name, candidateIndex) => candidateIndex === index ? player.name : name);

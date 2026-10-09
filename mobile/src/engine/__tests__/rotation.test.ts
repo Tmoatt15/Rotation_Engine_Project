@@ -739,6 +739,8 @@ describe('goalkeeper and minimum protection', () => {
     expect(regenerated.errors.filter((error) => /exceeds hard maximum|under minimum|under target/.test(error))).toEqual([]);
     expect(regenerated.errors.filter((error) => error.includes('under minimum'))).toEqual([]);
     expect(regenerated.needs_coach_approval).not.toBe(true);
+    expect(regenerated.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })))
+      .toEqual(initial.timeline.slice(0, 4).map(({ GK, D, M, F, positions }) => ({ GK, D, M, F, positions })));
     expect(fieldBlocks).toHaveLength(3);
     expect(regenerated.timeline[4].D.concat(regenerated.timeline[4].M, regenerated.timeline[4].F)).toContain(latePlayer);
   });
