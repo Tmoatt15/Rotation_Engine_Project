@@ -362,15 +362,15 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     { groups: ['developing', 'developmental'], floor: 4 },
   ];
   for (const tier of shortageTiers) {
-    const candidates = shortagePlayers.filter((player) => tier.groups.includes(player.group)).sort((left, right) => left.name.localeCompare(right.name));
-    while (shortfall > 0 && candidates.some((player) => player.minimum_blocks > tier.floor)) {
-      for (const player of candidates) {
-        if (shortfall <= 0) break;
-        if (player.minimum_blocks <= tier.floor) continue;
-        player.minimum_blocks -= 1;
-        player.hard_minimum_blocks = player.minimum_blocks;
-        shortfall -= 1;
-      }
+    const candidates = shortagePlayers.filter((player) => tier.groups.includes(player.group));
+    while (shortfall > 0) {
+      const player = candidates
+        .filter((candidate) => candidate.minimum_blocks > tier.floor)
+        .sort((left, right) => right.minimum_blocks - left.minimum_blocks || left.name.localeCompare(right.name))[0];
+      if (!player) break;
+      player.minimum_blocks -= 1;
+      player.hard_minimum_blocks = player.minimum_blocks;
+      shortfall -= 1;
     }
   }
   const adjustedMinimums = shortagePlayers
