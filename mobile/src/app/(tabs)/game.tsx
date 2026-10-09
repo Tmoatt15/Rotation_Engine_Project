@@ -242,6 +242,11 @@ export default function GameScreen() {
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
+      if (message.includes('exceeds hard maximum') || message.includes('exceeds the half') || message.includes('capacity is blocked by half maximums')) {
+        setError(null);
+        setShowMaximumLimitConfirmation(true);
+        return;
+      }
       const availableRoster = rosterPlayers.filter((player) => !unavailable.has(player.name));
       const shortage = parsePositionShortage(message, availableRoster, totalBlocks, formation, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
       if (shortage) {

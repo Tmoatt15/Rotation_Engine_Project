@@ -144,6 +144,7 @@ export interface GameInput {
   allow_emergency_assignments?: boolean;
   allow_emergency_positions?: boolean;
   disable_maximum_limits?: boolean;
+  maximum_relaxation_level?: 1 | 2;
   is_late_arrival_regen?: boolean;
   late_arrival_approval?: LateArrivalApprovalRequest;
   approved_player_name?: string;
@@ -170,6 +171,7 @@ export interface Game extends Required<
   gk_assignment: string | null;
   first_half_gk: string | null;
   second_half_gk: string | null;
+  maximum_relaxation_level?: 1 | 2;
   core_high_names: string[] | null;
   replacement_credits: ReplacementCredit[];
   replacement_bonuses: Record<string, number>;
@@ -303,6 +305,7 @@ export interface LiveSchedule {
   errors?: string[];
   structural_errors?: string[];
   review_status?: 'generated' | 'generated_with_errors' | 'manually_edited';
+  maximum_relaxation_level?: 1 | 2;
   blocks: ScheduleBlock[];
 }
 

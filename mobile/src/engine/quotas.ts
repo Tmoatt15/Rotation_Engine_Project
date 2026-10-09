@@ -331,13 +331,18 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     else if (['developing', 'developmental'].includes(player.group)) { minimum = minimumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MIN); maximum = Math.max(minimum, intendedMaximumBlocksForPercentage(game.total_blocks, DEVELOPMENTAL_MAX)); target = developingHigh.has(player.name) ? maximum : minimum; }
     else { result.errors.push(`Unknown group for player ${player.name}`); }
     if (game.quota_exempt_players.has(player.name)) { target = 0; minimum = 0; maximum = game.total_blocks; }
+    const graduatedMaximum = game.maximum_relaxation_level === 1 ? 8 : game.maximum_relaxation_level === 2 ? 9 : undefined;
+    if (graduatedMaximum !== undefined && !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name)) maximum = graduatedMaximum;
     player.target_blocks = target; player.minimum_blocks = minimum; player.maximum_blocks = game.quota_exempt_players.has(player.name) ? game.total_blocks : maximum + (game.replacement_bonuses[player.name] ?? 0);
     applyBlockLimits(player, game.total_blocks, game.is_late_arrival_regen);
     if (game.disable_maximum_limits) applyMaximumOverride(player, game.total_blocks);
     if (game.quota_exempt_players.has(player.name)) { player.hard_minimum_blocks = 0; player.hard_maximum_blocks = game.total_blocks; player.gk_field_minimum_blocks = 0; player.gk_field_maximum_blocks = game.total_blocks; }
+    else if (graduatedMaximum !== undefined && !isDedicatedGoalkeeper(player)) player.hard_maximum_blocks = graduatedMaximum;
     else player.hard_maximum_blocks = Math.min(game.total_blocks, player.hard_maximum_blocks + (game.replacement_bonuses[player.name] ?? 0));
     player.max_blocks_per_half = game.disable_maximum_limits
       ? game.total_blocks
+      : graduatedMaximum !== undefined && !isDedicatedGoalkeeper(player)
+        ? Math.ceil(graduatedMaximum / 2)
       : isDedicatedGoalkeeper(player)
         ? Math.max(1, Math.ceil(game.total_blocks / 2))
         : Math.max(1, Math.ceil(player.hard_maximum_blocks / 2));

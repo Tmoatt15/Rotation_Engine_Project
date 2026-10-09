@@ -2844,6 +2844,14 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
           ? [...chosen, ...(candidatePools[0] ?? []).slice(0, formation[group] - chosen.length)]
           : validChoice ? [...chosen, ...validChoice] : undefined;
         if (additional) chosen = additional;
+        if (!emergency && chosen.length < formation[group]) {
+          const halfMaximumBlocked = candidates
+            .filter((player) => materializedHalfCount(player.name, half) >= player.max_blocks_per_half)
+            .map((player) => `${player.name} (${materializedHalfCount(player.name, half)}/${player.max_blocks_per_half})`);
+          if (halfMaximumBlocked.length) {
+            result.errors.push(`Block ${block}: ${group} capacity is blocked by half maximums for ${halfMaximumBlocked.join(', ')}.`);
+          }
+        }
       }
         assignment[group] = chosen.map((player) => player.name); chosen.forEach((player) => used.add(player.name));
       const exactAssignment = assignExactSlots(roster, assignment[group], slots[group], group, previousPositions, game.season_position_starts, emergency);

@@ -40,20 +40,48 @@ function seasonHistory(reports: AfterGameReport[], gameNumber: number): { player
   return { playerBlocks, positionStarts, goalkeeperStarts };
 }
 
+function maximumConstraintFailure(errors: string[]): boolean {
+  return errors.some((error) => error.includes('exceeds hard maximum')
+    || error.includes('exceeds the half')
+    || error.includes('capacity is blocked by half maximums'));
+}
+
 export async function generateLocalSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; disableMaximumLimits?: boolean }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[] }> {
   const settings = await getSeasonSettings(input.teamId);
   const team = await getLocalTeam(input.teamId);
   const roster = (await getRoster(input.teamId)).players.map(rosterInput).filter((player) => input.availablePlayerNames.includes(player.name));
   const setup = new SeasonSetup({ ...settings, block_length_minutes: undefined });
   const history = seasonHistory(await getSavedReports(input.teamId), input.gameNumber);
-  const result = generateSchedule({ game_format: setup.game_format, has_goalkeeper: setup.has_goalkeeper, total_blocks: setup.total_blocks, formation: setup.formation, first_half_gk: input.firstHalfGk, second_half_gk: input.secondHalfGk, season_total_games: setup.total_games, season_game_number: input.gameNumber, season_seed: 2026, season_player_blocks: history.playerBlocks, season_position_starts: history.positionStarts, season_goalkeeper_starts: history.goalkeeperStarts, allow_emergency_assignments: true, disable_maximum_limits: input.disableMaximumLimits ?? false }, roster.map(createPlayer));
+  const baseGame = { game_format: setup.game_format, has_goalkeeper: setup.has_goalkeeper, total_blocks: setup.total_blocks, formation: setup.formation, first_half_gk: input.firstHalfGk, second_half_gk: input.secondHalfGk, season_total_games: setup.total_games, season_game_number: input.gameNumber, season_seed: 2026, season_player_blocks: history.playerBlocks, season_position_starts: history.positionStarts, season_goalkeeper_starts: history.goalkeeperStarts, allow_emergency_assignments: true, disable_maximum_limits: input.disableMaximumLimits ?? false };
+  const retryLevels: Array<1 | 2 | undefined> = input.disableMaximumLimits ? [undefined] : [undefined, 1, 2];
+  let result = generateSchedule(baseGame, roster.map(createPlayer));
+  let usedMaximumRelaxation: 1 | 2 | undefined;
+  let attemptedMaximumRetry = false;
+  for (const level of retryLevels.slice(1)) {
+    if (!result.errors.length || !maximumConstraintFailure(result.errors)) break;
+    attemptedMaximumRetry = true;
+    result = generateSchedule({ ...baseGame, maximum_relaxation_level: level }, roster.map(createPlayer));
+    if (!result.errors.length) {
+      usedMaximumRelaxation = level;
+      break;
+    }
+  }
+  if (attemptedMaximumRetry && result.errors.length && !maximumConstraintFailure(result.errors)) {
+    result.errors.push('Maximum limits prevented a complete schedule after graduated retries.');
+  }
   const goalkeeperErrors = result.errors.filter((error) => error.toLowerCase().includes('goalkeeper'));
   if (goalkeeperErrors.length) throw new Error(goalkeeperErrors.join(' '));
   assertCompleteSchedule(result.errors);
   const blockLengths = setup.block_lengths_minutes;
   const blockStarts = blockStartMinutes(blockLengths);
   const structuralErrors = summarizeStructuralErrors(input.gameNumber, result.errors.filter((error) => !error.includes('exceeds') && !error.includes('under target') && !error.includes('under minimum')));
-  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, available_player_names: input.availablePlayerNames, core_player_names: roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings: result.warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated' };
+  const graduatedWarning = usedMaximumRelaxation === 1
+    ? 'Roster is short-handed. Maximums relaxed to 8 blocks to generate a valid schedule.'
+    : usedMaximumRelaxation === 2
+      ? 'Roster is short-handed. Maximums relaxed to 9 blocks to generate a valid schedule.'
+      : undefined;
+  const warnings = graduatedWarning ? [...result.warnings, graduatedWarning] : result.warnings;
+  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, available_player_names: input.availablePlayerNames, core_player_names: roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated', maximum_relaxation_level: usedMaximumRelaxation };
 }
 
 export async function regenerateLateArrivalSchedule(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; minimumBlocks: number; maximumBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean; approval?: LateArrivalApprovalRequest; approvedPlayerName?: string }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; needs_minimum_warning?: boolean; minimum_warning?: string }> {
