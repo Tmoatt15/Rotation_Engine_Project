@@ -3107,7 +3107,7 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
   while (crossPositionChanged) {
     crossPositionChanged = false;
     const overMinimum = roster
-      .filter((player) => player.available && !assignedGoalkeeperNames.has(player.name)
+      .filter((player) => player.available
         && fairnessFieldCount(player.name) > fairnessMinimum(player))
       .sort((left, right) => (initialFairnessExcess.get(right.name) ?? 0) - (initialFairnessExcess.get(left.name) ?? 0)
         || fairnessFieldCount(right.name) - fairnessFieldCount(left.name)
@@ -3122,6 +3122,32 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       for (const under of underMinimum) {
         if (crossPositionChanged) break;
         for (const source of sourceGroups) {
+          if (crossPositionChanged) break;
+          for (let blockIndex = 1; blockIndex < result.timeline.length - 1; blockIndex += 1) {
+            const block = result.timeline[blockIndex];
+            if (block.GK === under.name || block.GK === over.name
+              || !block[source].includes(over.name)
+              || block[source].includes(under.name)) continue;
+            const assigned = new Set(flatMapCompat(FIELD_GROUPS, (group) => block[group]));
+            if (assigned.has(under.name) || !canCoverGroup(game, roster, under.name, source)) continue;
+            const replacement = block[source].map((name) => name === over.name ? under.name : name);
+            if (!completeExactAssignmentExists(roster, replacement, slots[source], source)) continue;
+            block[source] = replacement;
+            Object.assign(block.positions, assignExactSlots(roster, replacement, slots[source], source, block.positions, game.season_position_starts));
+            block.bench = block.bench.filter((name) => name !== under.name);
+            if (!block.bench.includes(over.name)) block.bench.push(over.name);
+            const half = blockHalf(blockIndex, game.total_blocks);
+            over.block_count -= 1;
+            over.field_blocks -= 1;
+            over.blocks_by_half[half] -= 1;
+            over.position_usage[source] -= 1;
+            under.block_count += 1;
+            under.field_blocks += 1;
+            under.blocks_by_half[half] += 1;
+            under.position_usage[source] += 1;
+            crossPositionChanged = true;
+            break;
+          }
           if (crossPositionChanged) break;
           const targetGroups = FIELD_GROUPS.filter((group) => group !== source && canCoverGroup(game, roster, over.name, group));
           for (const target of targetGroups) {

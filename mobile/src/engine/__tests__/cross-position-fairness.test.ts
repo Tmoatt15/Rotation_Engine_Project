@@ -18,14 +18,35 @@ it('rebalances the exported Real Folsom roster across positions', () => {
     general_positions: general_positions as string[], primary_positions: primary_positions as string[],
     backup_positions: backup_positions as string[],
   }));
-  const result = generateSchedule({
+  const activeRows = rows.filter((player) => player.name !== 'Blake');
+  const seasonPlayerBlocks = {
+    Alvin: 6, Artur: 5, Blake: 6, Brad: 5, Cameron: 7, Dane: 6, Eitan: 7, Everett: 6,
+    Frank: 5, Hanshith: 7, Jonathan: 6, Mahaswin: 5, Max: 6, Prerith: 5, Ryan: 5,
+    Sawyer: 7, Sid: 6, Thanish: 5, Yash: 5,
+  };
+  const seasonPositionStarts = {
+    Alvin: { LCB: 1 }, Blake: { LB: 1 }, Cameron: { GK: 1 }, Dane: { LM: 1 },
+    Eitan: { CM: 1 }, Everett: { RCB: 1 }, Hanshith: { CF: 1 }, Jonathan: { RM: 1 },
+    Max: { LF: 1 }, Sawyer: { RF: 1 }, Sid: { RB: 1 },
+  };
+  const fullResult = generateSchedule({
     total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan',
     season_total_games: 10, season_game_number: 1, allow_emergency_assignments: true,
     disable_maximum_limits: false,
   }, rows);
-  const fieldBlocks = (name: string): number => result.timeline.filter((block) =>
+  const result = generateSchedule({
+    total_blocks: 10, formation: '4-3-3', first_half_gk: 'Cameron', second_half_gk: 'Eitan',
+    season_total_games: 10, season_game_number: 2, allow_emergency_assignments: true,
+    season_player_blocks: seasonPlayerBlocks,
+    season_position_starts: seasonPositionStarts,
+    season_goalkeeper_starts: { Cameron: 1, Eitan: 0 },
+    disable_maximum_limits: false,
+  }, activeRows);
+  const fieldBlocks = (schedule: ReturnType<typeof generateSchedule>, name: string): number => schedule.timeline.filter((block) =>
     [...block.D, ...block.M, ...block.F].includes(name)).length;
-  expect(fieldBlocks('Max')).toBe(6);
-  expect(fieldBlocks('Mahaswin')).toBe(5);
-  expect(fieldBlocks('Prerith')).toBe(5);
+  expect(fieldBlocks(fullResult, 'Max')).toBe(6);
+  expect(fieldBlocks(fullResult, 'Mahaswin')).toBe(5);
+  expect(fieldBlocks(fullResult, 'Prerith')).toBe(5);
+  expect(fieldBlocks(result, 'Thanish')).toBe(5);
+  expect(fieldBlocks(result, 'Yash')).toBe(5);
 });
