@@ -345,10 +345,16 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
     if (!isDedicatedGoalkeeper(player) && player.group !== 'rotational_gk') requestedFieldSlots += target;
   }
   result.metadata.quota_feasibility = quotaFeasibility;
+  const assignedGoalkeeperNames = new Set([game.first_half_gk, game.second_half_gk].filter((name): name is string => Boolean(name)));
+  const shortageMinimumFor = (player: Player): number => assignedGoalkeeperNames.has(player.name)
+    ? player.gk_field_minimum_blocks
+    : minimumFor(player);
   const rosterMinimumRequirement = roster
     .filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name))
-    .reduce((total, player) => total + minimumFor(player), 0);
-  const shortagePlayers = roster.filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name));
+    .reduce((total, player) => total + shortageMinimumFor(player), 0);
+  const shortagePlayers = roster.filter((player) => !isDedicatedGoalkeeper(player)
+    && !assignedGoalkeeperNames.has(player.name)
+    && !game.quota_exempt_players.has(player.name));
   let shortfall = Math.max(0, rosterMinimumRequirement - quotaFeasibility.legalAvailableCapacity);
   const shortageTiers: Array<{ groups: string[]; floor: number }> = [
     { groups: ['core', 'core_a', 'core_b'], floor: minimumBlocksForPercentage(game.total_blocks, ROTATIONAL_MIN) },
