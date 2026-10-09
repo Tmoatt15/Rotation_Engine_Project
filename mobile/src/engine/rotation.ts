@@ -1,7 +1,7 @@
 import type { AvailabilityChange, Game, GameInput, LateArrivalApprovalRequest, LateArrivalApprovalResult, Player, PlayerInput, PositionGroup, RotationResult, ScheduleBlock } from './models';
 import { computeBlockTargets } from './quotas';
 import { assignExactSlots, buildTimeline, calculateMovementMetrics, completeExactAssignmentExists, estimateAdditionalPlayersNeeded, formationSlots, parseFormation, replayTimeline, validateTimeline } from './timeline';
-import { computeSurplus } from './surplus';
+import { computeSurplus, filterStaleQuotaWarnings } from './surplus';
 import { eligiblePlayers } from './positional';
 import { GAME_FORMATS } from './season';
 
@@ -103,15 +103,25 @@ function finalizeResult(game: Game, roster: Player[], timeline: RotationResult):
     ...timeline.timeline[timeline.timeline.length - 1].M,
     ...timeline.timeline[timeline.timeline.length - 1].F,
   ]);
+  const finalCounts = new Map<string, number>();
+  timeline.timeline.forEach((block) => [block.GK, ...block.D, ...block.M, ...block.F].forEach((name) => finalCounts.set(name, (finalCounts.get(name) ?? 0) + 1)));
   const allErrors = [...new Set([...timeline.errors, ...validationErrors])];
   const endpointQuotaWarnings = allErrors.filter((error) => {
     const match = error.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
-    return match !== null && endpointNames.has(match[1]);
+    const player = match ? roster.find((candidate) => candidate.name === match[1]) : undefined;
+    return match !== null && endpointNames.has(match[1]) && player !== undefined && (finalCounts.get(player.name) ?? 0) > player.hard_maximum_blocks;
   });
+  const currentWarnings = [...new Set([...timeline.warnings, ...endpointQuotaWarnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])]
+    .filter((warning) => {
+      const match = warning.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
+      if (!match || !endpointNames.has(match[1])) return true;
+      const player = roster.find((candidate) => candidate.name === match[1]);
+      return player === undefined || (finalCounts.get(player.name) ?? 0) > player.hard_maximum_blocks;
+    });
   return {
     ...timeline,
     errors: allErrors.filter((error) => !endpointQuotaWarnings.includes(error)),
-    warnings: [...new Set([...timeline.warnings, ...endpointQuotaWarnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])],
+    warnings: filterStaleQuotaWarnings(currentWarnings, timeline.timeline, roster),
     movement_metrics: calculateMovementMetrics(timeline.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments),
     starting_position_counts: startingPositionCounts(timeline.timeline),
   };

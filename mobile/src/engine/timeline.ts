@@ -3041,6 +3041,42 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
+  for (const blockIndex of [0, result.timeline.length - 1]) {
+    const block = result.timeline[blockIndex];
+    const half = blockHalf(blockIndex, game.total_blocks);
+    for (const group of FIELD_GROUPS) {
+      for (let playerIndex = 0; playerIndex < block[group].length; playerIndex += 1) {
+        const current = roster.find((player) => player.name === block[group][playerIndex]);
+        if (!current || CORE_GROUPS.has(current.group) || current.block_count <= current.hard_maximum_blocks) continue;
+        const replacement = roster
+          .filter((player) => player.available
+            && player.name !== block.GK
+            && block.bench.includes(player.name)
+            && player.block_count < player.minimum_blocks
+            && canCoverGroup(game, roster, player.name, group))
+          .sort((left, right) => (left.block_count - left.minimum_blocks) - (right.block_count - right.minimum_blocks)
+            || left.name.localeCompare(right.name))
+          .find((player) => {
+            const names = block[group].map((name, index) => index === playerIndex ? player.name : name);
+            return completeExactAssignmentExists(roster, names, slots[group], group);
+          });
+        if (!replacement) continue;
+        const names = block[group].map((name, index) => index === playerIndex ? replacement.name : name);
+        block[group] = names;
+        Object.assign(block.positions, assignExactSlots(roster, names, slots[group], group, block.positions, game.season_position_starts));
+        block.bench = block.bench.filter((name) => name !== replacement.name);
+        block.bench.push(current.name);
+        current.block_count -= 1;
+        current.field_blocks -= 1;
+        current.blocks_by_half[half] -= 1;
+        current.position_usage[group] -= 1;
+        replacement.block_count += 1;
+        replacement.field_blocks += 1;
+        replacement.blocks_by_half[half] += 1;
+        replacement.position_usage[group] += 1;
+      }
+    }
+  }
   result.movement_metrics = calculateMovementMetrics(result.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments);
   const finalValidationErrors = validateTimeline(roster, result.timeline, formation, slots, game.total_blocks, game);
   const finalEndpointNames = new Set([
