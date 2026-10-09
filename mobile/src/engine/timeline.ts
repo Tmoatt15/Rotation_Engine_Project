@@ -473,8 +473,9 @@ export function validateTimeline(roster: Player[], timeline: ScheduleBlock[], fo
         const totalMaximum = Math.max(0, Math.min(totalBlocks - 1, 9));
         if (total > totalMaximum) errors.push(`${player.name} exceeds hard maximum by ${total - totalMaximum} total blocks.`);
         if (fieldTotal > player.gk_field_maximum_blocks) errors.push(`${player.name} exceeds GK field maximum by ${fieldTotal - player.gk_field_maximum_blocks} blocks.`);
-    } else if (!approvedException && !soleGoalkeeper && total > player.hard_maximum_blocks) {
-      errors.push(`${player.name} exceeds hard maximum by ${total - player.hard_maximum_blocks} blocks.`);
+    } else if (!approvedException && !soleGoalkeeper && (assignedGoalkeeper ? fieldTotal : total) > player.hard_maximum_blocks) {
+      const countedBlocks = assignedGoalkeeper ? fieldTotal : total;
+      errors.push(`${player.name} exceeds hard maximum by ${countedBlocks - player.hard_maximum_blocks} blocks.`);
     }
     for (const half of [0, 1] as const) if (!approvedException && halves[half] > player.max_blocks_per_half) errors.push(`${player.name} exceeds the half ${half + 1} maximum by ${halves[half] - player.max_blocks_per_half} blocks.`);
   }

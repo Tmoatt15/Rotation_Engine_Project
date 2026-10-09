@@ -1824,7 +1824,28 @@ describe('ten-game season availability simulation', () => {
 
     expect(fieldBlocks('Jonathan')).toBeLessThanOrEqual(8);
     expect(fieldBlocks('Sawyer')).toBeLessThanOrEqual(8);
+    expect(fieldBlocks('Eitan')).toBeLessThanOrEqual(7);
+    expect(result.timeline.filter((block) => block.GK === 'Eitan')).toHaveLength(5);
     expect(result.errors.filter((error) => error.includes('exceeds hard maximum'))).toEqual([]);
+  });
+
+  it('does not count assigned goalkeeper blocks toward a rotational hard maximum', () => {
+    const result = generateSchedule({
+      total_blocks: 10,
+      formation: '4-3-3',
+      first_half_gk: 'Cameron',
+      second_half_gk: 'Eitan',
+      season_total_games: 1,
+      season_game_number: 1,
+      allow_emergency_assignments: true,
+      disable_maximum_limits: false,
+    }, seasonSimulationRoster().map(createPlayer));
+    const eitanFieldBlocks = result.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes('Eitan')).length;
+
+    expect(result.timeline).toHaveLength(10);
+    expect(result.timeline.filter((block) => block.GK === 'Eitan')).toHaveLength(5);
+    expect(eitanFieldBlocks).toBeLessThanOrEqual(7);
+    expect(result.errors.filter((error) => error.includes('Eitan exceeds hard maximum'))).toEqual([]);
   });
 
   it('protects the Test 6.0 defensive minimum for Yash', () => {

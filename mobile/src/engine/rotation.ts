@@ -124,18 +124,21 @@ function finalizeResult(game: Game, roster: Player[], timeline: RotationResult):
   ]);
   const finalCounts = new Map<string, number>();
   timeline.timeline.forEach((block) => [block.GK, ...block.D, ...block.M, ...block.F].forEach((name) => finalCounts.set(name, (finalCounts.get(name) ?? 0) + 1)));
+  const assignedGoalkeepers = new Set([game.first_half_gk, game.second_half_gk].filter((name): name is string => Boolean(name)));
+  const fieldBlockCount = (name: string): number => timeline.timeline.filter((block) => [...block.D, ...block.M, ...block.F].includes(name)).length;
+  const hardMaximumCount = (name: string): number => assignedGoalkeepers.has(name) ? fieldBlockCount(name) : (finalCounts.get(name) ?? 0);
   const allErrors = [...new Set([...timeline.errors, ...validationErrors])];
   const endpointQuotaWarnings = allErrors.filter((error) => {
     const match = error.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
     const player = match ? roster.find((candidate) => candidate.name === match[1]) : undefined;
-    return match !== null && endpointNames.has(match[1]) && player !== undefined && (finalCounts.get(player.name) ?? 0) > player.hard_maximum_blocks;
+    return match !== null && endpointNames.has(match[1]) && player !== undefined && hardMaximumCount(player.name) > player.hard_maximum_blocks;
   });
   const currentWarnings = [...new Set([...timeline.warnings, ...endpointQuotaWarnings, ...estimateAdditionalPlayersNeeded(timeline.timeline, formation, game.total_blocks)])]
     .filter((warning) => {
       const match = warning.match(/^(.+) exceeds hard maximum by \d+ blocks\.$/);
       if (!match || !endpointNames.has(match[1])) return true;
       const player = roster.find((candidate) => candidate.name === match[1]);
-      return player === undefined || (finalCounts.get(player.name) ?? 0) > player.hard_maximum_blocks;
+      return player === undefined || hardMaximumCount(player.name) > player.hard_maximum_blocks;
     });
   return {
     ...timeline,
