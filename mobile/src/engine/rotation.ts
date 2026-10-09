@@ -334,6 +334,7 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
         let applied = false;
         for (const group of ['D', 'M', 'F'] as const) {
           if (!eligiblePlayers(roster, group).some((item) => item.name === approvedPlayerName)) continue;
+          const count = (name: string): number => timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(name)).length;
           const replacementCandidates = block[group]
             .map((name, index) => ({ name, index }))
             .filter(({ name }) => {
@@ -347,7 +348,6 @@ export function regenerateSchedule(gameInput: Game | GameInput, rosterInput: Pla
             .sort((left, right) => {
               const leftPlayer = roster.find((player) => player.name === left.name);
               const rightPlayer = roster.find((player) => player.name === right.name);
-              const count = (name: string): number => timeline.timeline.filter((candidateBlock) => [candidateBlock.GK, ...candidateBlock.D, ...candidateBlock.M, ...candidateBlock.F].includes(name)).length;
               const leftCount = count(left.name);
               const rightCount = count(right.name);
               const leftTarget = leftPlayer?.target_blocks ?? leftPlayer?.hard_minimum_blocks ?? 0;
