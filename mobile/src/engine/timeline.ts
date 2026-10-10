@@ -1357,6 +1357,25 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
         return 0;
       });
       const chosen = choices[0] ?? [];
+      if (game.maximum_relaxation_level === 2 && blockIndex >= 7) {
+        console.info('[rotation] Level 2 extra-allocation decision', {
+          block: blockIndex + 1,
+          position,
+          selectionSource: futureSafeChoices.length ? 'future-safe' : 'exact-feasible',
+          candidates: ordered.map((player) => {
+            const fieldMinimum = assignedGoalkeepers.has(player.name) && game.is_late_arrival_regen ? player.gk_field_minimum_blocks : player.hard_minimum_blocks;
+            const currentBlocks = fieldCounts.get(player.name) ?? 0;
+            return {
+              name: player.name,
+              currentBlocks,
+              extraBlocks: Math.max(0, currentBlocks - fieldMinimum),
+              targetDeficit: Math.max(0, player.target_blocks - currentBlocks),
+              key: playerKey(player, position, blockIndex, previous),
+            };
+          }),
+          chosen: chosen.map((player) => player.name),
+        });
+      }
       plans[position][blockIndex] = chosen.map((player) => player.name);
       registerArrivalBlockPlacement(position, blockIndex, plans[position][blockIndex]);
       for (const player of chosen) {
@@ -3202,6 +3221,108 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
       }
     }
   }
+  const fairnessMaximum = (player: Player): number => assignedGoalkeeperNames.has(player.name)
+    ? player.gk_field_maximum_blocks
+    : game.disable_maximum_limits ? game.total_blocks : player.hard_maximum_blocks;
+  const fairnessHalfMaximum = (player: Player): number => assignedGoalkeeperNames.has(player.name)
+    ? game.total_blocks
+    : game.disable_maximum_limits ? game.total_blocks : player.max_blocks_per_half;
+  const updateFairnessSwapStats = (high: Player, low: Player, blockIndex: number, source: FieldGroup, target?: FieldGroup): void => {
+    const half = blockHalf(blockIndex, game.total_blocks);
+    high.block_count -= 1;
+    high.field_blocks -= 1;
+    high.blocks_by_half[half] -= 1;
+    high.position_usage[source] -= 1;
+    low.block_count += 1;
+    low.field_blocks += 1;
+    low.blocks_by_half[half] += 1;
+    low.position_usage[target ?? source] += 1;
+  };
+  const fairnessSwapPass = (): void => {
+    if (!result.timeline.length || result.timeline.some((block) => FIELD_GROUPS.some((group) => block[group].length !== formation[group]))) return;
+    let swaps = 0;
+    while (swaps < 10) {
+      const candidatesByTier = [false, true];
+      let swapped = false;
+      for (const coreTier of candidatesByTier) {
+        const tierPlayers = roster.filter((player) => player.available
+          && CORE_GROUPS.has(player.group) === coreTier);
+        const counts = (player: Player): number => fairnessFieldCount(player.name);
+        const lowPlayers = [...tierPlayers].sort((left, right) => counts(left) - counts(right) || left.name.localeCompare(right.name));
+        const highPlayers = [...tierPlayers].sort((left, right) => counts(right) - counts(left) || left.name.localeCompare(right.name));
+        for (const low of lowPlayers) {
+          const lowCount = counts(low);
+          if (lowCount >= fairnessMaximum(low)) continue;
+          for (const high of highPlayers) {
+            const highCount = counts(high);
+            const goalkeeperOverMaximum = assignedGoalkeeperNames.has(high.name) && highCount > fairnessMaximum(high);
+            if (high.name === low.name
+              || (!goalkeeperOverMaximum && highCount - lowCount <= 1)
+              || highCount <= fairnessMinimum(high)) continue;
+            let changed = false;
+            for (let blockIndex = 1; blockIndex < result.timeline.length - 1 && !changed; blockIndex += 1) {
+              const block = result.timeline[blockIndex];
+              if (block.GK === low.name || block.GK === high.name) continue;
+              const assigned = new Set(flatMapCompat(FIELD_GROUPS, (group) => block[group]));
+              if (assigned.has(low.name)) continue;
+              const half = blockHalf(blockIndex, game.total_blocks);
+              if (lowCount >= fairnessMaximum(low) || low.blocks_by_half[half] >= fairnessHalfMaximum(low)) continue;
+              for (const source of FIELD_GROUPS) {
+                if (!block[source].includes(high.name) || !canCoverGroup(game, roster, low.name, source)) continue;
+                const directNames = block[source].map((name) => name === high.name ? low.name : name);
+                if (!completeExactAssignmentExists(roster, directNames, slots[source], source)) continue;
+                block[source] = directNames;
+                Object.assign(block.positions, assignExactSlots(roster, directNames, slots[source], source, block.positions, game.season_position_starts));
+                block.bench = block.bench.filter((name) => name !== low.name);
+                if (!block.bench.includes(high.name)) block.bench.push(high.name);
+                updateFairnessSwapStats(high, low, blockIndex, source);
+                changed = true;
+                break;
+              }
+              if (changed) break;
+              for (const source of FIELD_GROUPS) {
+                if (!block[source].includes(high.name)) continue;
+                for (const target of FIELD_GROUPS) {
+                  if (source === target || !canCoverGroup(game, roster, low.name, target)) continue;
+                  const bridge = block[target]
+                    .map((name) => roster.find((player) => player.name === name))
+                    .find((player): player is Player => Boolean(player)
+                      && player.name !== high.name
+                      && canCoverGroup(game, roster, player.name, source));
+                  if (!bridge) continue;
+                  const sourceNames = block[source].map((name) => name === high.name ? bridge.name : name);
+                  const targetNames = block[target].map((name) => name === bridge.name ? low.name : name);
+                  if (!completeExactAssignmentExists(roster, sourceNames, slots[source], source)
+                    || !completeExactAssignmentExists(roster, targetNames, slots[target], target)) continue;
+                  block[source] = sourceNames;
+                  block[target] = targetNames;
+                  Object.assign(block.positions, assignExactSlots(roster, sourceNames, slots[source], source, block.positions, game.season_position_starts));
+                  Object.assign(block.positions, assignExactSlots(roster, targetNames, slots[target], target, block.positions, game.season_position_starts));
+                  block.bench = block.bench.filter((name) => name !== low.name);
+                  if (!block.bench.includes(high.name)) block.bench.push(high.name);
+                  updateFairnessSwapStats(high, low, blockIndex, source, target);
+                  bridge.position_usage[source] -= 1;
+                  bridge.position_usage[target] += 1;
+                  changed = true;
+                  break;
+                }
+                if (changed) break;
+              }
+            }
+            if (changed) {
+              swaps += 1;
+              swapped = true;
+              break;
+            }
+          }
+          if (swapped) break;
+        }
+        if (swapped) break;
+      }
+      if (!swapped) break;
+    }
+  };
+  fairnessSwapPass();
   result.movement_metrics = calculateMovementMetrics(result.timeline, game.total_blocks, roster, slots, game.allow_emergency_assignments);
   const finalValidationErrors = validateTimeline(roster, result.timeline, formation, slots, game.total_blocks, game);
   const finalEndpointNames = new Set([
