@@ -3249,14 +3249,21 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
           && CORE_GROUPS.has(player.group) === coreTier);
         const counts = (player: Player): number => fairnessFieldCount(player.name);
         const lowPlayers = [...tierPlayers].sort((left, right) => counts(left) - counts(right) || left.name.localeCompare(right.name));
-        const highPlayers = [...tierPlayers].sort((left, right) => counts(right) - counts(left) || left.name.localeCompare(right.name));
         for (const low of lowPlayers) {
           const lowCount = counts(low);
           if (lowCount >= fairnessMaximum(low)) continue;
+          const highPlayers = [...(lowCount < fairnessMinimum(low)
+            ? roster.filter((player) => player.available && !assignedGoalkeeperNames.has(player.name))
+            : tierPlayers)]
+            .sort((left, right) => counts(right) - counts(left) || left.name.localeCompare(right.name));
           for (const high of highPlayers) {
             const highCount = counts(high);
             const goalkeeperOverMaximum = assignedGoalkeeperNames.has(high.name) && highCount > fairnessMaximum(high);
             if (high.name === low.name
+              || (lowCount < fairnessMinimum(low) && !CORE_GROUPS.has(high.group) && CORE_GROUPS.has(low.group))
+              || (lowCount < fairnessMinimum(low) && CORE_GROUPS.has(high.group) && !CORE_GROUPS.has(low.group)
+                ? highCount <= fairnessMinimum(high)
+                : false)
               || (!goalkeeperOverMaximum && highCount - lowCount <= 1)
               || highCount <= fairnessMinimum(high)) continue;
             let changed = false;

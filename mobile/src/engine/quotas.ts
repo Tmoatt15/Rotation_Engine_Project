@@ -182,27 +182,45 @@ export function calculateQuotaFeasibility(
   const minimumFor = (player: Player) => ['core', 'core_a', 'core_b'].includes(player.group)
     ? minimumBlocksForPercentage(totalBlocks, CORE_MIN)
     : minimumBlocksForPercentage(totalBlocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
-  const groupMinimums = (['D', 'M', 'F'] as const).map((position) => {
-    const minimum = roster.filter((player) => !isDedicatedGoalkeeper(player)
-      && player.general_positions.includes(position)
-      && !player.general_positions.includes('ANY'))
-      .reduce((total, player) => total + minimumFor(player), 0);
-    return { position, minimum, capacity: formation[position] * totalBlocks };
-  });
-  const flexibleMinimum = roster.filter((player) => !isDedicatedGoalkeeper(player) && player.general_positions.includes('ANY'))
-    .reduce((total, player) => total + minimumFor(player), 0);
-  const remainingCapacity = groupMinimums.reduce((total, item) => total + Math.max(0, item.capacity - item.minimum), 0);
-  const minimumsFeasible = groupMinimums.every(({ minimum, capacity }) => minimum <= capacity)
-    && flexibleMinimum <= remainingCapacity
-    && groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum <= fieldSlots;
-  const totalMinimumRequirement = groupMinimums.reduce((total, item) => total + item.minimum, 0) + flexibleMinimum;
-  const affectedGroups = groupMinimums.filter(({ minimum, capacity }) => minimum > capacity).map(({ position }) => position);
+  const positions = ['D', 'M', 'F'] as const;
+  const playerMinimums = roster
+    .filter((player) => !isDedicatedGoalkeeper(player))
+    .map((player) => ({
+      player,
+      minimum: minimumFor(player),
+      positions: [...new Set(positions.filter((position) =>
+        eligiblePlayers(roster, position).some((candidate) => candidate.name === player.name)
+        || backupEligiblePlayers(roster, position).some((candidate) => candidate.name === player.name)))],
+    }));
+  const totalMinimumRequirement = playerMinimums.reduce((total, item) => total + item.minimum, 0);
+  const capacityByPosition = Object.fromEntries(positions.map((position) => [position, formation[position] * totalBlocks])) as Record<typeof positions[number], number>;
+  const remainingPositionCapacity = new Map<string, number>(positions.map((position) => [position, capacityByPosition[position]]));
+  const canAssignMinimums = (): boolean => {
+    const visit = (playerIndex: number, visited: Set<string>): boolean => {
+      if (playerIndex >= playerMinimums.length) return true;
+      const item = playerMinimums[playerIndex];
+      for (const position of item.positions) {
+        if (visited.has(position) || (remainingPositionCapacity.get(position) ?? 0) <= 0) continue;
+        visited.add(position);
+        const assigned = Math.min(item.minimum, remainingPositionCapacity.get(position) ?? 0);
+        if (assigned > 0) {
+          remainingPositionCapacity.set(position, (remainingPositionCapacity.get(position) ?? 0) - assigned);
+          if (assigned === item.minimum && visit(playerIndex + 1, new Set())) return true;
+          remainingPositionCapacity.set(position, (remainingPositionCapacity.get(position) ?? 0) + assigned);
+        }
+        visited.delete(position);
+      }
+      return false;
+    };
+    return totalMinimumRequirement <= fieldSlots && visit(0, new Set());
+  };
+  const minimumsFeasible = canAssignMinimums();
   return {
     minimumRequirement: totalMinimumRequirement,
     legalAvailableCapacity: fieldSlots,
     minimumsFeasible,
-    affectedPlayers: roster.filter((player) => player.general_positions.some((position) => affectedGroups.includes(position as 'D' | 'M' | 'F'))).map((player) => player.name).sort((left, right) => left.localeCompare(right)),
-    affectedGroups: [...new Set(affectedGroups)],
+    affectedPlayers: [],
+    affectedGroups: [],
   };
 }
 
@@ -308,19 +326,6 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
   const minimumFor = (player: Player) => ['core', 'core_a', 'core_b'].includes(player.group)
     ? minimumBlocksForPercentage(game.total_blocks, CORE_MIN)
     : minimumBlocksForPercentage(game.total_blocks, GROUP_HARD_MINIMUM[player.group] ?? DEVELOPMENTAL_MIN);
-  const warningMinimums = (['D', 'M', 'F'] as const).map((position) => {
-    const minimum = roster
-      .filter((player) => !isDedicatedGoalkeeper(player) && !game.quota_exempt_players.has(player.name))
-      .filter((player) => {
-        const positions = (['D', 'M', 'F'] as const).filter((candidatePosition) => new Map([
-          ...eligiblePlayers(roster, candidatePosition),
-          ...backupEligiblePlayers(roster, candidatePosition),
-        ].map((candidate) => [candidate.name, candidate] as const)).has(player.name));
-        return positions.length === 1 && positions[0] === position;
-      })
-      .reduce((total, player) => total + minimumFor(player), 0);
-    return { position, minimum, capacity: formationCounts[position] * game.total_blocks };
-  });
   game.core_high_names = [];
   let requestedFieldSlots = 0;
   for (const player of roster) {
@@ -401,13 +406,6 @@ export function computeBlockTargets(game: Game, roster: Player[]): RotationResul
   }
   const fieldSlots = quotaFeasibility.legalAvailableCapacity;
   if (requestedFieldSlots > fieldSlots) result.warnings.push(`Requested field targets require ${requestedFieldSlots} slots, but the formation provides ${fieldSlots}; targets cannot all be met.`);
-  for (const position of ['D', 'M', 'F'] as const) {
-    const slots = formationCounts[position] * game.total_blocks;
-    if (!slots) continue;
-    const minimumBlocks = warningMinimums.find((item) => item.position === position)?.minimum ?? 0;
-    if (minimumBlocks > slots) result.warnings.push(`${position} minimums require ${minimumBlocks} player-blocks, but the formation provides ${slots}; some ${position} players must finish below minimum.`);
-
-  }
   result.warnings.push(...positionCapacityWarnings(game.formation, roster));
   if (!game.disable_maximum_limits) addCapacityRecommendations(result, game, roster, formationCounts);
   return result;
