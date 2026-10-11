@@ -1,1 +1,1 @@
-export const buildHash = '1c797a2';
+export const buildHash = '28454b0';
