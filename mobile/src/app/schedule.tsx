@@ -41,6 +41,7 @@ type ScheduleData = {
   errors: string[];
   movement_metrics?: import('@/engine/models').MovementMetrics;
   review_status?: 'generated' | 'generated_with_errors' | 'manually_edited';
+  engine_source?: 'shipping' | 'redesign';
 };
 
 type SelectedPosition = { blockIndex: number; position: string };
@@ -272,7 +273,7 @@ export default function ScheduleScreen() {
                 <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
               </Pressable>
               <View style={styles.headerCopy}>
-                <Text style={styles.eyebrow}>GAME {schedule?.game_number ?? 1} · {schedule?.errors.length ? 'GENERATED WITH ERRORS' : 'GENERATED'}</Text>
+                <Text style={styles.eyebrow}>GAME {schedule?.game_number ?? 1} · {schedule?.errors.length ? 'GENERATED WITH ERRORS' : 'GENERATED'} · {schedule?.engine_source === 'redesign' ? 'REDESIGN ENGINE' : 'SHIPPING ENGINE'}</Text>
                 <Text style={styles.title}>{schedule?.team_name ? `${schedule.team_name} Schedule Review` : 'Schedule review'}</Text>
               </View>
               <View style={styles.countBadge}>

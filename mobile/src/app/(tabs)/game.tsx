@@ -1,7 +1,7 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
@@ -12,6 +12,8 @@ import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
+import { isRedesignEngineEnabled, setRedesignEngineEnabled } from '@/services/redesign-feature-flag';
+import { RedesignOfferError } from '@/services/redesign-schedule-service';
 
 const palette = {
   ink: '#17221f',
@@ -99,6 +101,7 @@ export default function GameScreen() {
   const [capacityWarnings, setCapacityWarnings] = useState<string[]>([]);
   const [capacityDeficits, setCapacityDeficits] = useState<PositionCapacityDeficit[]>([]);
   const [showCapacityWarning, setShowCapacityWarning] = useState(false);
+  const [useRedesignEngine, setUseRedesignEngine] = useState(isRedesignEngineEnabled);
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
   const availableCount = playerNames.length - unavailable.size;
@@ -241,6 +244,11 @@ export default function GameScreen() {
       const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK, disableMaximumLimits });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
+      if (requestError instanceof RedesignOfferError) {
+        Alert.alert('Redesign engine offer', requestError.offer.message, requestError.offer.buttons.map((button) => ({ text: button.label, style: button.action === 'cancel' ? 'cancel' as const : 'default' as const })));
+        setError(`Redesign engine: ${requestError.offer.kind}`);
+        return;
+      }
       const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
       if (message.includes('exceeds hard maximum') || message.includes('exceeds the half') || message.includes('capacity is blocked by half maximums')) {
         setError(null);
@@ -443,6 +451,19 @@ export default function GameScreen() {
               )}
             </View>}
 
+            <Pressable
+              onPress={() => {
+                const next = !useRedesignEngine;
+                setUseRedesignEngine(next);
+                setRedesignEngineEnabled(next);
+              }}
+              style={styles.engineToggle}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: useRedesignEngine }}>
+              <Text style={styles.engineToggleLabel}>ENGINE</Text>
+              <Text style={styles.engineToggleValue}>{useRedesignEngine ? 'REDESIGN (Stages 0–6)' : 'SHIPPING ENGINE'}</Text>
+            </Pressable>
+
             {loadingRoster ? <Text style={styles.helperText}>Loading season roster...</Text> : <View style={styles.playerList}>
               {playerNames.map((name, index) => {
                 const isUnavailable = unavailable.has(name);
@@ -507,6 +528,9 @@ export default function GameScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
+  engineToggle: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  engineToggleLabel: { color: palette.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  engineToggleValue: { color: palette.green, fontSize: 11, fontWeight: '900' },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
   emptyCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, margin: 16, padding: 18 },
   emptyTitle: { color: palette.ink, fontSize: 18, fontWeight: '800', lineHeight: 25, marginBottom: 18 },

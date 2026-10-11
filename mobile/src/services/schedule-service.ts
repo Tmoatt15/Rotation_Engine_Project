@@ -9,6 +9,8 @@ import { getActiveTeamId } from '@/services/team-service';
 import { getLocalTeam, getRoster, getSeasonSettings } from './team-service';
 import { summarizeStructuralErrors } from './structural-diagnostics';
 import { assertCompleteSchedule } from './schedule-validation';
+import { isRedesignEngineEnabled } from './redesign-feature-flag';
+import { generateRedesignSchedule, regenerateRedesignLateArrival } from './redesign-schedule-service';
 
 function positionRows(formation: string) {
   const slots = formationSlots(parseFormation(formation));
@@ -46,7 +48,8 @@ function maximumConstraintFailure(errors: string[]): boolean {
     || error.includes('capacity is blocked by half maximums'));
 }
 
-export async function generateLocalSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; disableMaximumLimits?: boolean }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[] }> {
+export async function generateLocalSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; disableMaximumLimits?: boolean }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'shipping' | 'redesign' }> {
+  if (isRedesignEngineEnabled()) return generateRedesignSchedule(input);
   const settings = await getSeasonSettings(input.teamId);
   const team = await getLocalTeam(input.teamId);
   const roster = (await getRoster(input.teamId)).players.map(rosterInput).filter((player) => input.availablePlayerNames.includes(player.name));
@@ -81,10 +84,11 @@ export async function generateLocalSchedule(input: { teamId: string; gameNumber:
       ? 'Roster is short-handed. Maximums relaxed to 9 blocks to generate a valid schedule.'
       : undefined;
   const warnings = graduatedWarning ? [...result.warnings, graduatedWarning] : result.warnings;
-  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, available_player_names: input.availablePlayerNames, core_player_names: roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated', maximum_relaxation_level: usedMaximumRelaxation };
+  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, available_player_names: input.availablePlayerNames, core_player_names: roster.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated', maximum_relaxation_level: usedMaximumRelaxation, engine_source: 'shipping' };
 }
 
-export async function regenerateLateArrivalSchedule(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; minimumBlocks: number; maximumBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean; approval?: LateArrivalApprovalRequest; approvedPlayerName?: string }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; needs_minimum_warning?: boolean; minimum_warning?: string }> {
+export async function regenerateLateArrivalSchedule(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; minimumBlocks: number; maximumBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean; approval?: LateArrivalApprovalRequest; approvedPlayerName?: string }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; needs_minimum_warning?: boolean; minimum_warning?: string; engine_source: 'shipping' | 'redesign' }> {
+  if (isRedesignEngineEnabled()) return regenerateRedesignLateArrival(input);
   const settings = await getSeasonSettings(input.teamId);
   const team = await getLocalTeam(input.teamId);
   const allPlayers = (await getRoster(input.teamId)).players.map(rosterInput);
@@ -109,11 +113,11 @@ export async function regenerateLateArrivalSchedule(input: { teamId: string; gam
       substitution_warning_seconds: setup.substitution_warning_seconds, blocks: result.timeline, warnings: result.warnings, errors: result.errors,
       structural_errors: structuralErrors, movement_metrics: result.movement_metrics, needs_minimum_warning: true,
       minimum_warning: `Adding ${input.playerName} would require taking a block from ${donor}.`,
-      review_status: 'generated_with_errors',
+      review_status: 'generated_with_errors', engine_source: 'shipping',
     };
   }
   assertCompleteSchedule(input.continueBelowMinimum ? result.errors.filter((error) => !error.toLowerCase().includes('under minimum')) : result.errors);
-  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, available_player_names: result.available_player_names ?? input.availablePlayerNames, core_player_names: allPlayers.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, position_rows: positionRows(setup.formation), blocks: result.timeline, warnings: result.warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated' };
+  return { team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, available_player_names: result.available_player_names ?? input.availablePlayerNames, core_player_names: allPlayers.filter((player) => ['core', 'core_a', 'core_b'].includes(player.group)).map((player) => player.name), first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null, position_rows: positionRows(setup.formation), block_start_minutes: blockStarts, block_lengths_minutes: blockLengths, substitution_alert: setup.substitution_alert, substitution_warning_seconds: setup.substitution_warning_seconds, blocks: result.timeline, warnings: result.warnings, errors: result.errors, structural_errors: structuralErrors, movement_metrics: result.movement_metrics, review_status: result.errors.length ? 'generated_with_errors' : 'generated', engine_source: 'shipping' };
 }
 
 export async function saveLocalSchedule(name: string, schedule: LiveSchedule): Promise<SavedSchedule> { return saveSchedule(await getDatabase(), schedule.team_id ?? await getActiveTeamId(), name, schedule); }
