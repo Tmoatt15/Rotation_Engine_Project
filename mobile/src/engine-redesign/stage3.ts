@@ -246,7 +246,12 @@ function placeBlock(
   const continuingPlayers = blockNumber === Math.floor(game.totalBlocks / 2) + 1
     ? new Set(previous.find((block) => block.block === blockNumber - 1)?.assignments.values())
     : new Set<string>();
-  const slots = demand.fieldSlots.map((slot) => slot.slot);
+  const slots = demand.fieldSlots.map((slot) => slot.slot).sort((left, right) => {
+    const leftIncumbent = previousBlock?.assignments.has(left) ? 0 : 1;
+    const rightIncumbent = previousBlock?.assignments.has(right) ? 0 : 1;
+    return leftIncumbent - rightIncumbent || demand.fieldSlots.findIndex((candidate) => candidate.slot === left)
+      - demand.fieldSlots.findIndex((candidate) => candidate.slot === right);
+  });
   const assignPlayer = (player: NormalizedPlayer, slot: string, preAccounted = false): boolean => {
     if (!candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock)) return false;
     assignments.set(slot, player.name);
@@ -308,6 +313,18 @@ export function placeStage3(
   const players = game.players;
   const blocks: PlacementBlock[] = [];
   const frozenByBlock = new Map(frozen.map((block) => [block.block, block]));
+  const turnoverScore = (candidateBlocks: PlacementBlock[]): number => candidateBlocks.slice(1).reduce((total, block, index) => {
+    const previousAssignments = candidateBlocks[index].assignments;
+    const previousPlayers = new Set(previousAssignments.values());
+    const currentPlayers = new Set(block.assignments.values());
+    const substitutions = [...new Set([...previousPlayers, ...currentPlayers])]
+      .filter((name) => previousPlayers.has(name) !== currentPlayers.has(name)).length;
+    const previousSlots = new Map([...previousAssignments].map(([slot, player]) => [player, slot]));
+    const positionalChanges = [...currentPlayers]
+      .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
+      .length;
+    return total + substitutions + positionalChanges;
+  }, 0);
   const search = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState, depth: number): PlacementBlock[] | null => {
     if (blockNumber > game.totalBlocks) return currentBlocks;
     const frozenBlock = frozenByBlock.get(blockNumber);
@@ -321,20 +338,29 @@ export function placeStage3(
       return search(blockNumber + 1, [...currentBlocks, { block: blockNumber, assignments }], nextState, depth);
     }
     const snapshot = cloneState(currentState);
-    const primary = placeBlock(game, demand, players, currentState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock);
+    const primaryState = cloneState(snapshot);
+    const primary = placeBlock(game, demand, players, primaryState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock);
     const alternatives = primary
       ? [...new Set([...primary.assignments.values()])].slice(0, 3).map((player) => new Set([player]))
       : [];
+    let bestResult: PlacementBlock[] | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
     for (const excluded of [new Set<string>(), ...alternatives]) {
       if (excluded.size && depth >= 2) continue;
       const nextState = cloneState(snapshot);
       const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, excluded);
       if (!candidate || !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock)) continue;
       const result = search(blockNumber + 1, [...currentBlocks, candidate], nextState, excluded.size ? depth + 1 : depth);
-      if (result) return result;
+      if (result) {
+        const score = turnoverScore(result);
+        if (score < bestScore) {
+          bestScore = score;
+          bestResult = result;
+        }
+      }
       if (depth >= 2) break;
     }
-    return null;
+    return bestResult;
   };
   const resultBlocks = search(1, blocks, state, 0);
   const errors: string[] = resultBlocks ? [] : ['Unable to place the schedule without stranding a future slot.'];
