@@ -323,7 +323,8 @@ export function placeStage3(
     const positionalChanges = [...currentPlayers]
       .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
       .length;
-    return total + substitutions + positionalChanges;
+    const spreadPenalty = Math.max(0, substitutions - 6) * 2;
+    return total + substitutions + positionalChanges + spreadPenalty;
   }, 0);
   const search = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState, depth: number): PlacementBlock[] | null => {
     if (blockNumber > game.totalBlocks) return currentBlocks;
