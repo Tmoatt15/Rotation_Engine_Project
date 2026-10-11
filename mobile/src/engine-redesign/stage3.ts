@@ -51,6 +51,12 @@ function isDedicatedKeeper(player: NormalizedPlayer): boolean {
   return player.generalPositions.length > 0 && player.generalPositions.every((position) => position === 'GK');
 }
 
+function isOppositeHalfKeeper(game: NormalizedGame, player: NormalizedPlayer, block: number): boolean {
+  const half = game.totalBlocks / 2;
+  return (player.name === game.firstHalfKeeper && block > half)
+    || (player.name === game.secondHalfKeeper && block <= half);
+}
+
 function isZonePosition(position: string, zone: RedesignZone, group: 'D' | 'M' | 'F'): boolean {
   return position === 'ANY' || position === group || ZONE_POSITIONS[zone].has(position);
 }
@@ -146,6 +152,9 @@ export function compareCandidates(
 ): number {
   const leftMin = state.remainingMin.get(left.name) ?? 0;
   const rightMin = state.remainingMin.get(right.name) ?? 0;
+  const leftKeeperUrgency = isOppositeHalfKeeper(game, left, block) && leftMin > 0 ? 1 : 0;
+  const rightKeeperUrgency = isOppositeHalfKeeper(game, right, block) && rightMin > 0 ? 1 : 0;
+  if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
   if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
   if (leftMin !== rightMin) return rightMin - leftMin;
   const leftTier = positionTier(left, slot);
@@ -183,6 +192,15 @@ function futureFeasible(
   const remainingSlots = demand.slotsPerBlock * (game.totalBlocks - fromBlock);
   const totalMax = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0);
   if (totalMax < remainingSlots) return false;
+  for (const player of players) {
+    const minimum = state.remainingMin.get(player.name) ?? 0;
+    if (!minimum) continue;
+    const eligibleBlocks = Array.from({ length: game.totalBlocks - fromBlock }, (_, index) => fromBlock + index + 1)
+      .filter((block) => !isDedicatedKeeper(player)
+        && !((block <= game.totalBlocks / 2 ? game.firstHalfKeeper : game.secondHalfKeeper) === player.name)
+        && (softRest || !rest.get(player.name)?.has(block))).length;
+    if (eligibleBlocks < minimum) return false;
+  }
   for (let block = fromBlock + 1; block <= game.totalBlocks; block += 1) {
     const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot)) {

@@ -137,6 +137,13 @@ describe('redesign stages 3-4', () => {
       const keeper = block.block <= 5 ? 'Keeper A' : 'Keeper B';
       expect(values).not.toContain(keeper);
     }
+    for (const keeper of ['Keeper A', 'Keeper B']) {
+      const fieldBlocks = placement.blocks.filter((block) => [...block.assignments.values()].includes(keeper)).map((block) => block.block);
+      expect(fieldBlocks.length).toBeGreaterThanOrEqual(2);
+      expect(fieldBlocks.length).toBeLessThanOrEqual(4);
+      expect(fieldBlocks.every((block) => keeper === 'Keeper A' ? block > 5 : block <= 5)).toBe(true);
+    }
+
   });
 
   it('runs polish metrics without changing a failed placement into success', () => {
