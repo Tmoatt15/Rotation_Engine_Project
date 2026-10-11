@@ -24,6 +24,9 @@ export interface LateArrivalFailure {
   player?: string;
   before?: number;
   after?: number;
+  position?: string;
+  candidates?: string[];
+  recommended?: string;
   errors: string[];
 }
 
@@ -53,10 +56,6 @@ function cloneQuotas(quotas: QuotaAssignment): QuotaAssignment {
   };
 }
 
-function remainingAfterFrozen(quota: PlayerQuota, frozen: FrozenBlock[]): number {
-  return Math.max(0, quota.remainingMin - frozen.filter((block) => [...block.assignments.values()].includes(quota.player)).length);
-}
-
 export function redistributeDonors(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[],
@@ -66,32 +65,40 @@ export function redistributeDonors(
   const candidates = quotas.quotas
     .map((quota) => ({
       quota,
-      remainingMin: remainingAfterFrozen(quota, frozen),
-      headroom: Math.max(0, quota.remainingMax - quota.remainingMin),
+      remainingMin: Math.max(0, quota.remainingMin - frozen.filter((block) => [...block.assignments.values()].includes(quota.player)).length),
+      remainingMax: Math.max(0, quota.remainingMax - frozen.filter((block) => [...block.assignments.values()].includes(quota.player)).length),
     }))
-    .filter(({ remainingMin }) => remainingMin > 0)
+    .map((candidate) => ({ ...candidate, headroom: Math.max(0, candidate.remainingMax - candidate.remainingMin) }))
+    .filter(({ headroom }) => headroom > 0)
     .sort((left, right) => right.headroom - left.headroom || left.quota.player.localeCompare(right.quota.player));
   const reductions: DonorReduction[] = [];
   let left = required;
-  for (const candidate of candidates) {
-    if (!left) break;
-    const amount = Math.min(left, candidate.headroom);
-    if (!amount) continue;
-    const before = candidate.quota.totalMax;
-    candidate.quota.totalMax -= amount;
-    candidate.quota.remainingMax = Math.max(candidate.quota.remainingMin, candidate.quota.remainingMax - amount);
-    reductions.push({ player: candidate.quota.player, amount, before, after: candidate.quota.totalMax });
-    left -= amount;
+  while (left && candidates.some((candidate) => candidate.headroom > 0)) {
+    for (const candidate of candidates) {
+      if (!left || candidate.headroom <= 0) break;
+      const before = candidate.quota.totalMax;
+      candidate.quota.totalMax -= 1;
+      candidate.quota.remainingMax = Math.max(candidate.quota.remainingMin, candidate.quota.remainingMax - 1);
+      candidate.headroom -= 1;
+      const existing = reductions.find((reduction) => reduction.player === candidate.quota.player);
+      if (existing) {
+        existing.amount += 1;
+        existing.after = candidate.quota.totalMax;
+      } else {
+        reductions.push({ player: candidate.quota.player, amount: 1, before, after: candidate.quota.totalMax });
+      }
+      left -= 1;
+    }
   }
   if (left) {
-    const donor = candidates.find((candidate) => candidate.remainingMin > 0);
+    const donor = candidates[0];
     return {
       reductions,
       failure: {
         kind: 'donor-below-minimum',
         player: donor?.quota.player,
         before: donor?.quota.totalMin,
-        after: donor ? donor.quota.totalMin : undefined,
+        after: donor ? donor.quota.totalMin - 1 : undefined,
         errors: ['The arrival target would require a player to play below their minimum.'],
       },
     };
@@ -105,17 +112,30 @@ function keeperFlex(quotas: QuotaAssignment): QuotaAssignment {
     if (quota.keeperBlocks > 0 && quota.keeperBlocks < quota.totalMax && quota.fieldMax > quota.fieldMin) {
       quota.fieldMin = Math.max(1, quota.fieldMin - 1);
       quota.fieldMax = Math.min(4, quota.fieldMax + 1);
-      quota.totalMax += 1;
-      quota.remainingMax += 1;
+      quota.totalMax = quota.fieldMax + quota.keeperBlocks + quota.pinnedBlocks.length;
+      quota.remainingMax = Math.max(0, quota.totalMax - quota.pinnedBlocks.length);
     }
   }
   return result;
 }
 
-function placementFailure(placement: PolishedPlacement): LateArrivalFailure {
+function placementFailure(placement: PolishedPlacement, game: NormalizedGame, quotas: QuotaAssignment): LateArrivalFailure {
   const text = placement.audit.errors.join(' ');
+  const candidates = game.players
+    .filter((player) => player.available && !player.keeper)
+    .sort((left, right) => {
+      const leftQuota = quotas.quotas.find((quota) => quota.player === left.name);
+      const rightQuota = quotas.quotas.find((quota) => quota.player === right.name);
+      const leftHeadroom = leftQuota ? leftQuota.remainingMax - leftQuota.remainingMin : 0;
+      const rightHeadroom = rightQuota ? rightQuota.remainingMax - rightQuota.remainingMin : 0;
+      return rightHeadroom - leftHeadroom || left.name.localeCompare(right.name);
+    })
+    .map((player) => player.name);
   return {
     kind: text.toLowerCase().includes('position') ? 'position-uncovered' : 'unfillable-within-maxes',
+    position: text.match(/\b(D|M|F|GK)\b/)?.[1],
+    candidates,
+    recommended: candidates[0],
     errors: placement.audit.errors,
   };
 }
@@ -133,9 +153,11 @@ export function replanLateArrival(input: LateArrivalReplanInput): LateArrivalRep
   arrivalQuota.remainingMin = Math.max(0, target - input.frozen.filter((block) => [...block.assignments.values()].includes(arrival.player)).length);
   arrivalQuota.remainingMax = arrivalQuota.remainingMin;
 
-  const required = Math.max(0, targetDelta);
+  const futureSlots = input.demand.slotsPerBlock * (input.game.totalBlocks - input.frozen.length);
+  const remainingMinimum = quotas.quotas.reduce((sum, quota) => sum + Math.max(0, quota.remainingMin - input.frozen.filter((block) => [...block.assignments.values()].includes(quota.player)).length), 0);
+  const required = Math.max(0, targetDelta, remainingMinimum - futureSlots);
   const donorResult = redistributeDonors(quotas, input.frozen, required);
-  if (donorResult.failure) return { kind: 'failure', failure: donorResult.failure, quotas };
+  if (donorResult.failure) return { kind: 'failure', failure: { ...donorResult.failure, arrival: arrival.player }, quotas };
 
   let placement = runStages3And4(input.game, input.demand, quotas, input.frozen);
   let keeperFlexed = false;
@@ -148,7 +170,20 @@ export function replanLateArrival(input: LateArrivalReplanInput): LateArrivalRep
     }
   }
   if (!placement.complete) {
-    return { kind: 'failure', failure: { ...placementFailure(placement), kind: 'late-arrival-exhausted', arrival: arrival.player }, quotas };
+    const failure = { ...placementFailure(placement, input.game, quotas), kind: 'late-arrival-exhausted' as const, arrival: arrival.player };
+    const halfLength = input.game.totalBlocks / 2;
+    if (failure.candidates?.some((player) => hasFiveConsecutiveBlocks(placement.blocks, player, halfLength))) {
+      failure.errors = [...failure.errors, 'A player would be scheduled for five consecutive blocks without approval.'];
+    }
+    return { kind: 'failure', failure, quotas };
+  }
+  const halfLength = input.game.totalBlocks / 2;
+  if (input.game.players.some((player) => hasFiveConsecutiveBlocks(placement.blocks, player.name, halfLength))) {
+    return {
+      kind: 'failure',
+      failure: { kind: 'late-arrival-exhausted', arrival: arrival.player, errors: ['A player would be scheduled for five consecutive blocks without approval.'] },
+      quotas,
+    };
   }
   return { kind: 'success', placement, quotas, donorReductions: donorResult.reductions, keeperFlexed };
 }

@@ -30,8 +30,19 @@ function quotas(): QuotaAssignment {
 describe('redesign stages 5-6', () => {
   it('redistributes whole donor blocks by headroom without changing the frozen prefix', () => {
     const result = redistributeDonors(quotas(), [], 2);
-    expect(result.reductions).toEqual([{ player: 'C', amount: 2, before: 5, after: 3 }]);
+    expect(result.reductions).toEqual([
+      { player: 'C', amount: 1, before: 5, after: 4 },
+      { player: 'A', amount: 1, before: 4, after: 3 },
+    ]);
     expect(result.failure).toBeUndefined();
+  });
+
+  it('keeps a donor who already met minimum eligible after the frozen prefix', () => {
+    const result = redistributeDonors(quotas(), [
+      { block: 1, assignments: new Map([['M1', 'B']]) },
+      { block: 2, assignments: new Map([['M1', 'B']]) },
+    ], 1);
+    expect(result.reductions[0].player).toBe('C');
   });
 
   it('applies a tactical substitution only to the current block and records actual totals', () => {
@@ -58,9 +69,33 @@ describe('redesign stages 5-6', () => {
     expect(result?.offer.buttons.map((button) => button.label)).toEqual(['Cancel', 'Allow']);
   });
 
+  it('searches trios when no one-player or pair exception is sufficient', () => {
+    const result = findTargetedRelaxation(quotas(), (candidate) => candidate.quotas.some((quota) => quota.player === 'A' && quota.totalMax > 4)
+      && candidate.quotas.some((quota) => quota.player === 'B' && quota.totalMax > 3)
+      && candidate.quotas.some((quota) => quota.player === 'C' && quota.totalMax > 5));
+    expect(result?.entries).toHaveLength(3);
+  });
+
   it('uses plain coach language for the below-minimum offer', () => {
     const offer = offerForFailure({ kind: 'donor-below-minimum', arrival: 'Arrival', player: 'A', before: 4, after: 3, errors: [] });
     expect(offer.message).toBe('Adding Arrival would drop A below minimum (4→3 blocks).');
     expect(offer.buttons.map((button) => button.action)).toEqual(['cancel', 'continue']);
+  });
+
+  it('includes position and candidate details in capacity and half offers', () => {
+    const capacity = offerForFailure({
+      kind: 'position-uncovered',
+      position: 'defense',
+      candidates: ['A', 'B'],
+      errors: [],
+    });
+    expect(capacity.message).toContain('defense: A, B');
+    const half = offerForFailure({
+      kind: 'late-arrival-exhausted',
+      recommended: 'A',
+      candidates: ['A', 'B'],
+      errors: [],
+    });
+    expect(half.context).toEqual(expect.objectContaining({ recommended: 'A', candidates: ['A', 'B'] }));
   });
 });

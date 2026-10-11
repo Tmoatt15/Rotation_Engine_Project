@@ -23,19 +23,23 @@ export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
     };
   }
   if (failure.kind === 'position-uncovered') {
+    const position = failure.position ?? 'the open position';
+    const candidates = failure.candidates ?? [];
     return {
       kind: 'position-capacity',
-      message: 'Consider making one of these players eligible for defense: review the available players.',
+      message: `Consider making one of these players eligible for ${position}: ${candidates.join(', ') || 'review the available players'}.`,
       buttons: [{ label: 'Assign backup position', action: 'assign-backup-position' }, { label: 'Turn Off Limits', action: 'turn-off-limits' }],
-      context: { failure },
+      context: { failure, position, candidates },
     };
   }
   if (failure.kind === 'late-arrival-exhausted') {
+    const candidates = failure.candidates ?? [];
+    const recommended = failure.recommended ?? candidates[0];
     return {
       kind: 'entire-half',
-      message: 'The arriving player cannot be added without changing the rest of this half. Choose a player to cover the entire half.',
+      message: `The arriving player cannot be added without changing the rest of this half. ${recommended ?? 'Choose a player'} could cover the half.`,
       buttons: [{ label: 'Cancel', action: 'cancel' }, { label: 'Continue Anyway', action: 'continue' }],
-      context: { failure },
+      context: { failure, recommended, candidates },
     };
   }
   return {
@@ -63,7 +67,6 @@ export function findTargetedRelaxation(
   canPlace: (candidate: QuotaAssignment) => boolean,
 ): TargetedRelaxation | null {
   const candidates = quotas.quotas
-    .filter((quota) => quota.totalMax < quota.totalMax + 1)
     .sort((left, right) => groupOrder[left.group] - groupOrder[right.group] || (right.totalMax - right.totalMin) - (left.totalMax - left.totalMin) || left.player.localeCompare(right.player));
   for (const quota of candidates) {
     const candidate = cloneQuotaAssignment(quotas);
@@ -81,6 +84,20 @@ export function findTargetedRelaxation(
         entry.remainingMax += 1;
       }
       if (canPlace(candidate)) return relaxationResult(entries, quotas);
+    }
+  }
+  for (let first = 0; first < candidates.length; first += 1) {
+    for (let second = first + 1; second < candidates.length; second += 1) {
+      for (let third = second + 1; third < candidates.length; third += 1) {
+        const candidate = cloneQuotaAssignment(quotas);
+        const entries = [candidates[first], candidates[second], candidates[third]]
+          .map((quota) => candidate.quotas.find((entry) => entry.player === quota.player)!);
+        for (const entry of entries) {
+          entry.totalMax += 1;
+          entry.remainingMax += 1;
+        }
+        if (canPlace(candidate)) return relaxationResult(entries, quotas);
+      }
     }
   }
   return null;
