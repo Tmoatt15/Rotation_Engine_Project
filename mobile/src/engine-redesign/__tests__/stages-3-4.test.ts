@@ -44,7 +44,7 @@ describe('redesign stages 3-4', () => {
     const game = normalizeGame({
       format: '4v4',
       formation: '1-2-1',
-      totalBlocks: 4,
+      totalBlocks: 10,
       firstHalfKeeper: null,
       secondHalfKeeper: null,
     }, [
@@ -101,6 +101,42 @@ describe('redesign stages 3-4', () => {
     expect(first.blocks[0].assignments).toEqual(frozen[0].assignments);
     expect(first.complete).toBe(true);
     expect(JSON.stringify(first.blocks)).toBe(JSON.stringify(second.blocks));
+  });
+
+  it('keeps half-keepers out of field slots during their keeper half', () => {
+    const game = normalizeGame({
+      format: '7v7',
+      formation: '2-3-1',
+      totalBlocks: 10,
+      firstHalfKeeper: 'Keeper A',
+      secondHalfKeeper: 'Keeper B',
+    }, [
+      { ...player('Keeper A', 'rotational', ['D']), primary_positions: ['ANY', 'GK'] },
+      { ...player('Keeper B', 'rotational', ['D']), primary_positions: ['ANY', 'GK'] },
+      player('Field A', 'rotational', ['ANY']),
+      player('Field B', 'rotational', ['ANY']),
+      player('Field C', 'rotational', ['ANY']),
+      player('Field D', 'rotational', ['ANY']),
+      player('Field E', 'rotational', ['ANY']),
+      player('Field F', 'rotational', ['ANY']),
+      player('Field G', 'rotational', ['ANY']),
+      player('Field H', 'rotational', ['ANY']),
+      player('Field I', 'rotational', ['ANY']),
+      player('Field J', 'rotational', ['ANY']),
+      player('Field K', 'rotational', ['ANY']),
+      player('Field L', 'rotational', ['ANY']),
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    const placement = placeStage3(game, demand, quotas);
+
+    expect(placement.complete).toBe(true);
+    for (const block of placement.blocks) {
+      const values = [...block.assignments.values()];
+      expect(new Set(values).size).toBe(values.length);
+      const keeper = block.block <= 5 ? 'Keeper A' : 'Keeper B';
+      expect(values).not.toContain(keeper);
+    }
   });
 
   it('runs polish metrics without changing a failed placement into success', () => {

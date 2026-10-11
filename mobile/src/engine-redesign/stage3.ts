@@ -111,6 +111,7 @@ function cloneState(state: PlacementState): PlacementState {
 }
 
 function candidateAllowed(
+  game: NormalizedGame,
   player: NormalizedPlayer,
   slot: string,
   block: number,
@@ -121,6 +122,8 @@ function candidateAllowed(
   pinnedByBlock: Map<number, Set<string>>,
 ): boolean {
   if (!player.available || isDedicatedKeeper(player) || assigned.has(player.name)) return false;
+  const keeperForHalf = block <= game.totalBlocks / 2 ? game.firstHalfKeeper : game.secondHalfKeeper;
+  if (keeperForHalf === player.name) return false;
   if ((state.remainingMax.get(player.name) ?? 0) <= 0 || excludedFromSlot(player, slot)) return false;
   if (!softRest && rest.get(player.name)?.has(block)) return false;
   if (positionTier(player, slot) === 0 && (state.outOfPosition.get(player.name) ?? 0) >= 2) return false;
@@ -184,7 +187,7 @@ function futureFeasible(
     const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot)) {
       if (existing?.has(slot)) continue;
-      if (!players.some((player) => candidateAllowed(player, slot, block, new Set(existing?.values()), state, rest, softRest, pinnedByBlock))) return false;
+      if (!players.some((player) => candidateAllowed(game, player, slot, block, new Set(existing?.values()), state, rest, softRest, pinnedByBlock))) return false;
     }
   }
   return true;
@@ -210,7 +213,7 @@ function placeBlock(
     : new Set<string>();
   const slots = demand.fieldSlots.map((slot) => slot.slot);
   const assignPlayer = (player: NormalizedPlayer, slot: string, preAccounted = false): boolean => {
-    if (!candidateAllowed(player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock)) return false;
+    if (!candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock)) return false;
     assignments.set(slot, player.name);
     assigned.add(player.name);
     if (positionTier(player, slot) === 0) state.outOfPosition.set(player.name, (state.outOfPosition.get(player.name) ?? 0) + 1);
@@ -226,7 +229,7 @@ function placeBlock(
     if (!player) continue;
     const slot = slots.filter((candidate) => !assignments.has(candidate))
       .sort((left, right) => positionTier(player, right) - positionTier(player, left) || slots.indexOf(left) - slots.indexOf(right))
-      .find((candidate) => candidateAllowed(player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock));
+      .find((candidate) => candidateAllowed(game, player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock));
     if (!slot || !assignPlayer(player, slot, true)) return null;
   }
   while (assignments.size < slots.length) {
@@ -234,12 +237,12 @@ function placeBlock(
     const slot = openSlots
       .map((candidate) => ({
         candidate,
-        count: players.filter((player) => candidateAllowed(player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock)).length,
+        count: players.filter((player) => candidateAllowed(game, player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock)).length,
       }))
       .sort((left, right) => left.count - right.count || slots.indexOf(left.candidate) - slots.indexOf(right.candidate))[0]?.candidate;
     if (!slot) return null;
     const candidates = players
-      .filter((player) => player.name !== excludedCandidate && candidateAllowed(player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
+      .filter((player) => player.name !== excludedCandidate && candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
       .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
