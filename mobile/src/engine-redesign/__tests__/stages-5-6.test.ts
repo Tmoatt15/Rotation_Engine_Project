@@ -98,4 +98,19 @@ describe('redesign stages 5-6', () => {
     });
     expect(half.context).toEqual(expect.objectContaining({ recommended: 'A', candidates: ['A', 'B'] }));
   });
+
+  it('offers explicit approval for a five-block run and carries the valid placement', () => {
+    const validPlacement = placement([{ block: 1, assignments: new Map([['M1', 'A']]) }]);
+    const offer = offerForFailure({
+      kind: 'never-five-violation',
+      player: 'A',
+      half: 'first',
+      placement: validPlacement,
+      errors: [],
+    });
+    expect(offer.kind).toBe('never-five-violation');
+    expect(offer.message).toBe('A would play 5 blocks in a row in the first half. Is that OK?');
+    expect(offer.buttons.map((button) => button.label)).toEqual(['Cancel', 'Allow']);
+    expect(offer.context.placement).toBe(validPlacement);
+  });
 });

@@ -19,7 +19,7 @@ export interface DonorReduction {
 }
 
 export interface LateArrivalFailure {
-  kind: 'donor-below-minimum' | 'unfillable-within-maxes' | 'position-uncovered' | 'late-arrival-exhausted';
+  kind: 'donor-below-minimum' | 'unfillable-within-maxes' | 'position-uncovered' | 'late-arrival-exhausted' | 'never-five-violation';
   arrival?: string;
   player?: string;
   before?: number;
@@ -27,6 +27,8 @@ export interface LateArrivalFailure {
   position?: string;
   candidates?: string[];
   recommended?: string;
+  half?: 'first' | 'second';
+  placement?: PolishedPlacement;
   errors: string[];
 }
 
@@ -178,10 +180,18 @@ export function replanLateArrival(input: LateArrivalReplanInput): LateArrivalRep
     return { kind: 'failure', failure, quotas };
   }
   const halfLength = input.game.totalBlocks / 2;
-  if (input.game.players.some((player) => hasFiveConsecutiveBlocks(placement.blocks, player.name, halfLength))) {
+  const violation = fiveViolation(placement.blocks, input.game.players.map((player) => player.name), halfLength);
+  if (violation) {
     return {
       kind: 'failure',
-      failure: { kind: 'late-arrival-exhausted', arrival: arrival.player, errors: ['A player would be scheduled for five consecutive blocks without approval.'] },
+      failure: {
+        kind: 'never-five-violation',
+        player: violation.player,
+        half: violation.half,
+        placement,
+        arrival: arrival.player,
+        errors: ['A player would be scheduled for five consecutive blocks without approval.'],
+      },
       quotas,
     };
   }
@@ -219,4 +229,16 @@ export function hasFiveConsecutiveBlocks(blocks: PlacementBlock[], player: strin
     if (blocks.slice(halfLength + start, halfLength + start + 5).every((block) => [...block.assignments.values()].includes(player))) return true;
   }
   return false;
+}
+
+function fiveViolation(blocks: PlacementBlock[], players: string[], halfLength: number): { player: string; half: 'first' | 'second' } | undefined {
+  for (const player of players) {
+    for (const half of ['first', 'second'] as const) {
+      const offset = half === 'first' ? 0 : halfLength;
+      for (let start = offset; start <= offset + halfLength - 5; start += 1) {
+        if (blocks.slice(start, start + 5).every((block) => [...block.assignments.values()].includes(player))) return { player, half };
+      }
+    }
+  }
+  return undefined;
 }

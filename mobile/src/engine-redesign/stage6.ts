@@ -1,7 +1,7 @@
 import type { QuotaAssignment, RedesignGroup } from './model';
 import type { LateArrivalFailure } from './stage5';
 
-export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'entire-half' | 'turn-off-limits' | 'failure';
+export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
 export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'assign-backup-position' | 'turn-off-limits';
 
 export interface Stage6Offer {
@@ -30,6 +30,14 @@ export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
       message: `Consider making one of these players eligible for ${position}: ${candidates.join(', ') || 'review the available players'}.`,
       buttons: [{ label: 'Assign backup position', action: 'assign-backup-position' }, { label: 'Turn Off Limits', action: 'turn-off-limits' }],
       context: { failure, position, candidates },
+    };
+  }
+  if (failure.kind === 'never-five-violation') {
+    return {
+      kind: 'never-five-violation',
+      message: `${failure.player ?? 'A player'} would play 5 blocks in a row in the ${failure.half ?? 'current'} half. Is that OK?`,
+      buttons: [{ label: 'Cancel', action: 'cancel' }, { label: 'Allow', action: 'allow' }],
+      context: { placement: failure.placement, player: failure.player, half: failure.half },
     };
   }
   if (failure.kind === 'late-arrival-exhausted') {
