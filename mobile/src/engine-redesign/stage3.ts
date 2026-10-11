@@ -149,9 +149,6 @@ export function compareCandidates(
   softRest: boolean,
   continuingPlayers: Set<string>,
   rest: Map<string, Set<number>>,
-  previousPlayers: Set<string> = new Set(),
-  previousSlots: Map<string, string> = new Map(),
-  priorPlayers: Set<string> = new Set(),
 ): number {
   const leftMin = state.remainingMin.get(left.name) ?? 0;
   const rightMin = state.remainingMin.get(right.name) ?? 0;
@@ -160,17 +157,6 @@ export function compareCandidates(
   if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
   if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
   if (leftMin !== rightMin) return rightMin - leftMin;
-  const leftIncumbent = previousPlayers.has(left.name)
-    && (state.remainingMax.get(left.name) ?? 0) > leftMin;
-  const rightIncumbent = previousPlayers.has(right.name)
-    && (state.remainingMax.get(right.name) ?? 0) > rightMin;
-  if (leftIncumbent !== rightIncumbent && leftMin === rightMin) return Number(rightIncumbent) - Number(leftIncumbent);
-  const leftExact = previousSlots.get(left.name) === slot && leftIncumbent;
-  const rightExact = previousSlots.get(right.name) === slot && rightIncumbent;
-  if (leftExact !== rightExact && leftMin === rightMin) return Number(rightExact) - Number(leftExact);
-  const leftStint = leftIncumbent && !priorPlayers.has(left.name);
-  const rightStint = rightIncumbent && !priorPlayers.has(right.name);
-  if (leftStint !== rightStint && leftMin === rightMin) return Number(rightStint) - Number(leftStint);
   const leftTier = positionTier(left, slot);
   const rightTier = positionTier(right, slot);
   if (leftTier !== rightTier) return rightTier - leftTier;
@@ -240,13 +226,8 @@ function placeBlock(
   const assignments = new Map<string, string>();
   const assigned = new Set<string>();
   const pinned = pinnedByBlock.get(blockNumber) ?? new Set<string>();
-  const previousBlock = previous.find((block) => block.block === blockNumber - 1);
-  const priorBlock = previous.find((block) => block.block === blockNumber - 2);
-  const previousPlayers = new Set(previousBlock?.assignments.values());
-  const previousSlots = new Map([...previousBlock?.assignments ?? new Map()].map(([slot, player]) => [player, slot]));
-  const priorPlayers = new Set(priorBlock?.assignments.values());
   const continuingPlayers = blockNumber === Math.floor(game.totalBlocks / 2) + 1
-    ? previousPlayers
+    ? new Set(previous.find((block) => block.block === blockNumber - 1)?.assignments.values())
     : new Set<string>();
   const slots = demand.fieldSlots.map((slot) => slot.slot);
   const assignPlayer = (player: NormalizedPlayer, slot: string, preAccounted = false): boolean => {
@@ -280,7 +261,7 @@ function placeBlock(
     if (!slot) return null;
     const candidates = players
       .filter((player) => player.name !== excludedCandidate && candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
-      .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
+      .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
   return { block: blockNumber, assignments };
