@@ -77,7 +77,23 @@ describe('redesign stages 0-2', () => {
     const keeper = quotas.quotas.find((item) => item.player === 'Keeper A')!;
     expect(keeper.keeperBlocks).toBe(5);
     expect(keeper.gkMin).toBe(5);
-    expect(keeper.fieldMax).toBeGreaterThan(0);
+    expect(keeper.fieldMin).toBe(2);
+    expect(keeper.fieldMax).toBe(4);
+    expect(keeper.totalMax).toBeLessThanOrEqual(normalized.totalBlocks);
+  });
+
+  it('treats an unpinned core player as benched when block 1 has lineup pins', () => {
+    const normalized = normalizeGame(game({
+      pins: [{ block: 1, slot: 'CM', player: 'Pinned Core' }],
+    }), [
+      player('Pinned Core', 'core', ['M']),
+      player('Benched Core', 'core', ['M']),
+      player('Keeper A', 'rotational', ['GK']),
+      player('Keeper B', 'rotational', ['GK']),
+    ]);
+    const quota = assignQuotas(normalized, buildDemandModel(normalized)).quotas.find((item) => item.player === 'Benched Core')!;
+    expect(quota.pinnedBlocks).toEqual([10]);
+    expect(quota.remainingMax).toBe(quota.totalMax - 1);
   });
 
   it('honors an explicit late-arrival target and block-10 core endpoint', () => {
@@ -118,5 +134,20 @@ describe('redesign stages 0-2', () => {
         expect(() => normalizeGame(input, roster)).toThrow('Choose a goalkeeper for both halves.');
       }
     }
+  });
+
+  it('covers the 7v7 fingerprint roster when its keeper is selected', () => {
+    const fixture = fingerprintCases.find((item) => item.id === '7v7-gk-and-groups')!;
+    const normalized = normalizeGame({
+      format: '7v7',
+      formation: fixture.game.formation,
+      totalBlocks: fixture.game.total_blocks,
+      firstHalfKeeper: 'Gio',
+      secondHalfKeeper: 'Gio',
+    }, fixture.players as RedesignPlayerInput[]);
+    const keeper = assignQuotas(normalized, buildDemandModel(normalized)).quotas.find((item) => item.player === 'Gio')!;
+    expect(keeper.keeperBlocks).toBe(6);
+    expect(keeper.fieldMin).toBe(0);
+    expect(keeper.totalMax).toBeLessThanOrEqual(6);
   });
 });

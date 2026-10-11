@@ -49,6 +49,10 @@ for (const fixture of cases) {
   try {
     const normalized = normalizeGame(input, fixture.players as RedesignPlayerInput[]);
     const quotas = assignQuotas(normalized, buildDemandModel(normalized));
+    const infeasible = quotas.quotas.filter((quota) => quota.totalMax > fixture.game.total_blocks);
+    if (infeasible.length) {
+      throw new Error(`quota feasibility invariant violated: ${infeasible.map((quota) => `${quota.player}=${quota.totalMax}`).join(', ')}`);
+    }
     console.log(`\n[${fixture.id}] ${format} N=${fixture.game.total_blocks}`);
     console.log('player | new min/max remainingMin/remainingMax pins | current min/max | delta min/max');
     for (const quota of quotas.quotas) {
@@ -60,5 +64,8 @@ for (const fixture of cases) {
     console.log(`audit=${JSON.stringify(quotas.audit)}`);
   } catch (error) {
     console.log(`\n[${fixture.id}] rejected by Stage 0: ${(error as Error).message}`);
+    if (fixture.id === '7v7-gk-and-groups') {
+      console.log(`current engine accepted quota computation for keeperless input; Gio current min/max=${current.get('Gio')?.min}/${current.get('Gio')?.max}`);
+    }
   }
 }

@@ -108,6 +108,7 @@ export interface PlayerQuota {
   remainingMax: number;
   fieldMin: number;
   fieldMax: number;
+  fieldTarget: number;
   gkMin: number;
   gkMax: number;
   keeperBlocks: number;
