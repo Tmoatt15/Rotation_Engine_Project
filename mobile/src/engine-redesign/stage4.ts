@@ -87,7 +87,9 @@ function exchangePlayers(game: NormalizedGame, blocks: PlacementBlock[], highInd
   const highSlot = [...high.assignments].find(([, player]) => player === second)?.[0];
   const lowSlot = [...low.assignments].find(([, player]) => player === first)?.[0];
   if (!highSlot || !lowSlot) return null;
-  if (!exchangeAllowed(game, blocks, highIndex, highSlot, first, rest) || !exchangeAllowed(game, blocks, lowIndex, lowSlot, second, rest)) return null;
+  const highAllowed = exchangeAllowed(game, blocks, highIndex, highSlot, first, rest);
+  const lowAllowed = exchangeAllowed(game, blocks, lowIndex, lowSlot, second, rest);
+  if (!highAllowed || !lowAllowed) return null;
   return blocks.map((block, index) => {
     if (index === highIndex) return { ...block, assignments: new Map([...block.assignments].map(([slot, player]) => [slot, slot === highSlot ? first : player])) };
     if (index === lowIndex) return { ...block, assignments: new Map([...block.assignments].map(([slot, player]) => [slot, slot === lowSlot ? second : player])) };
@@ -103,10 +105,10 @@ function restWindowPass(game: NormalizedGame, quotas: QuotaAssignment, blocks: P
     const outside = blocks.findIndex((block) => !window.has(block.block) && !new Set(block.assignments.values()).has(player));
     const inside = blocks.findIndex((block) => window.has(block.block) && new Set(block.assignments.values()).has(player));
     if (outside < 0 || inside < 0 || rest.get(player)?.has(blocks[outside].block)) continue;
-    const otherOutside = [...new Set(blocks[inside].assignments.values())].find((candidate) => coreWithoutPreset.includes(candidate)
-      && !new Set(blocks[outside].assignments.values()).has(candidate));
-    if (!otherOutside) continue;
-    const exchanged = exchangePlayers(game, blocks, outside, inside, player, otherOutside, rest);
+    const other = [...new Set(blocks[outside].assignments.values())].find((candidate) => coreWithoutPreset.includes(candidate)
+      && !new Set(blocks[inside].assignments.values()).has(candidate));
+    if (!other) continue;
+    const exchanged = exchangePlayers(game, blocks, outside, inside, player, other, rest);
     if (exchanged) return exchanged;
   }
   return blocks;
@@ -121,32 +123,12 @@ function spreadPass(game: NormalizedGame, blocks: PlacementBlock[], rest: Map<st
   const highPlaying = new Set(blocks[high].assignments.values());
   const lowPlaying = new Set(blocks[low].assignments.values());
   const first = [...cores].find((name) => !highPlaying.has(name) && lowPlaying.has(name));
-  const second = [...cores].find((name) => highPlaying.has(name) && !lowPlaying.has(name));
+  const second = game.players.map((player) => player.name)
+    .filter((name) => !cores.has(name))
+    .find((name) => highPlaying.has(name) && !lowPlaying.has(name));
   if (!first || !second) return blocks;
-  return exchangePlayers(game, blocks, high, low, first, second, rest) ?? blocks;
-}
-
-function staggerPass(game: NormalizedGame, blocks: PlacementBlock[], rest: Map<string, Set<number>>): PlacementBlock[] {
-  if (blocks.length < 2) return blocks;
-  let best = blocks;
-  let bestTurnover = metrics(game, blocks).maxBoundaryTurnovers;
-  for (let index = 0; index < blocks.length - 1; index += 1) {
-    const left = new Set(blocks[index].assignments.values());
-    const right = new Set(blocks[index + 1].assignments.values());
-    for (const first of left) {
-      for (const second of right) {
-        if (left.has(second) || right.has(first)) continue;
-        const exchanged = exchangePlayers(game, blocks, index, index + 1, first, second, rest);
-        if (!exchanged) continue;
-        const turnover = metrics(game, exchanged).maxBoundaryTurnovers;
-        if (turnover < bestTurnover) {
-          best = exchanged;
-          bestTurnover = turnover;
-        }
-      }
-    }
-  }
-  return best;
+  const exchanged = exchangePlayers(game, blocks, high, low, first, second, rest);
+  return exchanged ?? blocks;
 }
 
 export function polishStage4(game: NormalizedGame, _demand: DemandModel, quotas: QuotaAssignment, placement: PlacementResult): PolishedPlacement {
@@ -156,7 +138,6 @@ export function polishStage4(game: NormalizedGame, _demand: DemandModel, quotas:
   const rest = new Map(deriveRestPins(game, quotas).map((pin) => [pin.player, new Set(pin.blocks)]));
   let current = restWindowPass(game, quotas, blocks);
   current = spreadPass(game, current, rest);
-  current = staggerPass(game, current, rest);
   const cores = coreNames(game);
   const result = { ...placement, blocks: current };
   const resultMetrics = metrics(game, current);

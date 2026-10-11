@@ -146,11 +146,6 @@ function compareCandidates(
   const leftTier = positionTier(left, slot);
   const rightTier = positionTier(right, slot);
   if (leftTier !== rightTier) return rightTier - leftTier;
-  if (softRest) {
-    const leftRest = left.restPreset !== 'none' && game.totalBlocks > 0 ? 0 : 1;
-    const rightRest = right.restPreset !== 'none' && game.totalBlocks > 0 ? 0 : 1;
-    if (leftRest !== rightRest) return rightRest - leftRest;
-  }
   const groupRank: Record<NormalizedPlayer['group'], number> = { core: 3, rotational: 2, developing: 1 };
   if (groupRank[left.group] !== groupRank[right.group]) return groupRank[right.group] - groupRank[left.group];
   if (block === Math.floor(game.totalBlocks / 2) + 1) {

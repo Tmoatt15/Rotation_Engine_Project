@@ -39,7 +39,8 @@ for (const fixture of cases) {
     if (hardPlacement.complete) {
       const before = counts(hardPlacement.blocks);
       const after = counts(polished.blocks);
-      if (JSON.stringify([...before.entries()]) !== JSON.stringify([...after.entries()])) {
+      const sortedCounts = (value: Map<string, number>) => [...value.entries()].sort(([left], [right]) => left.localeCompare(right));
+      if (JSON.stringify(sortedCounts(before)) !== JSON.stringify(sortedCounts(after))) {
         throw new Error('post-polish quota preservation invariant violated');
       }
     }

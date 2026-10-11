@@ -93,4 +93,80 @@ describe('redesign stages 3-4', () => {
     const polished = polishStage4(game, buildDemandModel(game), assignQuotas(game, buildDemandModel(game)), placement);
     expect(polished.metrics.maxBoundaryTurnovers).toBe(4);
   });
+
+  it('improves the core bench spread with a non-core counterpart and preserves totals', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 4,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [
+      player('Core A', 'core', ['ANY']),
+      player('Core B', 'core', ['ANY']),
+      player('Core C', 'core', ['M']),
+      player('Rot A', 'rotational', ['D']),
+      player('Rot B', 'rotational', ['ANY']),
+      player('Rot C', 'rotational', ['M']),
+      player('Rot D', 'rotational', ['F']),
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    const placement = {
+      blocks: [
+        { block: 1, assignments: new Map([['D1', 'Rot A'], ['M1', 'Rot B'], ['M2', 'Rot C'], ['F1', 'Rot D']]) },
+        { block: 2, assignments: new Map([['D1', 'Core A'], ['M1', 'Core B'], ['M2', 'Core C'], ['F1', 'Rot A']]) },
+        { block: 3, assignments: new Map([['D1', 'Core A'], ['M1', 'Core B'], ['M2', 'Core C'], ['F1', 'Rot B']]) },
+        { block: 4, assignments: new Map([['D1', 'Core A'], ['M1', 'Core B'], ['M2', 'Core C'], ['F1', 'Rot C']]) },
+      ],
+      complete: true,
+      audit: { restPins: [], softRestFallback: false, outOfPositionBlocks: {}, errors: [] },
+    };
+    const benchGap = (candidate: typeof placement): number => {
+      const values = candidate.blocks.map((block) => 3 - ['Core A', 'Core B', 'Core C'].filter((name) => [...block.assignments.values()].includes(name)).length);
+      return Math.max(...values) - Math.min(...values);
+    };
+    const beforeGap = benchGap(placement);
+    const polished = polishStage4(game, demand, quotas, placement);
+    const counts = new Map<string, number>();
+    for (const block of polished.blocks) for (const name of block.assignments.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
+    const beforeCounts = new Map<string, number>();
+    for (const block of placement.blocks) for (const name of block.assignments.values()) beforeCounts.set(name, (beforeCounts.get(name) ?? 0) + 1);
+    expect(counts).toEqual(beforeCounts);
+    expect(benchGap(polished)).toBeLessThan(beforeGap);
+  });
+
+  it('moves a generic core rest into the rest window without changing totals', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 10,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [
+      player('Core A', 'core', ['ANY']),
+      player('Core B', 'core', ['ANY']),
+      player('Rot A', 'rotational', ['D']),
+      player('Rot B', 'rotational', ['M']),
+      player('Rot C', 'rotational', ['F']),
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    const blocks = Array.from({ length: 10 }, (_, index) => ({
+      block: index + 1,
+      assignments: new Map([
+        ['D1', index === 1 ? 'Core B' : 'Core A'],
+        ['M1', 'Rot A'],
+        ['M2', 'Rot B'],
+        ['F1', 'Rot C'],
+      ]),
+    }));
+    const placement = { blocks, complete: true, audit: { restPins: [], softRestFallback: false, outOfPositionBlocks: {}, errors: [] } };
+    const before = blocks.map((block) => [...block.assignments.values()].includes('Core A'));
+    const polished = polishStage4(game, demand, quotas, placement);
+    const after = polished.blocks.map((block) => [...block.assignments.values()].includes('Core A'));
+    expect(before[1]).toBe(false);
+    expect(after[1]).toBe(true);
+    expect(after[3]).toBe(false);
+  });
 });
