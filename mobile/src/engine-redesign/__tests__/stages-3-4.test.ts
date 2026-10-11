@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, deriveRestPins, normalizeGame, placeStage3, polishStage4 } from '..';
+import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, normalizeGame, placeStage3, polishStage4 } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
 const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none'): RedesignPlayerInput => ({
@@ -38,6 +38,37 @@ describe('redesign stages 3-4', () => {
       { player: 'Rest A', blocks: [3, 8] },
       { player: 'Rest B', blocks: [5, 6] },
     ]);
+  });
+
+  it('uses season field history only after higher-priority candidate dimensions tie', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 4,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [
+      player('Core More History', 'core', ['M']),
+      player('Rot Less History', 'rotational', ['M']),
+      { ...player('Rot More History', 'rotational', ['M']), historicalFieldBlocks: 5 },
+      { ...player('Rot Less History 2', 'rotational', ['M']), historicalFieldBlocks: 1 },
+    ]);
+    const [core, rotational] = game.players;
+    const state = {
+      remainingMin: new Map([['Core More History', 1], ['Rot Less History', 1]]),
+      remainingMax: new Map([['Core More History', 2], ['Rot Less History', 2]]),
+      outOfPosition: new Map<string, number>(),
+    };
+    expect(compareCandidates(rotational, core, 'M1', 1, game, state, false, new Set(), new Map())).toBeGreaterThan(0);
+
+    const moreHistory = game.players.find((candidate) => candidate.name === 'Rot More History')!;
+    const lessHistory = game.players.find((candidate) => candidate.name === 'Rot Less History 2')!;
+    const tiedState = {
+      remainingMin: new Map([[moreHistory.name, 1], [lessHistory.name, 1]]),
+      remainingMax: new Map([[moreHistory.name, 2], [lessHistory.name, 2]]),
+      outOfPosition: new Map<string, number>(),
+    };
+    expect(compareCandidates(lessHistory, moreHistory, 'M1', 1, game, tiedState, false, new Set(), new Map())).toBeLessThan(0);
   });
 
   it('drops rest pins before a late arrival block', () => {

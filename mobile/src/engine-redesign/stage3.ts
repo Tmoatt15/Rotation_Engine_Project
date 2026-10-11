@@ -38,6 +38,8 @@ interface PlacementState {
 function groupForSlot(slot: string): 'D' | 'M' | 'F' {
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
   if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
+  if (/^D\d+$/.test(slot)) return 'D';
+  if (/^M\d+$/.test(slot)) return 'M';
   return 'F';
 }
 
@@ -128,7 +130,7 @@ function candidateAllowed(
   return true;
 }
 
-function compareCandidates(
+export function compareCandidates(
   left: NormalizedPlayer,
   right: NormalizedPlayer,
   slot: string,

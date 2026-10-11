@@ -14,6 +14,8 @@ function zoneFor(slot: string): RedesignZone {
 function groupFor(slot: string): 'D' | 'M' | 'F' {
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
   if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
+  if (/^D\d+$/.test(slot)) return 'D';
+  if (/^M\d+$/.test(slot)) return 'M';
   return 'F';
 }
 
