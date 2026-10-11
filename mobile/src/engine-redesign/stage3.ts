@@ -53,7 +53,7 @@ function isZonePosition(position: string, zone: RedesignZone, group: 'D' | 'M' |
   return position === 'ANY' || position === group || ZONE_POSITIONS[zone].has(position);
 }
 
-function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
+export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
   if (player.primaryPositions.some((position) => isZonePosition(position, zone, group))) return 2;
@@ -61,7 +61,7 @@ function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
   return 0;
 }
 
-function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
+export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
   return player.excludedPositions.some((position) => position === slot || position === zone || position === group || ZONE_POSITIONS[zone].has(position));
@@ -137,6 +137,7 @@ function compareCandidates(
   state: PlacementState,
   softRest: boolean,
   continuingPlayers: Set<string>,
+  rest: Map<string, Set<number>>,
 ): number {
   const leftMin = state.remainingMin.get(left.name) ?? 0;
   const rightMin = state.remainingMin.get(right.name) ?? 0;
@@ -156,6 +157,11 @@ function compareCandidates(
     const leftContinuity = continuingPlayers.has(left.name) ? 1 : 0;
     const rightContinuity = continuingPlayers.has(right.name) ? 1 : 0;
     if (leftContinuity !== rightContinuity) return rightContinuity - leftContinuity;
+  }
+  if (softRest && block > 0) {
+    const leftPinned = rest.get(left.name)?.has(block) ? 1 : 0;
+    const rightPinned = rest.get(right.name)?.has(block) ? 1 : 0;
+    if (leftPinned !== rightPinned) return leftPinned - rightPinned;
   }
   if (left.history.historicalFieldBlocks !== right.history.historicalFieldBlocks) {
     return left.history.historicalFieldBlocks - right.history.historicalFieldBlocks;
@@ -237,7 +243,7 @@ function placeBlock(
     if (!slot) return null;
     const candidates = players
       .filter((player) => player.name !== excludedCandidate && candidateAllowed(player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
-      .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers));
+      .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
   return { block: blockNumber, assignments };

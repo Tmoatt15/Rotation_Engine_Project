@@ -57,6 +57,10 @@ describe('redesign stages 3-4', () => {
       player('Rest B', 'rotational', ['M']),
       player('Field C', 'rotational', ['M']),
       player('Field D', 'rotational', ['F']),
+      player('Field E', 'rotational', ['D']),
+      player('Field F', 'rotational', ['M']),
+      player('Field G', 'rotational', ['M']),
+      player('Field H', 'rotational', ['F']),
     ]);
     const demand = buildDemandModel(game);
     const quotas = assignQuotas(game, demand);
@@ -64,6 +68,7 @@ describe('redesign stages 3-4', () => {
     const first = placeStage3(game, demand, quotas, frozen);
     const second = placeStage3(game, demand, quotas, frozen);
     expect(first.blocks[0].assignments).toEqual(frozen[0].assignments);
+    expect(first.complete).toBe(true);
     expect(JSON.stringify(first.blocks)).toBe(JSON.stringify(second.blocks));
   });
 
@@ -73,5 +78,19 @@ describe('redesign stages 3-4', () => {
     const polished = polishStage4(game, demand, quotas, placement);
     expect(polished.complete).toBe(placement.complete);
     expect(polished.metrics.maxCoreBenches).toBeGreaterThanOrEqual(0);
+  });
+
+  it('measures boundary turnovers using player values, not slot keys', () => {
+    const { game } = setup({ format: '4v4', formation: '1-2-1', totalBlocks: 4, firstHalfKeeper: null, secondHalfKeeper: null });
+    const placement = {
+      blocks: [
+        { block: 1, assignments: new Map([['D1', 'A'], ['M1', 'B'], ['M2', 'C'], ['F1', 'D']]) },
+        { block: 2, assignments: new Map([['D1', 'A'], ['M1', 'B'], ['M2', 'E'], ['F1', 'F']]) },
+      ],
+      complete: true,
+      audit: { restPins: [], softRestFallback: false, outOfPositionBlocks: {}, errors: [] },
+    };
+    const polished = polishStage4(game, buildDemandModel(game), assignQuotas(game, buildDemandModel(game)), placement);
+    expect(polished.metrics.maxBoundaryTurnovers).toBe(4);
   });
 });
