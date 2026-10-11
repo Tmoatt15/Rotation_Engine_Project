@@ -158,6 +158,8 @@ export function compareCandidates(
   const leftKeeperUrgency = isOppositeHalfKeeper(game, left, block) && leftMin > 0 ? 1 : 0;
   const rightKeeperUrgency = isOppositeHalfKeeper(game, right, block) && rightMin > 0 ? 1 : 0;
   if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
+  if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
+  if (leftMin !== rightMin) return rightMin - leftMin;
   const leftIncumbent = previousPlayers.has(left.name) && (state.remainingMax.get(left.name) ?? 0) > 0;
   const rightIncumbent = previousPlayers.has(right.name) && (state.remainingMax.get(right.name) ?? 0) > 0;
   if (leftIncumbent !== rightIncumbent && leftMin === rightMin) return Number(rightIncumbent) - Number(leftIncumbent);
@@ -167,8 +169,6 @@ export function compareCandidates(
   const leftStint = leftIncumbent && !priorPlayers.has(left.name);
   const rightStint = rightIncumbent && !priorPlayers.has(right.name);
   if (leftStint !== rightStint && leftMin === rightMin) return Number(rightStint) - Number(leftStint);
-  if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
-  if (leftMin !== rightMin) return rightMin - leftMin;
   const leftTier = positionTier(left, slot);
   const rightTier = positionTier(right, slot);
   if (leftTier !== rightTier) return rightTier - leftTier;
