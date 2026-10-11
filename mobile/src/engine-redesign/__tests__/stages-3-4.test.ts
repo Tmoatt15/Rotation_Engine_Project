@@ -103,6 +103,35 @@ describe('redesign stages 3-4', () => {
     )).toBeLessThan(0);
   });
 
+  it('keeps continuity preferences off when a player has no quota headroom', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 4,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [player('Z Incumbent', 'rotational', ['M']), player('A New Player', 'rotational', ['M'])]);
+    const state = {
+      remainingMin: new Map([['Z Incumbent', 1], ['A New Player', 1]]),
+      remainingMax: new Map([['Z Incumbent', 1], ['A New Player', 2]]),
+      outOfPosition: new Map<string, number>(),
+    };
+    expect(compareCandidates(
+      game.players.find((candidate) => candidate.name === 'Z Incumbent')!,
+      game.players.find((candidate) => candidate.name === 'A New Player')!,
+      'M1',
+      2,
+      game,
+      state,
+      false,
+      new Set(),
+      new Map(),
+      new Set(['Z Incumbent']),
+      new Map([['Z Incumbent', 'M1']]),
+      new Set(),
+    )).toBeGreaterThan(0);
+  });
+
   it('drops rest pins before a late arrival block', () => {
     const { game, quotas } = setup({ lateArrival: { player: 'Rest A', arrivalBlock: 5, targetBlocks: 3 } });
     expect(deriveRestPins(game, quotas).find((pin) => pin.player === 'Rest A')?.blocks.every((block) => block >= 5)).toBe(true);

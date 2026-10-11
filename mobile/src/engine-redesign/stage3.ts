@@ -160,8 +160,10 @@ export function compareCandidates(
   if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
   if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
   if (leftMin !== rightMin) return rightMin - leftMin;
-  const leftIncumbent = previousPlayers.has(left.name) && (state.remainingMax.get(left.name) ?? 0) > 0;
-  const rightIncumbent = previousPlayers.has(right.name) && (state.remainingMax.get(right.name) ?? 0) > 0;
+  const leftIncumbent = previousPlayers.has(left.name)
+    && (state.remainingMax.get(left.name) ?? 0) > leftMin;
+  const rightIncumbent = previousPlayers.has(right.name)
+    && (state.remainingMax.get(right.name) ?? 0) > rightMin;
   if (leftIncumbent !== rightIncumbent && leftMin === rightMin) return Number(rightIncumbent) - Number(leftIncumbent);
   const leftExact = previousSlots.get(left.name) === slot && leftIncumbent;
   const rightExact = previousSlots.get(right.name) === slot && rightIncumbent;
