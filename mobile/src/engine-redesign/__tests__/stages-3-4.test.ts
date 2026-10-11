@@ -150,6 +150,27 @@ describe('redesign stages 3-4', () => {
 
   });
 
+  it('completes a tight 19-player 11v11 placement deterministically', () => {
+    const game = normalizeGame({
+      format: '11v11',
+      formation: '4-3-3',
+      totalBlocks: 10,
+      firstHalfKeeper: 'Keeper A',
+      secondHalfKeeper: 'Keeper B',
+    }, [
+      { ...player('Keeper A', 'rotational', ['D']), primary_positions: ['ANY', 'GK'], keeper: true },
+      { ...player('Keeper B', 'rotational', ['D']), primary_positions: ['ANY', 'GK'], keeper: true },
+      ...Array.from({ length: 17 }, (_, index) => player(`Field ${index + 1}`, 'rotational', ['ANY'])),
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    const first = placeStage3(game, demand, quotas);
+    const second = placeStage3(game, demand, quotas);
+    expect(first.complete).toBe(true);
+    expect(first.blocks).toHaveLength(10);
+    expect(first.blocks).toEqual(second.blocks);
+  });
+
   it('runs polish metrics without changing a failed placement into success', () => {
     const { game, demand, quotas } = setup();
     const placement = placeStage3(game, demand, quotas);
