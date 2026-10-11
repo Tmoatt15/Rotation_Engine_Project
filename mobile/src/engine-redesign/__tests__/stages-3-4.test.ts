@@ -24,6 +24,7 @@ function setup(overrides: Partial<RedesignGameInput> = {}) {
     player('Rest B', 'core', ['M'], 'B'),
     player('Keeper A', 'rotational', ['GK']),
     player('Keeper B', 'rotational', ['GK']),
+    ...Array.from({ length: 14 }, (_, index) => player(`Depth ${index + 1}`, 'rotational', ['ANY'])),
   ];
   const game = normalizeGame(gameInput, roster);
   const demand = buildDemandModel(game);

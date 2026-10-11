@@ -101,6 +101,38 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel): QuotaAs
     reduceRoundRobin(['core', 'rotational'], 0);
     reduceRoundRobin(['developing', 'core', 'rotational'], 0);
   }
+  const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
+    const value = base.get(player.name)!;
+    const pins = endpointPins(game, player).length;
+    return total + Math.max(0, Math.min(value.max - pins, game.totalBlocks - keeperBlocks(game, player, demand) - pins));
+  }, 0);
+  if (effectiveMax() < fieldSlots) {
+    let deficit = fieldSlots - effectiveMax();
+    const priority = (group: RedesignGroup): number => group === 'core' ? 0 : group === 'rotational' ? 1 : 2;
+    const candidates = [...fieldPlayers]
+      .sort((left, right) => {
+        const leftKeeper = isHalfKeeper(game, left, demand) ? 1 : 0;
+        const rightKeeper = isHalfKeeper(game, right, demand) ? 1 : 0;
+        return leftKeeper - rightKeeper || priority(left.group) - priority(right.group) || left.name.localeCompare(right.name);
+      });
+    while (deficit > 0) {
+      let changed = false;
+      for (const player of candidates) {
+        const value = base.get(player.name)!;
+        const cap = game.totalBlocks - keeperBlocks(game, player, demand);
+        if (value.max >= cap) continue;
+        const minWasAtMax = value.min === value.max;
+        value.max += 1;
+        if (minWasAtMax) value.min += 1;
+        audit.surplusAssignments.push({ group: player.group, player: player.name, amount: 1 });
+        deficit = fieldSlots - effectiveMax();
+        changed = true;
+        if (!deficit) break;
+      }
+      if (!changed) break;
+    }
+    audit.unfillableWithinMax += deficit;
+  }
   const quotas: PlayerQuota[] = available.map((player) => {
     const pins = endpointPins(game, player);
     const gk = keeperBlocks(game, player, demand);
