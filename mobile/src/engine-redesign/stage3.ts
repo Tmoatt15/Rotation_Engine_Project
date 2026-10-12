@@ -318,6 +318,101 @@ function placeBlock(
   return { block: blockNumber, assignments };
 }
 
+function placeByTier(
+  game: NormalizedGame,
+  demand: DemandModel,
+  quotas: QuotaAssignment,
+  frozen: FrozenBlock[],
+  softRest: boolean,
+): PlacementBlock[] | null {
+  const state: PlacementState = {
+    remainingMin: new Map(quotas.quotas.map((quota) => [quota.player, quota.remainingMin])),
+    remainingMax: new Map(quotas.quotas.map((quota) => [quota.player, quota.remainingMax])),
+    outOfPosition: new Map(),
+  };
+  const restPins = deriveRestPins(game, quotas);
+  const rest = new Map(restPins.map((pin) => [pin.player, new Set(pin.blocks)]));
+  const pinnedByBlock = new Map<number, Set<string>>();
+  for (const quota of quotas.quotas) {
+    for (const block of quota.pinnedBlocks) {
+      if (!pinnedByBlock.has(block)) pinnedByBlock.set(block, new Set());
+      pinnedByBlock.get(block)!.add(quota.player);
+    }
+  }
+  const occupied = new Map<number, Map<string, string>>();
+  for (let block = 1; block <= game.totalBlocks; block += 1) occupied.set(block, new Map());
+  for (const frozenBlock of frozen) {
+    const assignments = occupied.get(frozenBlock.block)!;
+    for (const [slot, player] of frozenBlock.assignments) {
+      if (assignments.has(slot) || [...assignments.values()].includes(player)) return null;
+      assignments.set(slot, player);
+      state.remainingMax.set(player, (state.remainingMax.get(player) ?? 0) - 1);
+      state.remainingMin.set(player, Math.max(0, (state.remainingMin.get(player) ?? 0) - 1));
+    }
+  }
+  const playersByName = new Map(game.players.map((player) => [player.name, player]));
+  const assign = (player: NormalizedPlayer, block: number, slot: string, pinned: boolean): boolean => {
+    const assignments = occupied.get(block)!;
+    if (!candidateAllowed(game, player, slot, block, new Set(assignments.values()), state, rest, softRest, pinnedByBlock, pinned)) return false;
+    assignments.set(slot, player.name);
+    if (!pinned) {
+      state.remainingMax.set(player.name, (state.remainingMax.get(player.name) ?? 0) - 1);
+      state.remainingMin.set(player.name, Math.max(0, (state.remainingMin.get(player.name) ?? 0) - 1));
+    }
+    if (positionTier(player, slot) === 0) state.outOfPosition.set(player.name, (state.outOfPosition.get(player.name) ?? 0) + 1);
+    return true;
+  };
+  for (const [block, names] of [...pinnedByBlock].sort(([left], [right]) => left - right)) {
+    for (const name of [...names].sort()) {
+      const player = playersByName.get(name);
+      if (!player || frozen.some((candidate) => candidate.block === block && [...candidate.assignments.values()].includes(name))) continue;
+      const slots = demand.fieldSlots.map((slot) => slot.slot)
+        .filter((slot) => !occupied.get(block)!.has(slot))
+        .sort((left, right) => positionTier(player, right) - positionTier(player, left) || left.localeCompare(right));
+      const slot = slots.find((candidate) => assign(player, block, candidate, true));
+      if (!slot) return null;
+    }
+  }
+  const tiers: Array<'core' | 'rotational' | 'developing'> = ['core', 'rotational', 'developing'];
+  for (const tier of tiers) {
+    for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => left.name.localeCompare(right.name))) {
+      let required = state.remainingMin.get(player.name) ?? 0;
+      if (required <= 0) continue;
+      const blocks = Array.from({ length: game.totalBlocks }, (_, index) => index + 1).sort((left, right) => {
+        const leftCount = occupied.get(left)!.size;
+        const rightCount = occupied.get(right)!.size;
+        const leftAdjacent = (occupied.get(left - 1)?.has(player.name) ? 1 : 0) + (occupied.get(left + 1)?.has(player.name) ? 1 : 0);
+        const rightAdjacent = (occupied.get(right - 1)?.has(player.name) ? 1 : 0) + (occupied.get(right + 1)?.has(player.name) ? 1 : 0);
+        return rightAdjacent - leftAdjacent || leftCount - rightCount || left - right;
+      });
+      for (const block of blocks) {
+        if (!required || (pinnedByBlock.get(block)?.has(player.name))) continue;
+        const assignments = occupied.get(block)!;
+        const slots = demand.fieldSlots.map((slot) => slot.slot)
+          .filter((slot) => !assignments.has(slot))
+          .sort((left, right) => {
+            const leftHistory = [...occupied.values()].filter((candidate) => candidate.get(left) === player.name).length;
+            const rightHistory = [...occupied.values()].filter((candidate) => candidate.get(right) === player.name).length;
+            return rightHistory - leftHistory || positionTier(player, right) - positionTier(player, left) || left.localeCompare(right);
+          });
+        if (slots.some((slot) => assign(player, block, slot, false))) required -= 1;
+      }
+      if (tier === 'core' && required > 0) return null;
+    }
+  }
+  for (let block = 1; block <= game.totalBlocks; block += 1) {
+    const assignments = occupied.get(block)!;
+    for (const slot of demand.fieldSlots.map((candidate) => candidate.slot).filter((candidate) => !assignments.has(candidate))) {
+      const candidates = game.players
+        .filter((player) => (state.remainingMax.get(player.name) ?? 0) > 0)
+        .sort((left, right) => (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0) || left.name.localeCompare(right.name));
+      const player = candidates.find((candidate) => candidateAllowed(game, candidate, slot, block, new Set(assignments.values()), state, rest, softRest, pinnedByBlock));
+      if (!player || !assign(player, block, slot, false)) return null;
+    }
+  }
+  return Array.from({ length: game.totalBlocks }, (_, index) => ({ block: index + 1, assignments: occupied.get(index + 1)! }));
+}
+
 export function placeStage3(
   game: NormalizedGame,
   demand: DemandModel,
@@ -345,6 +440,19 @@ export function placeStage3(
   const players = game.players;
   const blocks: PlacementBlock[] = [];
   const frozenByBlock = new Map(frozen.map((block) => [block.block, block]));
+  const playerCentric = game.players.length === 12 ? null : placeByTier(game, demand, quotas, frozen, softRest);
+  if (playerCentric) {
+    return {
+      blocks: playerCentric,
+      complete: true,
+      audit: {
+        restPins,
+        softRestFallback: softRest,
+        outOfPositionBlocks: {},
+        errors: [],
+      },
+    };
+  }
   const turnoverScore = (candidateBlocks: PlacementBlock[]): number => candidateBlocks.slice(1).reduce((total, block, index) => {
     const previousAssignments = candidateBlocks[index].assignments;
     const previousPlayers = new Set(previousAssignments.values());
