@@ -11,7 +11,7 @@ import { positionCapacityCandidates, positionCapacityDeficits, positionCapacityW
 import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
-import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
+import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 import { isRedesignEngineEnabled, setRedesignEngineEnabled } from '@/services/redesign-feature-flag';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
@@ -211,13 +211,15 @@ export default function GameScreen() {
     setShowGameNumberConfirmation(true);
   }
 
-  async function generateSchedule() {
+  async function generateSchedule(keeperOverride?: string) {
+    const selectedFirstHalfGK = keeperOverride ?? firstHalfGK;
+    const selectedSecondHalfGK = keeperOverride ?? secondHalfGK;
     const availableGoalkeepers = new Set(goalkeeperNames.filter((name) => !unavailable.has(name)));
-    if (hasGoalkeeper && (!firstHalfGK || !secondHalfGK)) {
+    if (hasGoalkeeper && (!selectedFirstHalfGK || !selectedSecondHalfGK)) {
       setError('Choose a goalkeeper for both halves before generating the schedule.');
       return;
     }
-    if (hasGoalkeeper && (!availableGoalkeepers.has(firstHalfGK!) || !availableGoalkeepers.has(secondHalfGK!))) {
+    if (hasGoalkeeper && (!availableGoalkeepers.has(selectedFirstHalfGK!) || !availableGoalkeepers.has(selectedSecondHalfGK!))) {
       setError('Choose available goalkeeper selections for both halves.');
       return;
     }
@@ -231,11 +233,40 @@ export default function GameScreen() {
     setShowGameNumberConfirmation(false);
     try {
       const activeTeamId = teamId ?? await getActiveTeamId();
-      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       if (requestError instanceof RedesignOfferError) {
-        Alert.alert('Redesign engine offer', requestError.offer.message, requestError.offer.buttons.map((button) => ({ text: button.label, style: button.action === 'cancel' ? 'cancel' as const : 'default' as const })));
+        const offer = requestError.offer;
+        const suggestions = Array.isArray(offer.context.suggestions) ? offer.context.suggestions.filter((value): value is string => typeof value === 'string') : [];
+        const positionGroup = typeof offer.context.positionGroup === 'string' ? offer.context.positionGroup : null;
+        const backupLabel = positionGroup === 'D' ? 'D' : positionGroup === 'M' ? 'M' : 'F';
+        const keeperNames = Array.isArray(offer.context.keeperNames) ? offer.context.keeperNames.filter((value): value is string => typeof value === 'string') : [];
+        const applyBackupAndRegenerate = async (playerName: string) => {
+          if (!positionGroup) return;
+          const activeTeamId = teamId ?? await getActiveTeamId();
+          const roster = await getRoster(activeTeamId);
+          const updated = roster.players.map((player) => player.name === playerName
+            ? { ...player, backup_positions: [...new Set([...(player.backup_positions ?? []), backupLabel])] }
+            : player);
+          await updateRoster(activeTeamId, updated);
+          setRosterPlayers(updated as RosterPlayer[]);
+          await generateSchedule();
+        };
+        Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button, index) => ({
+          text: button.label,
+          style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
+          onPress: () => {
+            if (button.action === 'choose-player' && suggestions[index]) void applyBackupAndRegenerate(suggestions[index]);
+            else if (button.action === 'go-to-roster' || button.action === 'assign-backup-position' || button.action === 'pick-keeper') router.navigate('/position-assignment');
+            else if (button.action === 'full-game-keeper' && keeperNames[0]) {
+              const keeper = keeperNames[0];
+              setFirstHalfGK(keeper);
+              setSecondHalfGK(keeper);
+              void generateSchedule(keeper);
+            }
+          },
+        })));
         setError(`Redesign engine: ${requestError.offer.kind}`);
         return;
       }

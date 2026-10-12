@@ -1,8 +1,8 @@
 import type { QuotaAssignment, RedesignGroup } from './model';
 import type { LateArrivalFailure } from './stage5';
 
-export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
-export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'assign-backup-position' | 'turn-off-limits';
+export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'position-shortage' | 'keeper-issue' | 'impossible' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
+export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'assign-backup-position' | 'choose-player' | 'go-to-roster' | 'pick-keeper' | 'full-game-keeper' | 'turn-off-limits';
 
 export interface Stage6Offer {
   kind: Stage6OfferKind;
@@ -28,7 +28,7 @@ export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
     return {
       kind: 'position-capacity',
       message: `Consider making one of these players eligible for ${position}: ${candidates.join(', ') || 'review the available players'}.`,
-      buttons: [{ label: 'Assign backup position', action: 'assign-backup-position' }, { label: 'Turn Off Limits', action: 'turn-off-limits' }],
+      buttons: [{ label: 'Assign backup position', action: 'assign-backup-position' }, { label: 'Cancel', action: 'cancel' }],
       context: { failure, position, candidates },
     };
   }
@@ -51,9 +51,9 @@ export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
     };
   }
   return {
-    kind: 'turn-off-limits',
-    message: 'The players cannot be scheduled within their current limits. Turn off limits to complete the lineup.',
-    buttons: [{ label: 'Cancel', action: 'cancel' }, { label: 'Turn Off Limits', action: 'turn-off-limits' }],
+    kind: 'impossible',
+    message: 'The available roster cannot satisfy the formation and playing-time requirements.',
+    buttons: [{ label: 'Cancel', action: 'cancel' }],
     context: { failure },
   };
 }
