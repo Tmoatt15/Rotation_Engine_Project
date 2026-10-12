@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assignQuotas, buildDemandModel, normalizeGame, placeStage3 } from '..';
 import type { NormalizedGame, RedesignPlayerInput } from '../model';
+import type { PlacementResult } from '../stage3';
 
 const corePositions: Record<string, string[]> = {
   Alvin: ['D', 'M'],
@@ -62,6 +63,21 @@ function fieldCounts(result: ReturnType<typeof generateWithTiers>): Map<string, 
   return counts;
 }
 
+function measureCloseness(result: PlacementResult, playerNames: string[], totalSlots: number) {
+  const counts = new Map<string, number>();
+  const blocksPlaced = result.blocks.reduce((total, block) => {
+    for (const player of block.assignments.values()) counts.set(player, (counts.get(player) ?? 0) + 1);
+    return total + block.assignments.size;
+  }, 0);
+  const strandedCount = playerNames.filter((player) => (counts.get(player) ?? 0) === 0).length;
+  return {
+    strandedCount,
+    blocksPlaced,
+    score: blocksPlaced / totalSlots - strandedCount * 0.1,
+    complete: result.complete,
+  };
+}
+
 describe('realistic roster-size matrix', () => {
   for (const [count, expectedTier] of [[12, 1], [14, 0], [16, 0], [18, 0], [19, 0]] as const) {
     it(`${count}-player roster generates a complete schedule`, () => {
@@ -118,5 +134,16 @@ describe('realistic roster-size matrix', () => {
     expect(quotas.quotas.reduce((total, quota) => total + quota.fieldMin, 0)).toBeLessThanOrEqual(demand.slotsPerBlock * game.totalBlocks);
     const result = placeStage3(game, demand, quotas);
     expect(result.complete).toBe(true);
+  });
+
+  it('reports closeness metrics for the 17-player crowding scenario', () => {
+    const game = buildGame(17);
+    const demand = buildDemandModel(game);
+    const result = placeStage3(game, demand, assignQuotas(game, demand));
+    const closeness = measureCloseness(result, game.players.map((player) => player.name), demand.slotsPerBlock * game.totalBlocks);
+    expect(closeness.complete).toBe(true);
+    expect(closeness.strandedCount).toBe(0);
+    expect(closeness.blocksPlaced).toBe(demand.slotsPerBlock * game.totalBlocks);
+    expect(closeness.score).toBe(1);
   });
 });
