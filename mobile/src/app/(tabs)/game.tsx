@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { GAME_FORMATS } from '@/engine/season';
 import { createPlayer } from '@/engine/rotation';
-import { fieldCapacityByHalf, positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
+import { positionCapacityCandidates, positionCapacityDeficits, positionCapacityWarnings, type PositionCapacityDeficit } from '@/engine/quotas';
 import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
@@ -92,8 +92,6 @@ export default function GameScreen() {
   const [completedGameCount, setCompletedGameCount] = useState(0);
   const [gameNumber, setGameNumber] = useState('1');
   const [showGameNumberConfirmation, setShowGameNumberConfirmation] = useState(false);
-  const [showMaximumLimitConfirmation, setShowMaximumLimitConfirmation] = useState(false);
-  const [disableMaximumLimits, setDisableMaximumLimits] = useState(false);
   const [playersOnField, setPlayersOnField] = useState(11);
   const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
   const [totalBlocks, setTotalBlocks] = useState(10);
@@ -179,7 +177,6 @@ export default function GameScreen() {
       return;
     }
     setError(null);
-    setDisableMaximumLimits(false);
     const availableRoster = rosterPlayers
       .filter((player) => !unavailable.has(player.name))
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
@@ -206,18 +203,6 @@ export default function GameScreen() {
   }
 
   function continueToGenerationOptions() {
-    const requiredFieldBlocks = totalBlocks * (playersOnField - (hasGoalkeeper ? 1 : 0));
-    const availableFieldPlayers = playerNames
-      .filter((name) => !unavailable.has(name))
-      .map((name) => rosterPlayers.find((player) => player.name === name))
-      .filter((player): player is RosterPlayer => player !== undefined)
-      .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
-    const normalMaximumCapacity = availableFieldPlayers.reduce((total, player) => total + fieldCapacityByHalf(player, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK }).reduce((sum, capacity) => sum + capacity, 0), 0);
-    const maximumCapacityPressure = normalMaximumCapacity < requiredFieldBlocks;
-    if (maximumCapacityPressure) {
-      setShowMaximumLimitConfirmation(true);
-      return;
-    }
     requestGameNumberConfirmation();
   }
 
@@ -246,7 +231,7 @@ export default function GameScreen() {
     setShowGameNumberConfirmation(false);
     try {
       const activeTeamId = teamId ?? await getActiveTeamId();
-      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK, disableMaximumLimits });
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       if (requestError instanceof RedesignOfferError) {
@@ -278,21 +263,13 @@ export default function GameScreen() {
     }
   }
 
-  function continueWithMaximumChoice(disableLimits: boolean) {
-    setDisableMaximumLimits(disableLimits);
-    setShowMaximumLimitConfirmation(false);
-    requestGameNumberConfirmation();
-  }
-
   function continueWithCapacityOverride() {
-    setDisableMaximumLimits(true);
     setShowCapacityWarning(false);
     requestGameNumberConfirmation();
   }
 
   function tryCapacityGeneration() {
     setShowCapacityWarning(false);
-    setDisableMaximumLimits(false);
     requestGameNumberConfirmation();
   }
 
@@ -336,25 +313,6 @@ export default function GameScreen() {
               <Pressable onPress={() => { recheckCapacityOnFocus.current = true; setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.capacityAssignButton} accessibilityRole="button"><Text style={styles.capacityAssignButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
               <Pressable onPress={continueWithCapacityOverride} style={styles.capacityLimitsButton} accessibilityRole="button"><Text style={styles.capacityLimitsButtonText}>TURN OFF LIMITS</Text></Pressable>
               <Pressable onPress={tryCapacityGeneration} style={styles.capacityTryButton} accessibilityRole="button"><Text style={styles.capacityTryButtonText}>TRY ANYWAY WITH LIMITS</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      <Modal visible={showMaximumLimitConfirmation} transparent animationType="fade" onRequestClose={() => setShowMaximumLimitConfirmation(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.gameNumberModal}>
-            <Text style={styles.modalEyebrow}>LOW ATTENDANCE</Text>
-            <Text style={styles.modalTitle}>Everyone may need to play</Text>
-            <Text style={styles.modalDetail}>
-              {availableCount} players are available for a {playersOnField}-player formation. Keeping maximum limits may leave some required positions unassigned. Turn off maximum limits for this game so available players can play every block?
-            </Text>
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => continueWithMaximumChoice(false)} style={styles.cancelButton} accessibilityRole="button">
-                <Text style={styles.cancelButtonText}>KEEP LIMITS</Text>
-              </Pressable>
-              <Pressable onPress={() => continueWithMaximumChoice(true)} style={styles.confirmButton} accessibilityRole="button">
-                <Text style={styles.confirmButtonText}>TURN OFF MAXIMUMS</Text>
-              </Pressable>
             </View>
           </View>
         </View>
