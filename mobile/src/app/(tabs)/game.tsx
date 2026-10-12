@@ -14,6 +14,7 @@ import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
 import { isRedesignEngineEnabled, setRedesignEngineEnabled } from '@/services/redesign-feature-flag';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
+import { findPositionGaps } from '@/engine-redesign';
 
 const palette = {
   ink: '#17221f',
@@ -182,7 +183,11 @@ export default function GameScreen() {
     const availableRoster = rosterPlayers
       .filter((player) => !unavailable.has(player.name))
       .map((player) => createPlayer(player as Parameters<typeof createPlayer>[0]));
-    const warnings = positionCapacityWarnings(formation, availableRoster);
+    const gaps = findPositionGaps(formation, rosterPlayers.filter((player) => !unavailable.has(player.name)));
+    const warnings = [
+      ...positionCapacityWarnings(formation, availableRoster),
+      ...gaps.map((gap) => `Preflight: only ${gap.eligible} available ${gap.position} players can cover ${gap.required} ${gap.position} slots.`),
+    ];
     const deficits = positionCapacityDeficits(formation, availableRoster, totalBlocks, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
     if (warnings.length || deficits.length) {
       setCapacityWarnings(warnings);
