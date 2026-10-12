@@ -38,7 +38,7 @@ function endpointPins(game: NormalizedGame, player: NormalizedPlayer): number[] 
   return [1, game.totalBlocks];
 }
 
-export function assignQuotas(game: NormalizedGame, demand: DemandModel): QuotaAssignment {
+export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0): QuotaAssignment {
   const available = game.players.filter((player) => player.available);
   const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player));
   const fieldSlots = demand.slotsPerBlock * game.totalBlocks;
@@ -131,6 +131,20 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel): QuotaAs
       if (!changed) break;
     }
     audit.unfillableWithinMax += deficit;
+  }
+  const tierShifts = [
+    { core: 0, rotational: 0, developing: 0 },
+    { core: 2, rotational: 1, developing: 1 },
+    { core: 2, rotational: 2, developing: 1 },
+    { core: 2, rotational: 2, developing: 2 },
+  ];
+  const shifts = tierShifts[Math.max(0, Math.min(3, tier))];
+  if (tier > 0) {
+    for (const player of fieldPlayers) {
+      if (isHalfKeeper(game, player, demand)) continue;
+      const value = base.get(player.name)!;
+      value.max = Math.min(game.totalBlocks, value.max + shifts[player.group]);
+    }
   }
   const quotas: PlayerQuota[] = available.map((player) => {
     const pins = endpointPins(game, player);

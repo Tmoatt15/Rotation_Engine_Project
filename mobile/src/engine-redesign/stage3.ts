@@ -21,6 +21,7 @@ export interface PlacementAudit {
   softRestFallback: boolean;
   outOfPositionBlocks: Record<string, number>;
   errors: string[];
+  relaxationTier?: number;
 }
 
 export interface PlacementResult {

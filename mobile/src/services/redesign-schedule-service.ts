@@ -61,6 +61,18 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, placement: Retur
   });
 }
 
+function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>) {
+  let last: { placement: ReturnType<typeof runStages3And4>; quotas: ReturnType<typeof assignQuotas>; tier: number } | null = null;
+  for (let tier = 0; tier <= 3; tier += 1) {
+    const quotas = assignQuotas(game, demand, tier);
+    const placement = runStages3And4(game, demand, quotas);
+    placement.audit.relaxationTier = tier;
+    last = { placement, quotas, tier };
+    if (placement.complete) return last;
+  }
+  return last!;
+}
+
 async function context(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null }) {
   const settings = await getSeasonSettings(input.teamId);
   const team = await getLocalTeam(input.teamId);
@@ -87,8 +99,8 @@ async function context(input: { teamId: string; gameNumber: number; availablePla
 type RedesignSchedule = LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'redesign' };
 
 export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null }): Promise<RedesignSchedule> {
-  const { settings, team, game, demand, quotas } = await context(input);
-  const placement = runStages3And4(game, demand, quotas);
+  const { settings, team, game, demand } = await context(input);
+  const { placement } = placementWithTierFallback(game, demand);
   if (!placement.complete) throw new RedesignOfferError(offerForFailure({ kind: 'unfillable-within-maxes', errors: placement.audit.errors }));
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
   return {
