@@ -6,6 +6,48 @@ export interface FrozenBlock {
   assignments: Map<string, string>;
 }
 
+function reserveShortPositionGroups(
+  game: NormalizedGame,
+  demand: DemandModel,
+  quotas: QuotaAssignment,
+): Map<string, 'D' | 'M' | 'F'> {
+  const groups: Array<'D' | 'M' | 'F'> = ['D', 'M', 'F'];
+  const fieldMax = new Map(quotas.quotas.map((quota) => [quota.player, quota.fieldMax]));
+  const slotsNeeded = new Map(groups.map((group) => [
+    group,
+    demand.fieldSlots.filter((slot) => slot.group === group).length * game.totalBlocks,
+  ] as const));
+  const supply = new Map(groups.map((group) => [group, 0] as const));
+  for (const player of game.players) {
+    const max = fieldMax.get(player.name) ?? 0;
+    for (const group of groups) {
+      const primary = player.generalPositions.includes('ANY') || player.generalPositions.includes(group);
+      const backup = player.backupPositions.includes(group);
+      if (primary) supply.set(group, (supply.get(group) ?? 0) + max);
+      else if (backup) supply.set(group, (supply.get(group) ?? 0) + max * 0.5);
+    }
+  }
+  const reservations = new Map<string, 'D' | 'M' | 'F'>();
+  for (const group of groups) {
+    let shortage = (slotsNeeded.get(group) ?? 0) - (supply.get(group) ?? 0);
+    if (shortage <= 0) continue;
+    const candidates = game.players
+      .filter((player) => !player.generalPositions.includes('ANY') && !player.generalPositions.includes(group) && player.backupPositions.includes(group))
+      .sort((left, right) => {
+        const leftGroups = groups.filter((candidate) => left.generalPositions.includes(candidate) || left.backupPositions.includes(candidate)).length;
+        const rightGroups = groups.filter((candidate) => right.generalPositions.includes(candidate) || right.backupPositions.includes(candidate)).length;
+        return leftGroups - rightGroups || left.name.localeCompare(right.name);
+      });
+    for (const player of candidates) {
+      if (reservations.has(player.name)) continue;
+      reservations.set(player.name, group);
+      shortage -= fieldMax.get(player.name) ?? 0;
+      if (shortage <= 0) break;
+    }
+  }
+  return reservations;
+}
+
 export interface PlacementBlock {
   block: number;
   assignments: Map<string, string>;
@@ -333,6 +375,7 @@ function placeByTier(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[],
   softRest: boolean,
+  reservedGroups: Map<string, 'D' | 'M' | 'F'>,
 ): PlacementBlock[] | null {
   const state: PlacementState = {
     remainingMin: new Map(quotas.quotas.map((quota) => [quota.player, quota.remainingMin])),
@@ -384,7 +427,11 @@ function placeByTier(
   }
   const tiers: Array<'core' | 'rotational' | 'developing'> = ['core', 'rotational', 'developing'];
   for (const tier of tiers) {
-    for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => left.name.localeCompare(right.name))) {
+    for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => {
+      const leftReserved = reservedGroups.has(left.name) ? 0 : 1;
+      const rightReserved = reservedGroups.has(right.name) ? 0 : 1;
+      return leftReserved - rightReserved || left.name.localeCompare(right.name);
+    })) {
       let required = state.remainingMin.get(player.name) ?? 0;
       if (required <= 0) continue;
       const blocks = Array.from({ length: game.totalBlocks }, (_, index) => index + 1).sort((left, right) => {
@@ -402,8 +449,11 @@ function placeByTier(
           .sort((left, right) => {
             const leftHistory = [...occupied.values()].filter((candidate) => candidate.get(left) === player.name).length;
             const rightHistory = [...occupied.values()].filter((candidate) => candidate.get(right) === player.name).length;
-            return rightHistory - leftHistory || positionTier(player, right) - positionTier(player, left) || left.localeCompare(right);
-          });
+              const reserved = reservedGroups.get(player.name);
+              const leftReserved = reserved === groupForSlot(left) ? 1 : 0;
+              const rightReserved = reserved === groupForSlot(right) ? 1 : 0;
+              return rightReserved - leftReserved || rightHistory - leftHistory || positionTier(player, right) - positionTier(player, left) || left.localeCompare(right);
+            });
         if (slots.some((slot) => assign(player, block, slot, false))) required -= 1;
       }
       if (tier === 'core' && required > 0) return null;
@@ -450,7 +500,8 @@ export function placeStage3(
   const players = game.players;
   const blocks: PlacementBlock[] = [];
   const frozenByBlock = new Map(frozen.map((block) => [block.block, block]));
-  const playerCentric = game.players.length === 12 ? null : placeByTier(game, demand, quotas, frozen, softRest);
+  const reservedGroups = reserveShortPositionGroups(game, demand, quotas);
+  const playerCentric = game.players.length === 12 ? null : placeByTier(game, demand, quotas, frozen, softRest, reservedGroups);
   if (playerCentric) {
     return {
       blocks: playerCentric,
