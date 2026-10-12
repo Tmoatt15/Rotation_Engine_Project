@@ -2,7 +2,7 @@ export * from './model';
 export { normalizeGame } from './stage0';
 export { buildDemandModel, ZONE_POSITIONS } from './stage1';
 export { assignQuotas, BANDS, maximumBlocks, percentageBlocks } from './stage2';
-export { compareCandidates, deriveRestPins, placeStage3, positionTier, restoreIncumbents } from './stage3';
+export { compareCandidates, deriveRestPins, placeStage3, positionTier } from './stage3';
 export type { FrozenBlock, PlacementBlock, PlacementResult, RestPin } from './stage3';
 export { polishStage4, runStages3And4 } from './stage4';
 export { findPositionGaps } from './position-gap';

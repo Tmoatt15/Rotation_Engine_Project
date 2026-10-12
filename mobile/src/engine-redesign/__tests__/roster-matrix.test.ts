@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, normalizeGame, placeStage3, restoreIncumbents } from '..';
+import { assignQuotas, buildDemandModel, normalizeGame, placeStage3 } from '..';
 import type { NormalizedGame, RedesignPlayerInput } from '../model';
 
 const corePositions: Record<string, string[]> = {
@@ -99,27 +99,6 @@ describe('realistic roster-size matrix', () => {
     const second = generateWithTiers(buildGame(12));
     expect(first.blocks).toEqual(second.blocks);
     expect(first.audit.relaxationTier).toBe(second.audit.relaxationTier);
-  });
-
-  it('restores eligible incumbents without changing quota, keeper, or pin invariants', () => {
-    const game = buildGame(12);
-    const demand = buildDemandModel(game);
-    const quotas = assignQuotas(game, demand, 1);
-    const placed = placeStage3(game, demand, quotas);
-    expect(placed.complete).toBe(true);
-    const restored = restoreIncumbents(placed.blocks, quotas, game);
-    expect(restored).toEqual(restoreIncumbents(placed.blocks, quotas, game));
-    const counts = new Map<string, number>();
-    for (const block of restored) {
-      const values = [...block.assignments.values()];
-      expect(new Set(values).size).toBe(values.length);
-      expect(values).not.toContain(block.block <= 5 ? 'Cameron' : 'Eitan');
-      for (const player of values) counts.set(player, (counts.get(player) ?? 0) + 1);
-    }
-    for (const quota of quotas.quotas) {
-      expect(counts.get(quota.player) ?? 0).toBeGreaterThanOrEqual(quota.fieldMin);
-    }
-    expect([...restored[9].assignments.values()]).toEqual(expect.arrayContaining(coreNames));
   });
 
   it('preserves minimums across all tested tiers', () => {
