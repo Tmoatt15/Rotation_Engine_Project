@@ -33,6 +33,7 @@ interface PlacementState {
   remainingMin: Map<string, number>;
   remainingMax: Map<string, number>;
   outOfPosition: Map<string, number>;
+  slack?: number;
 }
 
 function groupForSlot(slot: string): 'D' | 'M' | 'F' {
@@ -113,6 +114,7 @@ function cloneState(state: PlacementState): PlacementState {
     remainingMin: new Map(state.remainingMin),
     remainingMax: new Map(state.remainingMax),
     outOfPosition: new Map(state.outOfPosition),
+    slack: state.slack,
   };
 }
 
@@ -153,6 +155,15 @@ export function compareCandidates(
 ): number {
   const leftMin = state.remainingMin.get(left.name) ?? 0;
   const rightMin = state.remainingMin.get(right.name) ?? 0;
+  const slack = state.slack ?? 8;
+  if (slack < 8) {
+    if (leftMin !== rightMin) return rightMin - leftMin;
+    if (slack <= 1) {
+      const leftFlexibility = (state.remainingMax.get(left.name) ?? 0) - leftMin;
+      const rightFlexibility = (state.remainingMax.get(right.name) ?? 0) - rightMin;
+      if (leftFlexibility !== rightFlexibility) return leftFlexibility - rightFlexibility;
+    }
+  }
   const leftKeeperUrgency = isOppositeHalfKeeper(game, left, block) && leftMin > 0 ? 1 : 0;
   const rightKeeperUrgency = isOppositeHalfKeeper(game, right, block) && rightMin > 0 ? 1 : 0;
   if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
@@ -321,6 +332,9 @@ export function placeStage3(
     remainingMax: new Map(quotas.quotas.map((quota) => [quota.player, quota.remainingMax])),
     outOfPosition: new Map(),
   };
+  const totalPins = quotas.quotas.reduce((total, quota) => total + quota.pinnedBlocks.length, 0);
+  const nonPinnedSlots = demand.slotsPerBlock * game.totalBlocks - totalPins;
+  state.slack = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0) - nonPinnedSlots;
   const players = game.players;
   const blocks: PlacementBlock[] = [];
   const frozenByBlock = new Map(frozen.map((block) => [block.block, block]));
@@ -334,7 +348,7 @@ export function placeStage3(
     const positionalChanges = [...currentPlayers]
       .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
       .length;
-    const spreadPenalty = Math.max(0, substitutions - 6) * 2;
+    const spreadPenalty = (state.slack ?? 8) < 8 ? 0 : Math.max(0, substitutions - 6) * 2;
     return total + substitutions + positionalChanges + spreadPenalty;
   }, 0);
   const search = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState, depth: number): PlacementBlock[] | null => {
