@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, normalizeGame, ZONE_POSITIONS } from '..';
+import { assignQuotas, buildDemandModel, normalizeGame, placeStage3, ZONE_POSITIONS } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 import fingerprintCases from '../../engine/__tests__/fixtures/rotation_fingerprint_cases.json';
 
@@ -80,6 +80,23 @@ describe('redesign stages 0-2', () => {
     expect(keeper.fieldMin).toBe(2);
     expect(keeper.fieldMax).toBeLessThanOrEqual(5);
     expect(keeper.totalMax).toBeLessThanOrEqual(normalized.totalBlocks);
+  });
+
+  it('caps field minimum and maximum when one keeper covers every block', () => {
+    const normalized = normalizeGame(game({
+      firstHalfKeeper: 'Eitan',
+      secondHalfKeeper: 'Eitan',
+    }), [
+      player('Eitan', 'rotational', ['M', 'GK']),
+      ...Array.from({ length: 10 }, (_, index) => player(`Field ${index}`, 'core', ['ANY'])),
+    ]);
+    const demand = buildDemandModel(normalized);
+    const quotas = assignQuotas(normalized, demand);
+    const keeper = quotas.quotas.find((item) => item.player === 'Eitan')!;
+    expect(keeper.keeperBlocks).toBe(10);
+    expect(keeper.fieldMin).toBe(0);
+    expect(keeper.fieldMax).toBe(0);
+    expect(placeStage3(normalized, demand, quotas).complete).toBe(true);
   });
 
   it('treats an unpinned core player as benched when block 1 has lineup pins', () => {
