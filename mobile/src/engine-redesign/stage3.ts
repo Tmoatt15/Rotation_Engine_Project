@@ -496,8 +496,8 @@ function placeByTier(
                 return constrainedMin / Math.max(1, totalSlots - assigned);
               };
               return rightReserved - leftReserved
-                || rightHistory - leftHistory
                 || pressure(groupForSlot(left)) - pressure(groupForSlot(right))
+                || rightHistory - leftHistory
                 || positionTier(player, right) - positionTier(player, left)
                 || left.localeCompare(right);
               });
