@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, normalizeGame, placeStage3, polishStage4 } from '..';
+import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4 } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
 const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none'): RedesignPlayerInput => ({
@@ -12,8 +12,8 @@ const player = (name: string, group: string, positions: string[], rest_preset?: 
 
 function setup(overrides: Partial<RedesignGameInput> = {}) {
   const gameInput: RedesignGameInput = {
-    format: '11v11',
-    formation: '4-3-3',
+    format: '4v4',
+    formation: '1-2-1',
     totalBlocks: 10,
     firstHalfKeeper: 'Keeper A',
     secondHalfKeeper: 'Keeper B',
@@ -33,6 +33,34 @@ function setup(overrides: Partial<RedesignGameInput> = {}) {
 }
 
 describe('redesign stages 3-4', () => {
+  it('constrains ANY primary positions to the general group', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 10,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [{
+      ...player('Hanshith', 'core', ['F']),
+      primary_positions: ['ANY'],
+      backup_positions: ['M', 'CM'],
+    }, {
+      ...player('Sawyer', 'core', ['F']),
+      primary_positions: ['RF'],
+      backup_positions: ['M'],
+    }]);
+    const hanshith = game.players[0];
+    const sawyer = game.players[1];
+    expect(isEligible(hanshith, 'LB')).toBe(false);
+    expect(isEligible(hanshith, 'CF')).toBe(true);
+    expect(isEligible(hanshith, 'CM')).toBe(true);
+    expect(isEligible(sawyer, 'LB')).toBe(false);
+    expect(isEligible(sawyer, 'RB')).toBe(false);
+    expect(isEligible(sawyer, 'RF')).toBe(true);
+    expect(isEligible(sawyer, 'LF')).toBe(true);
+    expect(isEligible(sawyer, 'CM')).toBe(true);
+  });
+
   it('derives the specified A and B rest pins', () => {
     const { game, quotas } = setup();
     expect(deriveRestPins(game, quotas)).toEqual([

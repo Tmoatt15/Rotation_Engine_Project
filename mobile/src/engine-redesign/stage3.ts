@@ -63,12 +63,21 @@ function isZonePosition(position: string, zone: RedesignZone, group: 'D' | 'M' |
   return position === 'ANY' || position === group || ZONE_POSITIONS[zone].has(position);
 }
 
+function isSpecificPosition(position: string, slot: string, group: 'D' | 'M' | 'F'): boolean {
+  return position === slot || position === group;
+}
+
 export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
-  const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
-  if (player.primaryPositions.some((position) => isZonePosition(position, zone, group))) return 2;
-  if (player.backupPositions.some((position) => isZonePosition(position, zone, group))) return 1;
+  const generalMatch = player.generalPositions.includes('ANY') || player.generalPositions.includes(group);
+  const primaryMatch = player.primaryPositions.some((position) => position === 'ANY' ? generalMatch : isSpecificPosition(position, slot, group));
+  if (primaryMatch) return 2;
+  if (generalMatch || player.backupPositions.some((position) => isSpecificPosition(position, slot, group))) return 1;
   return 0;
+}
+
+export function isEligible(player: NormalizedPlayer, slot: string): boolean {
+  return positionTier(player, slot) > 0 && !excludedFromSlot(player, slot);
 }
 
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
@@ -136,7 +145,7 @@ function candidateAllowed(
   if (keeperForHalf === player.name) return false;
   if ((!isPinnedAssignment && (state.remainingMax.get(player.name) ?? 0) <= 0) || excludedFromSlot(player, slot)) return false;
   if (!softRest && rest.get(player.name)?.has(block)) return false;
-  if (positionTier(player, slot) === 0 && (state.outOfPosition.get(player.name) ?? 0) >= 2) return false;
+  if (positionTier(player, slot) === 0) return false;
   return true;
 }
 
@@ -400,6 +409,7 @@ function placeByTier(
       if (tier === 'core' && required > 0) return null;
     }
   }
+  if ([...state.remainingMin.values()].some((remaining) => remaining > 0)) return null;
   for (let block = 1; block <= game.totalBlocks; block += 1) {
     const assignments = occupied.get(block)!;
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot).filter((candidate) => !assignments.has(candidate))) {
