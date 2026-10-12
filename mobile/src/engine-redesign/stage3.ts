@@ -71,6 +71,40 @@ export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 
   return 0;
 }
 
+export function restoreIncumbents(
+  blocks: PlacementBlock[],
+  quotas: QuotaAssignment,
+  game: NormalizedGame,
+): PlacementBlock[] {
+  const result = blocks.map((block) => ({ ...block, assignments: new Map(block.assignments) }));
+  const pinnedByPlayer = new Map(quotas.quotas.map((quota) => [quota.player, new Set(quota.pinnedBlocks)]));
+  const playerByName = new Map(game.players.map((player) => [player.name, player]));
+  for (let index = 1; index < result.length; index += 1) {
+    const previous = result[index - 1];
+    const current = result[index];
+    const processed = new Set<string>();
+    for (const [slot, playerName] of [...current.assignments]) {
+      if (processed.has(playerName)) continue;
+      const previousSlot = [...previous.assignments].find(([, name]) => name === playerName)?.[0];
+      if (!previousSlot || previousSlot === slot) continue;
+      const occupant = current.assignments.get(previousSlot);
+      if (!occupant || occupant === playerName) continue;
+      const player = playerByName.get(playerName);
+      const occupantPlayer = playerByName.get(occupant);
+      if (!player || !occupantPlayer) continue;
+      const pinned = (name: string): boolean => pinnedByPlayer.get(name)?.has(index + 1) ?? false;
+      const keeper = (name: string): boolean => (index + 1 <= game.totalBlocks / 2 ? game.firstHalfKeeper : game.secondHalfKeeper) === name;
+      if (pinned(playerName) || pinned(occupant) || keeper(playerName) || keeper(occupant)) continue;
+      if (excludedFromSlot(player, previousSlot) || excludedFromSlot(occupantPlayer, slot)) continue;
+      current.assignments.set(slot, occupant);
+      current.assignments.set(previousSlot, playerName);
+      processed.add(playerName);
+      processed.add(occupant);
+    }
+  }
+  return result;
+}
+
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
@@ -420,8 +454,9 @@ export function placeStage3(
   };
   const feasibleBlocks = findFeasible();
   const resultBlocks = feasibleBlocks ?? search(1, blocks, state, 0);
+  const restoredBlocks = resultBlocks ? restoreIncumbents(resultBlocks, quotas, game) : null;
   const errors: string[] = resultBlocks ? [] : ['Unable to place the schedule without stranding a future slot.'];
-  const finalBlocks = resultBlocks ?? blocks;
+  const finalBlocks = restoredBlocks ?? blocks;
   return {
     blocks: finalBlocks,
     complete: errors.length === 0 && finalBlocks.length === game.totalBlocks,
