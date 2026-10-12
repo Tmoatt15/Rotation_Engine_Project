@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -652,7 +652,7 @@ function PositionDepthPanel({
         const status = have < slots ? 'critical' : total < recommended ? 'warning' : 'good';
         const next = status === 'good' ? null : suggestion(group, positions);
         return (
-          <View key={group} style={styles.depthRow}>
+          <Pressable key={group} onPress={next ? () => onAddBackup(next) : undefined} disabled={!next} style={styles.depthRow} accessibilityRole={next ? 'button' : undefined}>
             <View style={styles.depthRowHeader}>
               <Text style={styles.depthGroup}>{groupNames[group]}</Text>
               <Text style={styles.depthNeed}>need {slots} · recommend {recommended}</Text>
@@ -666,12 +666,8 @@ function PositionDepthPanel({
                   ? `⚠ Warning — Recommend ${recommended - total} more ${groupNames[group].toLowerCase().replace(/s$/, '')} backup(s) for coverage.`
                   : `✓ Good (${total} total)`}
             </Text>
-            {next && (
-              <Pressable onPress={() => onAddBackup(next)} style={styles.depthAction} accessibilityRole="button">
-                <Text style={styles.depthActionText}>Add backup: {displayPlayerName(next.name)}</Text>
-              </Pressable>
-            )}
-          </View>
+            {next && <Text style={styles.depthActionText}>Add backup: {displayPlayerName(next.name)}</Text>}
+          </Pressable>
         );
       })}
       <View style={styles.depthRow}>

@@ -103,6 +103,7 @@ export default function GameScreen() {
   const [useRedesignEngine, setUseRedesignEngine] = useState(isRedesignEngineEnabled);
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
+  const gameScrollRef = useRef<ScrollView>(null);
   const availableCount = playerNames.length - unavailable.size;
   const enteredGameNumber = Number.parseInt(gameNumber, 10);
   const gameNumberWarning = Number.isInteger(enteredGameNumber) && enteredGameNumber <= completedGameCount
@@ -271,11 +272,6 @@ export default function GameScreen() {
         return;
       }
       const message = requestError instanceof Error ? requestError.message : 'Unable to reach the schedule service.';
-      if (message.includes('exceeds hard maximum') || message.includes('exceeds the half') || message.includes('capacity is blocked by half maximums')) {
-        setError(null);
-        setShowMaximumLimitConfirmation(true);
-        return;
-      }
       const availableRoster = rosterPlayers.filter((player) => !unavailable.has(player.name));
       const shortage = parsePositionShortage(message, availableRoster, totalBlocks, formation, { firstHalfGk: firstHalfGK, secondHalfGk: secondHalfGK });
       if (shortage) {
@@ -292,11 +288,6 @@ export default function GameScreen() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function continueWithCapacityOverride() {
-    setShowCapacityWarning(false);
-    requestGameNumberConfirmation();
   }
 
   function tryCapacityGeneration() {
@@ -342,7 +333,6 @@ export default function GameScreen() {
             </View>
             <View style={styles.capacityModalActions}>
               <Pressable onPress={() => { recheckCapacityOnFocus.current = true; setShowCapacityWarning(false); router.push('/position-assignment'); }} style={styles.capacityAssignButton} accessibilityRole="button"><Text style={styles.capacityAssignButtonText}>ASSIGN BACKUP POSITION</Text></Pressable>
-              <Pressable onPress={continueWithCapacityOverride} style={styles.capacityLimitsButton} accessibilityRole="button"><Text style={styles.capacityLimitsButtonText}>TURN OFF LIMITS</Text></Pressable>
               <Pressable onPress={tryCapacityGeneration} style={styles.capacityTryButton} accessibilityRole="button"><Text style={styles.capacityTryButtonText}>TRY ANYWAY WITH LIMITS</Text></Pressable>
             </View>
           </View>
@@ -378,7 +368,7 @@ export default function GameScreen() {
       </Modal>
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={gameScrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
               <Pressable onPress={() => router.navigate('/' as never)} style={styles.backButton} accessibilityLabel="Go home">
                 <SymbolView
@@ -512,7 +502,9 @@ export default function GameScreen() {
               />}
             </Pressable>
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {error && (error === 'Choose a goalkeeper for both halves before generating the schedule.'
+              ? <Pressable onPress={() => { setError(null); gameScrollRef.current?.scrollTo({ y: 250, animated: true }); }} accessibilityRole="button"><Text style={styles.errorText}>{error} Tap here to choose.</Text></Pressable>
+              : <Text style={styles.errorText}>{error}</Text>)}
           </ScrollView>
         </SafeAreaView>
       </View>

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 
 import PositionAssignmentScreen from '../position-assignment';
@@ -31,6 +31,7 @@ function withBlockSettings(value: SeasonSettings, gameLength: number, requestedB
 }
 
 export default function RosterTab() {
+  const router = useRouter();
   const [settings, setSettings] = useState<SeasonSettings | null>(null);
   const [draft, setDraft] = useState<SeasonSettings | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -84,7 +85,10 @@ export default function RosterTab() {
         const names = unmappablePlayers.length === 1
           ? unmappablePlayers[0]
           : `${unmappablePlayers.slice(0, -1).join(', ')}, and ${unmappablePlayers[unmappablePlayers.length - 1]}`;
-        Alert.alert('Check player positions', `We couldn't find a clean spot for ${names} in the new formation — please check their positions.`);
+        Alert.alert('Check player positions', `We couldn't find a clean spot for ${names} in the new formation — please check their positions.`, [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Review positions', onPress: () => router.push('/position-assignment') },
+        ]);
       }
       setSettings(saved);
       setDraft(saved);
