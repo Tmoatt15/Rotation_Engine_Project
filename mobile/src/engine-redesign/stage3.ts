@@ -128,6 +128,13 @@ export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolea
   return player.excludedPositions.some((position) => position === slot || position === zone || position === group || ZONE_POSITIONS[zone].has(position));
 }
 
+function eligibleGroupCount(player: NormalizedPlayer): number {
+  const groups = ['D', 'M', 'F'] as const;
+  return groups.filter((group) => player.generalPositions.includes('ANY')
+    || player.generalPositions.includes(group)
+    || player.backupPositions.includes(group)).length;
+}
+
 function restBlocks(game: NormalizedGame, quota: PlayerQuota, player: NormalizedPlayer): number[] {
   if (player.group !== 'core' || player.restPreset === 'none') return [];
   const restCount = Math.max(0, game.totalBlocks - quota.totalMax);
@@ -420,7 +427,14 @@ function placeByTier(
       if (!player || frozen.some((candidate) => candidate.block === block && [...candidate.assignments.values()].includes(name))) continue;
       const slots = demand.fieldSlots.map((slot) => slot.slot)
         .filter((slot) => !occupied.get(block)!.has(slot))
-        .sort((left, right) => positionTier(player, right) - positionTier(player, left) || left.localeCompare(right));
+        .sort((left, right) => {
+          const reserved = reservedGroups.get(player.name);
+          const leftReserved = reserved === groupForSlot(left) ? 1 : 0;
+          const rightReserved = reserved === groupForSlot(right) ? 1 : 0;
+          return rightReserved - leftReserved
+            || positionTier(player, right) - positionTier(player, left)
+            || left.localeCompare(right);
+        });
       const slot = slots.find((candidate) => assign(player, block, candidate, true));
       if (!slot) return null;
     }
@@ -430,7 +444,9 @@ function placeByTier(
     for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => {
       const leftReserved = reservedGroups.has(left.name) ? 0 : 1;
       const rightReserved = reservedGroups.has(right.name) ? 0 : 1;
-      return leftReserved - rightReserved || left.name.localeCompare(right.name);
+      return leftReserved - rightReserved
+        || eligibleGroupCount(left) - eligibleGroupCount(right)
+        || left.name.localeCompare(right.name);
     })) {
       let required = state.remainingMin.get(player.name) ?? 0;
       if (required <= 0) continue;
@@ -452,8 +468,23 @@ function placeByTier(
               const reserved = reservedGroups.get(player.name);
               const leftReserved = reserved === groupForSlot(left) ? 1 : 0;
               const rightReserved = reserved === groupForSlot(right) ? 1 : 0;
-              return rightReserved - leftReserved || rightHistory - leftHistory || positionTier(player, right) - positionTier(player, left) || left.localeCompare(right);
-            });
+              const pressure = (group: 'D' | 'M' | 'F'): number => {
+                const constrainedMin = game.players.reduce((total, candidate) => {
+                  const remaining = state.remainingMin.get(candidate.name) ?? 0;
+                  return total + (remaining > 0 && eligibleGroupCount(candidate) === 1
+                    && (candidate.generalPositions.includes(group) || candidate.backupPositions.includes(group)) ? remaining : 0);
+                }, 0);
+                const totalSlots = demand.fieldSlots.filter((candidate) => candidate.group === group).length * game.totalBlocks;
+                const assigned = [...occupied.values()].reduce((total, candidate) => total
+                  + [...candidate.keys()].filter((slot) => groupForSlot(slot) === group).length, 0);
+                return constrainedMin / Math.max(1, totalSlots - assigned);
+              };
+              return rightReserved - leftReserved
+                || pressure(groupForSlot(left)) - pressure(groupForSlot(right))
+                || rightHistory - leftHistory
+                || positionTier(player, right) - positionTier(player, left)
+                || left.localeCompare(right);
+              });
         if (slots.some((slot) => assign(player, block, slot, false))) required -= 1;
       }
       if (tier === 'core' && required > 0) return null;
