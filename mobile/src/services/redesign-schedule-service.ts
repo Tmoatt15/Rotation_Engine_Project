@@ -18,8 +18,10 @@ export class RedesignOfferError extends Error {
 }
 
 function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>): Stage6Offer {
+  const firstHalfAssigned = Boolean(game.firstHalfKeeper);
+  const secondHalfAssigned = Boolean(game.secondHalfKeeper);
   const keepers = game.players.filter((player) => player.available && (player.keeper || player.generalPositions.includes('GK') || player.primaryPositions.includes('GK')));
-  if (keepers.length < 2) {
+  if (!firstHalfAssigned || !secondHalfAssigned) {
     if (keepers.length === 0) {
       return {
         kind: 'keeper-issue',
