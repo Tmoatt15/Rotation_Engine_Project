@@ -5,4 +5,6 @@ export { assignQuotas, BANDS, maximumBlocks, percentageBlocks } from './stage2';
 export { compareCandidates, deriveRestPins, placeStage3, positionTier } from './stage3';
 export type { FrozenBlock, PlacementBlock, PlacementResult, RestPin } from './stage3';
 export { polishStage4, runStages3And4 } from './stage4';
+export { findPositionGaps } from './position-gap';
+export type { PositionGap, PositionGapPlayer, PositionGapSuggestion } from './position-gap';
 export type { PolishMetrics, PolishedPlacement } from './stage4';
