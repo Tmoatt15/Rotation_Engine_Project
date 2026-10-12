@@ -509,10 +509,19 @@ function placeByTier(
   if ([...state.remainingMin.values()].some((remaining) => remaining > 0)) return null;
   for (let block = 1; block <= game.totalBlocks; block += 1) {
     const assignments = occupied.get(block)!;
+    const previousSlot = new Map<string, string>(
+      [...(occupied.get(block - 1)?.entries() ?? [])].map(([slot, player]) => [player, slot]),
+    );
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot).filter((candidate) => !assignments.has(candidate))) {
       const candidates = game.players
         .filter((player) => (state.remainingMax.get(player.name) ?? 0) > 0)
-        .sort((left, right) => (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0) || left.name.localeCompare(right.name));
+        .sort((left, right) => {
+          const leftHistory = previousSlot.get(left.name) === slot ? 1 : 0;
+          const rightHistory = previousSlot.get(right.name) === slot ? 1 : 0;
+          return rightHistory - leftHistory
+            || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
+            || left.name.localeCompare(right.name);
+        });
       const player = candidates.find((candidate) => candidateAllowed(game, candidate, slot, block, new Set(assignments.values()), state, rest, softRest, pinnedByBlock));
       if (!player || !assign(player, block, slot, false)) return null;
     }
