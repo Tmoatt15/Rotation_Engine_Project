@@ -503,7 +503,15 @@ export default function GameScreen() {
             </Pressable>
 
             {error && (error === 'Choose a goalkeeper for both halves before generating the schedule.'
-              ? <Pressable onPress={() => { setError(null); gameScrollRef.current?.scrollTo({ y: 250, animated: true }); }} accessibilityRole="button"><Text style={styles.errorText}>{error} Tap here to choose.</Text></Pressable>
+              ? <Pressable onPress={() => {
+                setError(null);
+                const availableKeepers = goalkeeperNames.filter((name) => !unavailable.has(name));
+                if (availableKeepers.length === 0) {
+                  router.push('/position-assignment');
+                } else {
+                  gameScrollRef.current?.scrollTo({ y: 250, animated: true });
+                }
+              }} accessibilityRole="button"><Text style={styles.errorText}>{error} Tap here to choose.</Text></Pressable>
               : <Text style={styles.errorText}>{error}</Text>)}
           </ScrollView>
         </SafeAreaView>
