@@ -126,16 +126,14 @@ function candidateAllowed(
   rest: Map<string, Set<number>>,
   softRest: boolean,
   pinnedByBlock: Map<number, Set<string>>,
+  isPinnedAssignment = false,
 ): boolean {
   if (!player.available || isDedicatedKeeper(player) || assigned.has(player.name)) return false;
   const keeperForHalf = block <= game.totalBlocks / 2 ? game.firstHalfKeeper : game.secondHalfKeeper;
   if (keeperForHalf === player.name) return false;
-  if ((state.remainingMax.get(player.name) ?? 0) <= 0 || excludedFromSlot(player, slot)) return false;
+  if ((!isPinnedAssignment && (state.remainingMax.get(player.name) ?? 0) <= 0) || excludedFromSlot(player, slot)) return false;
   if (!softRest && rest.get(player.name)?.has(block)) return false;
   if (positionTier(player, slot) === 0 && (state.outOfPosition.get(player.name) ?? 0) >= 2) return false;
-  const futurePins = [...pinnedByBlock.entries()]
-    .filter(([pinBlock, names]) => pinBlock > block && names.has(player.name)).length;
-  if ((state.remainingMax.get(player.name) ?? 0) <= futurePins) return false;
   return true;
 }
 
@@ -201,7 +199,9 @@ function futureFeasible(
   softRest: boolean,
   pinnedByBlock: Map<number, Set<string>>,
 ): boolean {
-  const remainingSlots = demand.slotsPerBlock * (game.totalBlocks - fromBlock);
+  const futurePinnedSlots = Array.from({ length: game.totalBlocks - fromBlock }, (_, index) => fromBlock + index + 1)
+    .reduce((total, block) => total + (pinnedByBlock.get(block)?.size ?? 0), 0);
+  const remainingSlots = demand.slotsPerBlock * (game.totalBlocks - fromBlock) - futurePinnedSlots;
   const totalMax = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0);
   if (totalMax < remainingSlots) return false;
   for (const player of players) {
@@ -217,7 +217,18 @@ function futureFeasible(
     const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot)) {
       if (existing?.has(slot)) continue;
-      if (!players.some((player) => candidateAllowed(game, player, slot, block, new Set(existing?.values()), state, rest, softRest, pinnedByBlock))) return false;
+      if (!players.some((player) => candidateAllowed(
+        game,
+        player,
+        slot,
+        block,
+        new Set(existing?.values()),
+        state,
+        rest,
+        softRest,
+        pinnedByBlock,
+        pinnedByBlock.get(block)?.has(player.name) ?? false,
+      ))) return false;
     }
   }
   return true;
@@ -253,7 +264,7 @@ function placeBlock(
       - demand.fieldSlots.findIndex((candidate) => candidate.slot === right);
   });
   const assignPlayer = (player: NormalizedPlayer, slot: string, preAccounted = false): boolean => {
-    if (!candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock)) return false;
+    if (!candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock, preAccounted)) return false;
     assignments.set(slot, player.name);
     assigned.add(player.name);
     if (positionTier(player, slot) === 0) state.outOfPosition.set(player.name, (state.outOfPosition.get(player.name) ?? 0) + 1);
@@ -269,7 +280,7 @@ function placeBlock(
     if (!player) continue;
     const slot = slots.filter((candidate) => !assignments.has(candidate))
       .sort((left, right) => positionTier(player, right) - positionTier(player, left) || slots.indexOf(left) - slots.indexOf(right))
-      .find((candidate) => candidateAllowed(game, player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock));
+      .find((candidate) => candidateAllowed(game, player, candidate, blockNumber, assigned, state, rest, softRest, pinnedByBlock, true));
     if (!slot || !assignPlayer(player, slot, true)) return null;
   }
   while (assignments.size < slots.length) {
