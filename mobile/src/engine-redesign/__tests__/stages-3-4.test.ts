@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4 } from '..';
+import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4, turnoverVariance } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
 const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none'): RedesignPlayerInput => ({
@@ -33,6 +33,18 @@ function setup(overrides: Partial<RedesignGameInput> = {}) {
 }
 
 describe('redesign stages 3-4', () => {
+  it('prefers evenly spread turnover over boundary spikes', () => {
+    const smooth = Array.from({ length: 10 }, (_, index) => ({
+      block: index + 1,
+      assignments: new Map([['D1', `A${index % 2}`], ['M1', `M${index % 2}`], ['F1', `F${index % 2}`]]),
+    }));
+    const spiky = Array.from({ length: 10 }, (_, index) => ({
+      block: index + 1,
+      assignments: new Map([['D1', index === 2 ? 'B' : 'A'], ['M1', index === 2 ? 'N' : 'M'], ['F1', index === 2 ? 'Q' : 'F']]),
+    }));
+    expect(turnoverVariance(smooth)).toBeLessThan(turnoverVariance(spiky));
+  });
+
   it('constrains ANY primary positions to the general group', () => {
     const game = normalizeGame({
       format: '4v4',

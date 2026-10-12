@@ -72,6 +72,22 @@ export interface PlacementResult {
   complete: boolean;
 }
 
+export function turnoverVariance(blocks: PlacementBlock[]): number {
+  if (blocks.length < 3) return 0;
+  const halfBoundary = Math.floor(blocks.length / 2) + 1;
+  const turnovers = blocks.slice(1).reduce<number[]>((values, block, index) => {
+    if (block.block === 2 || block.block === halfBoundary) return values;
+    const previous = new Set(blocks[index].assignments.values());
+    const current = new Set(block.assignments.values());
+    values.push([...new Set([...previous, ...current])]
+      .filter((player) => previous.has(player) !== current.has(player)).length);
+    return values;
+  }, []);
+  if (!turnovers.length) return 0;
+  const mean = turnovers.reduce((total, value) => total + value, 0) / turnovers.length;
+  return turnovers.reduce((total, value) => total + (value - mean) ** 2, 0) / turnovers.length;
+}
+
 interface PlacementState {
   remainingMin: Map<string, number>;
   remainingMax: Map<string, number>;
@@ -545,19 +561,22 @@ export function placeStage3(
       },
     };
   }
-  const turnoverScore = (candidateBlocks: PlacementBlock[]): number => candidateBlocks.slice(1).reduce((total, block, index) => {
-    const previousAssignments = candidateBlocks[index].assignments;
-    const previousPlayers = new Set(previousAssignments.values());
-    const currentPlayers = new Set(block.assignments.values());
-    const substitutions = [...new Set([...previousPlayers, ...currentPlayers])]
-      .filter((name) => previousPlayers.has(name) !== currentPlayers.has(name)).length;
-    const previousSlots = new Map([...previousAssignments].map(([slot, player]) => [player, slot]));
-    const positionalChanges = [...currentPlayers]
-      .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
-      .length;
-    const spreadPenalty = (state.slack ?? 8) < 8 ? 0 : Math.max(0, substitutions - 6) * 2;
-    return total + substitutions + positionalChanges + spreadPenalty;
-  }, 0);
+  const turnoverScore = (candidateBlocks: PlacementBlock[]): number => {
+    const baseScore = candidateBlocks.slice(1).reduce((total, block, index) => {
+      const previousAssignments = candidateBlocks[index].assignments;
+      const previousPlayers = new Set(previousAssignments.values());
+      const currentPlayers = new Set(block.assignments.values());
+      const substitutions = [...new Set([...previousPlayers, ...currentPlayers])]
+        .filter((name) => previousPlayers.has(name) !== currentPlayers.has(name)).length;
+      const previousSlots = new Map([...previousAssignments].map(([slot, player]) => [player, slot]));
+      const positionalChanges = [...currentPlayers]
+        .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
+        .length;
+      const spreadPenalty = (state.slack ?? 8) < 8 ? 0 : Math.max(0, substitutions - 6) * 2;
+      return total + substitutions + positionalChanges + spreadPenalty;
+    }, 0);
+    return baseScore + turnoverVariance(candidateBlocks) * 0.001;
+  };
   const findFeasible = (): PlacementBlock[] | null => {
     const deadline = Date.now() + 3000;
     const searchFeasible = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState): PlacementBlock[] | null => {
