@@ -67,6 +67,30 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
       context: { failureType: 'position-shortage', positionGroup: shortage.group, have: shortage.have, need: shortage.need, suggestions },
     };
   }
+  const quotas = assignQuotas(game, demand).quotas;
+  for (const group of groups) {
+    const slots = demand.fieldSlots.filter((slot) => slot.group === group);
+    const eligible = game.players.filter((player) => player.available && !player.keeper
+      && slots.some((slot) => positionTier(player, slot.slot) > 0));
+    const capacityHave = eligible.reduce((total, player) => total + (quotas.find((quota) => quota.player === player.name)?.fieldMax ?? 0), 0);
+    const capacityNeed = slots.length * game.totalBlocks;
+    if (capacityHave >= capacityNeed) continue;
+    const suggestions = game.players
+      .filter((player) => player.available && !player.keeper && !slots.some((slot) => positionTier(player, slot.slot) > 0))
+      .sort((left, right) => (left.backupPositions.length ? 1 : 0) - (right.backupPositions.length ? 1 : 0)
+        || left.name.localeCompare(right.name))
+      .slice(0, 3)
+      .map((player) => player.name);
+    const label = group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
+    return {
+      kind: 'position-shortage',
+      message: `Not enough ${label} coverage. Your ${label} can cover ${capacityHave} blocks, but the formation needs ${capacityNeed}.`,
+      buttons: suggestions.length
+        ? suggestions.map((player) => ({ label: `Add ${label.slice(0, -1)} backup for ${player}`, action: 'choose-player' as const }))
+        : [{ label: 'Go to Roster', action: 'go-to-roster' as const }],
+      context: { failureType: 'position-shortage', positionGroup: group, have: eligible.length, need: slots.length, capacityHave, capacityNeed, suggestions },
+    };
+  }
   return {
     kind: 'impossible',
     message: 'No eligible placement can satisfy the formation and playing-time requirements.',
