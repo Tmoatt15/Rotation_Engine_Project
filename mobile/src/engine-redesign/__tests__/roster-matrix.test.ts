@@ -15,7 +15,7 @@ const corePositions: Record<string, string[]> = {
 };
 
 const coreNames = Object.keys(corePositions);
-const rotationals = ['Frank', 'Artur', 'Brad', 'Ryan', 'Mahaswin', 'Prerith', 'Thanish', 'Extra1'];
+const rotationals = ['Frank', 'Artur', 'Brad', 'Ryan', 'Mahaswin', 'Prerith', 'Thanish', 'Extra1', 'Extra2', 'Extra3', 'Extra4'];
 
 function player(name: string, group: string, positions: string[], keeper = false): RedesignPlayerInput {
   return {
@@ -109,5 +109,14 @@ describe('realistic roster-size matrix', () => {
         expect(counts.get(quota.player) ?? 0).toBeGreaterThanOrEqual(quota.fieldMin);
       }
     }
+  });
+
+  it('reduces minimums for an oversized 22-player roster before placement', () => {
+    const game = buildGame(22);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    expect(quotas.quotas.reduce((total, quota) => total + quota.fieldMin, 0)).toBeLessThanOrEqual(demand.slotsPerBlock * game.totalBlocks);
+    const result = placeStage3(game, demand, quotas);
+    expect(result.complete).toBe(true);
   });
 });

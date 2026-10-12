@@ -73,33 +73,34 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     }
     audit.unfillableWithinMax = remaining;
   } else if (sum('min') > fieldSlots) {
-    let shortage = sum('min') - fieldSlots;
-    const reduceRoundRobin = (groups: RedesignGroup[], floor: number | ((player: NormalizedPlayer) => number)): void => {
-      const candidates = groups.flatMap((group) => fieldPlayers
-        .filter((candidate) => candidate.group === group)
-          .filter((candidate) => !isHalfKeeper(game, candidate, demand))
-          .sort((left, right) => left.name.localeCompare(right.name)));
-      while (shortage > 0) {
-        let changed = false;
-        for (const player of candidates) {
-          const value = base.get(player.name)!;
-          const minimum = typeof floor === 'function' ? floor(player) : floor;
-          if (value.min <= minimum) continue;
-          value.min -= 1;
-          shortage -= 1;
-          changed = true;
-          audit.relaxedGroups.push({ group: player.group, amount: 1 });
-          if (!shortage) return;
-        }
-        if (!changed) return;
+    const order: RedesignGroup[] = ['developing', 'rotational', 'core'];
+    const startingPercent: Record<RedesignGroup, number> = { core: 70, rotational: 60, developing: 50 };
+    const groupPercent = { ...startingPercent };
+    const reduceStep = (minimumPercent: number): void => {
+      const group = order[steps % order.length];
+      const nextPercent = Math.max(minimumPercent, groupPercent[group] - 10);
+      if (nextPercent === groupPercent[group]) {
+        steps += 1;
+        return;
       }
+      groupPercent[group] = nextPercent;
+      const target = percentageBlocks(game.totalBlocks, nextPercent / 100, 0);
+      for (const player of fieldPlayers.filter((candidate) => candidate.group === group && !isHalfKeeper(game, candidate, demand))) {
+        const value = base.get(player.name)!;
+        if (value.min > target) {
+          audit.relaxedGroups.push({ group, amount: value.min - target });
+          value.min = target;
+        }
+      }
+      steps += 1;
     };
-    const rotationalMins = fieldPlayers.filter((player) => player.group === 'rotational').map((player) => base.get(player.name)!.min);
-    const rotationalMin = rotationalMins.length ? Math.min(...rotationalMins) : 0;
-    reduceRoundRobin(['developing'], 0);
-    reduceRoundRobin(['core'], rotationalMin);
-    reduceRoundRobin(['core', 'rotational'], 0);
-    reduceRoundRobin(['developing', 'core', 'rotational'], 0);
+    let steps = 0;
+    while (sum('min') > fieldSlots && steps < 6) reduceStep(40);
+    steps = 0;
+    while (sum('min') > fieldSlots && steps < 30) {
+      if (Object.values(groupPercent).every((percent) => percent === 0)) break;
+      reduceStep(0);
+    }
   }
   const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
     const value = base.get(player.name)!;
