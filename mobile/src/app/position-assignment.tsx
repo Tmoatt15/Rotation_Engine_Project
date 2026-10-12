@@ -452,6 +452,13 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                 );
               })}
             </View>}
+            {formationConfigured && (
+              <PositionDepthPanel
+                players={players}
+                positionRows={positionRows}
+                onAddBackup={(player) => openPositionPicker(player, 'backup_positions')}
+              />
+            )}
             {message && <Text style={styles.successText}>{message}</Text>}
             {error && <Text style={styles.errorText}>{error}</Text>}
             {!embedded && !loading && (
@@ -593,6 +600,91 @@ const healthColors: Record<PositionHealth['status'], { background: string; borde
   green: { background: '#dcebe2', border: '#19634b', text: '#19634b', icon: '🟢' },
 };
 
+function positionGroupForRow(row: { label?: string }): 'D' | 'M' | 'F' | null {
+  if (row.label?.includes('DEFENDER')) return 'D';
+  if (row.label?.includes('MIDFIELD')) return 'M';
+  if (row.label?.includes('FORWARD')) return 'F';
+  return null;
+}
+
+function PositionDepthPanel({
+  players,
+  positionRows,
+  onAddBackup,
+}: {
+  players: Player[];
+  positionRows: Array<{ label: string; exactPositions: string[] }>;
+  onAddBackup: (player: Player) => void;
+}) {
+  const groups = positionRows
+    .map((row) => ({ group: positionGroupForRow(row), positions: row.exactPositions }))
+    .filter((item): item is { group: 'D' | 'M' | 'F'; positions: string[] } => item.group !== null);
+  const groupNames: Record<'D' | 'M' | 'F', string> = { D: 'DEFENDERS', M: 'MIDFIELDERS', F: 'FORWARDS' };
+  const groupPlayers = (group: 'D' | 'M' | 'F', positions: string[]) => players.filter((player) => {
+    const general = player.general_positions.map((position) => position.toUpperCase());
+    const primary = player.primary_positions.map((position) => position.toUpperCase());
+    return general.includes(group) || general.includes(ANY_POSITION) || primary.includes(group) || primary.some((position) => positions.includes(position));
+  });
+  const backupPlayers = (group: 'D' | 'M' | 'F', positions: string[]) => players.filter((player) => {
+    const backup = player.backup_positions.map((position) => position.toUpperCase());
+    const primary = groupPlayers(group, positions).some((candidate) => candidate.name === player.name);
+    return !primary && (backup.includes(group) || backup.some((position) => positions.includes(position)));
+  });
+  const suggestion = (group: 'D' | 'M' | 'F', positions: string[]) => players
+    .filter((player) => !backupPlayers(group, positions).some((candidate) => candidate.name === player.name))
+    .sort((left, right) => {
+      const leftHasBackup = left.backup_positions.length ? 1 : 0;
+      const rightHasBackup = right.backup_positions.length ? 1 : 0;
+      const leftProximity = left.general_positions.includes(group) ? 0 : 1;
+      const rightProximity = right.general_positions.includes(group) ? 0 : 1;
+      return leftHasBackup - rightHasBackup || leftProximity - rightProximity || left.name.localeCompare(right.name);
+    })[0];
+  return (
+    <View style={styles.depthCard}>
+      <Text style={styles.depthTitle}>Position Depth</Text>
+      {groups.map(({ group, positions }) => {
+        const primary = groupPlayers(group, positions);
+        const backup = backupPlayers(group, positions);
+        const slots = positions.length;
+        const recommended = slots + 2;
+        const have = primary.length;
+        const total = have + backup.length;
+        const status = have < slots ? 'critical' : total < recommended ? 'warning' : 'good';
+        const next = status === 'good' ? null : suggestion(group, positions);
+        return (
+          <View key={group} style={styles.depthRow}>
+            <View style={styles.depthRowHeader}>
+              <Text style={styles.depthGroup}>{groupNames[group]}</Text>
+              <Text style={styles.depthNeed}>need {slots} · recommend {recommended}</Text>
+            </View>
+            <Text style={styles.depthNames}>Primary: {have ? primary.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
+            <Text style={styles.depthNames}>Backup: {backup.length ? backup.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
+            <Text style={[styles.depthStatus, status === 'critical' && styles.depthCritical, status === 'warning' && styles.depthWarning, status === 'good' && styles.depthGood]}>
+              {status === 'critical'
+                ? `✗ Critical — Need ${slots - have} more ${groupNames[group].toLowerCase().replace(/s$/, '')}.`
+                : status === 'warning'
+                  ? `⚠ Warning — Recommend ${recommended - total} more ${groupNames[group].toLowerCase().replace(/s$/, '')} backup(s) for coverage.`
+                  : `✓ Good (${total} total)`}
+            </Text>
+            {next && (
+              <Pressable onPress={() => onAddBackup(next)} style={styles.depthAction} accessibilityRole="button">
+                <Text style={styles.depthActionText}>Add backup: {displayPlayerName(next.name)}</Text>
+              </Pressable>
+            )}
+          </View>
+        );
+      })}
+      <View style={styles.depthRow}>
+        <Text style={styles.depthGroup}>GOALKEEPER</Text>
+        <Text style={styles.depthNames}>Primary: {players.filter(isGoalkeeperAllowed).map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
+        <Text style={[styles.depthStatus, players.filter(isGoalkeeperAllowed).length >= 2 ? styles.depthGood : styles.depthWarning]}>
+          {players.filter(isGoalkeeperAllowed).length >= 2 ? '✓ Good' : '⚠ Warning — Recommend another goalkeeper.'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function PositionHealthPanel({ health, collapsed, onToggle, onSelect }: { health: PositionHealth[]; collapsed: boolean; onToggle: () => void; onSelect: (value: PositionHealth) => void }) {
   return (
     <View style={[styles.healthCard, collapsed && styles.healthCardCollapsed]}>
@@ -714,6 +806,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   healthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
+  depthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
+  depthTitle: { color: palette.ink, fontSize: 17, fontWeight: '800', marginBottom: 10 },
+  depthRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
+  depthRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
+  depthGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
+  depthNeed: { color: palette.muted, fontSize: 11 },
+  depthNames: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  depthStatus: { fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 5 },
+  depthCritical: { color: '#8f3928' },
+  depthWarning: { color: '#795b08' },
+  depthGood: { color: palette.green },
+  depthAction: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  depthActionText: { color: palette.panel, fontSize: 11, fontWeight: '800' },
   healthCardCollapsed: { paddingVertical: 10 },
   healthHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   healthTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
