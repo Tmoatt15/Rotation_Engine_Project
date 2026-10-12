@@ -256,6 +256,7 @@ function placeBlock(
   softRest: boolean,
   pinnedByBlock: Map<number, Set<string>>,
   excludedCandidates: Set<string> = new Set(),
+  feasibilityMode = false,
 ): PlacementBlock | null {
   const assignments = new Map<string, string>();
   const assigned = new Set<string>();
@@ -305,7 +306,12 @@ function placeBlock(
     if (!slot) return null;
     const candidates = players
       .filter((player) => !excludedCandidates.has(player.name) && candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
-      .sort((left, right) => compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
+      .sort((left, right) => feasibilityMode
+        ? (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
+          || ((state.remainingMax.get(left.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0))
+            - ((state.remainingMax.get(right.name) ?? 0) - (state.remainingMin.get(right.name) ?? 0))
+          || left.name.localeCompare(right.name)
+        : compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
   return { block: blockNumber, assignments };
@@ -351,6 +357,29 @@ export function placeStage3(
     const spreadPenalty = (state.slack ?? 8) < 8 ? 0 : Math.max(0, substitutions - 6) * 2;
     return total + substitutions + positionalChanges + spreadPenalty;
   }, 0);
+  const findFeasible = (): PlacementBlock[] | null => {
+    const deadline = Date.now() + 3000;
+    const searchFeasible = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState): PlacementBlock[] | null => {
+      if (Date.now() > deadline) return null;
+      if (blockNumber > game.totalBlocks) {
+        return [...currentState.remainingMin.values()].every((value) => value === 0) ? currentBlocks : null;
+      }
+      const frozenBlock = frozenByBlock.get(blockNumber);
+      if (frozenBlock) {
+        const nextState = cloneState(currentState);
+        for (const player of frozenBlock.assignments.values()) {
+          nextState.remainingMax.set(player, (nextState.remainingMax.get(player) ?? 0) - 1);
+          nextState.remainingMin.set(player, Math.max(0, (nextState.remainingMin.get(player) ?? 0) - 1));
+        }
+        return searchFeasible(blockNumber + 1, [...currentBlocks, { block: blockNumber, assignments: new Map(frozenBlock.assignments) }], nextState);
+      }
+      const nextState = cloneState(currentState);
+      const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, new Set(), true);
+      if (!candidate || !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock)) return null;
+      return searchFeasible(blockNumber + 1, [...currentBlocks, candidate], nextState);
+    };
+    return searchFeasible(1, [], cloneState(state));
+  };
   const search = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState, depth: number): PlacementBlock[] | null => {
     if (blockNumber > game.totalBlocks) return currentBlocks;
     const frozenBlock = frozenByBlock.get(blockNumber);
@@ -388,7 +417,8 @@ export function placeStage3(
     }
     return bestResult;
   };
-  const resultBlocks = search(1, blocks, state, 0);
+  const feasibleBlocks = findFeasible();
+  const resultBlocks = feasibleBlocks ?? search(1, blocks, state, 0);
   const errors: string[] = resultBlocks ? [] : ['Unable to place the schedule without stranding a future slot.'];
   const finalBlocks = resultBlocks ?? blocks;
   return {
