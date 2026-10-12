@@ -356,7 +356,8 @@ export function placeStage3(
       .filter((name) => previousPlayers.has(name) && previousSlots.get(name) !== [...block.assignments].find(([, player]) => player === name)?.[0])
       .length;
     const spreadPenalty = (state.slack ?? 8) < 8 ? 0 : Math.max(0, substitutions - 6) * 2;
-    return total + substitutions + positionalChanges + spreadPenalty;
+    const swapPenalty = Math.max(0, positionalChanges - 3) * 3;
+    return total + substitutions + positionalChanges + spreadPenalty + swapPenalty;
   }, 0);
   const findFeasible = (): PlacementBlock[] | null => {
     const deadline = Date.now() + 3000;
