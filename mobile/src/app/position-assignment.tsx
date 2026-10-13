@@ -1,6 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -109,6 +109,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
   const [expandedPlayerName, setExpandedPlayerName] = useState<string | null>(null);
+  const jerseyRefs = useRef<Record<string, TextInput | null>>({});
+  const nameRefs = useRef<Record<string, TextInput | null>>({});
   const filteredPlayers = useMemo(
     () => (filter === 'all' ? players : players.filter((player) => player.group === filter))
       .slice()
@@ -427,9 +429,10 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           <Text style={styles.gridLabel}>KEEPER</Text>
                           <Text style={styles.gridValue}>{isGoalkeeperAllowed(player) ? 'Yes' : 'No'} ›</Text>
                         </Pressable>
-                        <View style={styles.gridCell}>
+                        <Pressable style={styles.gridCell} onPress={() => jerseyRefs.current[player.name]?.focus()} accessibilityRole="button">
                           <Text style={styles.gridLabel}>JERSEY #</Text>
                           <TextInput
+                            ref={(input) => { jerseyRefs.current[player.name] = input; }}
                             defaultValue={player.number === undefined ? '' : String(player.number)}
                             onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
                             keyboardType="number-pad"
@@ -437,11 +440,16 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                             placeholderTextColor={palette.muted}
                             style={styles.gridInput}
                           />
-                        </View>
-                        <View style={styles.nameEditCell}>
+                        </Pressable>
+                        <Pressable style={styles.nameEditCell} onPress={() => nameRefs.current[player.name]?.focus()} accessibilityRole="button">
                           <Text style={styles.gridLabel}>PLAYER NAME</Text>
-                          <TextInput defaultValue={player.name} onEndEditing={(event) => void savePlayerName(player.name, event.nativeEvent.text)} style={styles.nameEditInput} />
-                        </View>
+                          <TextInput
+                            ref={(input) => { nameRefs.current[player.name] = input; }}
+                            defaultValue={player.name}
+                            onEndEditing={(event) => void savePlayerName(player.name, event.nativeEvent.text)}
+                            style={styles.nameEditInput}
+                          />
+                        </Pressable>
                       </View>
                     </View>}
                   </View>
