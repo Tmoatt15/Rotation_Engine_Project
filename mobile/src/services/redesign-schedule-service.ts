@@ -174,6 +174,18 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   };
 }
 
+function relaxedGenerationFailureOffer(): Stage6Offer {
+  return {
+    kind: 'impossible',
+    message: "Even with relaxed minimums, a schedule couldn't be generated. Try adding more backup positions.",
+    buttons: [
+      { label: 'Add Backup Positions', action: 'go-to-builder' },
+      { label: 'Cancel', action: 'cancel' },
+    ],
+    context: { failureType: 'relaxed-impossible' },
+  };
+}
+
 function rosterInput(player: SeasonRosterPlayer): RedesignPlayerInput {
   return {
     name: player.name,
@@ -260,7 +272,11 @@ type RedesignSchedule = LiveSchedule & { warnings: string[]; errors: string[]; a
 export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean }): Promise<RedesignSchedule> {
   const { settings, team, game, demand } = await context(input);
   const { placement } = placementWithTierFallback(game, demand);
-  if (!placement.complete) throw new RedesignOfferError(generationFailureOffer(game, demand, input.allowRelaxedMinimums));
+  if (!placement.complete) {
+    const offer = generationFailureOffer(game, demand, input.allowRelaxedMinimums);
+    if (input.allowRelaxedMinimums && offer.kind === 'impossible') throw new RedesignOfferError(relaxedGenerationFailureOffer());
+    throw new RedesignOfferError(offer);
+  }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
   return {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
