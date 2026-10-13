@@ -512,6 +512,8 @@ function PositionPickerModal({
   const pickerRows = picker.group === 'general_positions' && positionRows.length === 0
     ? ['D', 'M', 'F'].map((group) => ({ label: group, groupPositions: [group], exactPositions: [] }))
     : positionRows;
+  const visiblePickerRows = pickerRows.filter((row) => row.groupPositions.some((position) => picker.allowedPositions.includes(position))
+    || row.exactPositions.some((position) => picker.allowedPositions.includes(position)));
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onFinish}>
       <View style={styles.modalBackdrop}>
@@ -541,7 +543,7 @@ function PositionPickerModal({
                 </View>
               </View>
             )}
-            {pickerRows.map((row) => {
+            {visiblePickerRows.map((row) => {
               const genericPositions = useGroupPositions
                 ? row.groupPositions.filter((position) => picker.allowedPositions.includes(position))
                 : [];
@@ -771,7 +773,7 @@ const styles = StyleSheet.create({
   compactPlayerHeader: { alignItems: 'center', flexDirection: 'row', minHeight: 52 },
   disclosure: { color: palette.muted, fontSize: 24, marginLeft: 8 },
   expandedPlayer: { paddingBottom: 12 },
-  positionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  positionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   gridCell: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 8, borderWidth: 1, minHeight: 48, padding: 7, width: '48%' },
   gridLabel: { color: palette.muted, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
   gridValue: { color: palette.ink, fontSize: 12, fontWeight: '800', marginTop: 5 },
