@@ -1,14 +1,13 @@
 import { Stack, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
 import { getRoster, getSeasonSettings } from '@/services/team-service';
-import { calculateGroupCoverage } from '@/coverage-utils';
 import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';
 import { GAME_FORMATS } from '@/engine/season';
 import type { GameFormat } from '@/engine/models';
@@ -39,8 +38,6 @@ type PositionTier = 'primary' | 'general' | 'backup';
 type PositionEntry = { position: string; tier: PositionTier };
 type GroupedPlayer = { player: Player; positions: string[]; isBackup: boolean };
 
-const positionLabels = ['F', 'M', 'D', 'GK'];
-const positionNames: Record<string, string> = { F: 'Forwards', M: 'Midfielders', D: 'Defenders', GK: 'Goalkeepers' };
 const roleGroups: RoleGroup[] = [
   { key: 'F', label: 'Forwards' },
   { key: 'M', label: 'Midfielders' },
@@ -81,6 +78,87 @@ function belongsToRoleGroup(position: string, group: string): boolean {
   if (group === 'F') return position === 'F' || position.startsWith('F') || ['CF', 'LW', 'RW'].includes(position);
   if (group === 'M') return position === 'M' || position.startsWith('M') || ['CM', 'CDM', 'CAM', 'LAM', 'RAM', 'LDM', 'RDM'].includes(position);
   return position === 'D' || ['CB', 'LB', 'RB', 'LCB', 'RCB', 'LWB', 'RWB'].includes(position);
+}
+
+function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }: {
+  players: Player[];
+  formation: string;
+  gameFormat: GameFormat;
+  onChoosePlayer: () => void;
+}) {
+  const rows = (['D', 'M', 'F'] as const).map((group) => ({
+    group,
+    label: group === 'D' ? 'DEFENDERS' : group === 'M' ? 'MIDFIELDERS' : 'FORWARDS',
+    positions: formation.split('-')[group === 'D' ? 0 : group === 'M' ? 1 : 2] ? [group] : [],
+  })).filter((row) => row.positions.length);
+  const groupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
+    const entries = playerPositionEntries(player);
+    return !player.primary_positions.includes('GK') && entries.some(({ position }) => belongsToRoleGroup(position, group));
+  });
+  const backupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
+    const entries = playerPositionEntries(player);
+    return !groupPlayers(group).some((candidate) => candidate.name === player.name)
+      && entries.some(({ position, tier }) => tier === 'backup' && belongsToRoleGroup(position, group));
+  });
+  const suggestions = (group: 'D' | 'M' | 'F') => players
+    .filter((player) => !groupPlayers(group).some((candidate) => candidate.name === player.name)
+      && !backupPlayers(group).some((candidate) => candidate.name === player.name)
+      && !player.primary_positions.includes('GK'))
+    .sort((left, right) => {
+      const leftProximity = left.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
+      const rightProximity = right.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
+      return leftProximity - rightProximity || left.name.localeCompare(right.name);
+    });
+  const formationParts = formation.split('-').map(Number);
+  const needs = { D: formationParts[0] ?? 0, M: formationParts[1] ?? 0, F: formationParts[2] ?? 0 };
+  const showSuggestions = (group: 'D' | 'M' | 'F', label: string) => {
+    const candidates = suggestions(group).slice(0, 3);
+    Alert.alert(`Improve ${label.toLowerCase()} coverage`, 'Choose a player to review for a backup position.', [
+      ...candidates.map((player) => ({ text: player.name, onPress: onChoosePlayer })),
+      { text: 'Choose another player', onPress: onChoosePlayer },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+  return (
+    <View style={styles.builderCard}>
+      <Text style={styles.builderTitle}>Optimal Roster Setup</Text>
+      <Text style={styles.builderSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
+      <Text style={styles.builderHint}>Tap a row to review ranked backup recommendations.</Text>
+      <View style={styles.builderRecommendations}>
+        <Text style={styles.builderRecommendationTitle}>To reach optimal:</Text>
+        <Text style={styles.builderRecommendation}>• Give F backup to additional midfielders.</Text>
+        <Text style={styles.builderRecommendation}>• Give D backup to one defensive-minded midfielder.</Text>
+        <Text style={styles.builderRecommendation}>• Both keepers need M backup.</Text>
+      </View>
+      {rows.map(({ group, label }) => {
+        const primary = groupPlayers(group);
+        const backups = backupPlayers(group);
+        const minimum = needs[group] + 1;
+        const optimal = needs[group] + 2;
+        const total = primary.length + backups.length;
+        const status = primary.length < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
+        return (
+          <Pressable key={group} onPress={() => showSuggestions(group, label)} style={styles.builderRow} accessibilityRole="button">
+            <View style={styles.builderRowHeader}>
+              <Text style={styles.builderGroup}>{label}</Text>
+              <Text style={styles.builderCounts}>Current {primary.length} · Minimum {minimum} · Optimal {optimal}</Text>
+            </View>
+            <View style={styles.builderBarTrack}><View style={[styles.builderBarFill, { width: `${Math.min(100, (primary.length / Math.max(1, optimal)) * 100)}%` }]} /></View>
+            <Text style={styles.builderNames}>Primary: {primary.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
+            <Text style={styles.builderNames}>Backups: {backups.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
+            <Text style={[styles.builderStatus, status === 'critical' && styles.builderCritical, status === 'warning' && styles.builderWarning, status === 'good' && styles.builderGood]}>
+              {status === 'critical' ? `⚠ Below minimum by ${minimum - primary.length}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : '✓ Optimal coverage'}
+            </Text>
+          </Pressable>
+        );
+      })}
+      <View style={styles.builderRow}>
+        <Text style={styles.builderGroup}>GOALKEEPERS</Text>
+        <Text style={styles.builderNames}>Current {players.filter((player) => player.primary_positions.includes('GK')).length} · Minimum 2 · Optimal 2</Text>
+        <Text style={styles.builderStatus}>{players.filter((player) => player.primary_positions.includes('GK')).length >= 2 ? '✓ Minimum keeper coverage' : '⚠ Add another goalkeeper'}</Text>
+      </View>
+    </View>
+  );
 }
 
 export default function CoverageScreen() {
@@ -130,23 +208,12 @@ export default function CoverageScreen() {
     };
   }, []));
 
-  const coverage = useMemo(() => formation ? calculateGroupCoverage(formation, players) : [], [formation, players]);
   const notices = useMemo(() => formation ? calculatePlayingTimeNotices({
     formation,
     total_blocks: totalBlocks,
     game_format: gameFormat,
     has_goalkeeper: hasGoalkeeper,
   }, players) : { playingTimeNotice: false, positionCoverageNotice: false }, [formation, gameFormat, hasGoalkeeper, players, totalBlocks]);
-  const depth = useMemo(() => positionLabels.map((position) => {
-    const group = coverage.find((item) => item.group === position);
-    return {
-      position,
-      count: group?.assigned ?? 0,
-      recommended: group?.recommended ?? null,
-      backupNeeded: group?.backupNeeded ?? 0,
-    };
-  }), [coverage]);
-
   const groupedPlayers = useMemo(() => roleGroups.map((group) => ({
     ...group,
     players: players.flatMap((player) => {
@@ -196,24 +263,7 @@ export default function CoverageScreen() {
               {notices.positionCoverageNotice && <Text style={styles.noticeText}>{POSITION_COVERAGE_NOTICE}</Text>}
             </View>}
 
-            <Text style={styles.sectionTitle}>Position depth</Text>
-            <View style={styles.depthList}>
-              {depth.map((item) => (
-                <View key={item.position} style={styles.depthRow}>
-                  <View style={styles.depthLabel}>
-                    <Text style={styles.positionName}>{positionNames[item.position].toUpperCase()}</Text>
-                    {item.recommended !== null && <Text style={[styles.recommendation, item.count >= item.recommended && styles.recommendationMet]}>{item.recommended} {positionNames[item.position]} recommended</Text>}
-                    {item.recommended !== null && <Text style={styles.coverageStatus}>{item.backupNeeded > 0 ? `Backup assignments recommended: ${item.backupNeeded} ${item.position}` : 'Covered'}</Text>}
-                  </View>
-                  <View style={styles.depthGraphRow}>
-                    <View style={styles.depthBarTrack}>
-                      <View style={[styles.depthBar, item.recommended !== null && item.count >= item.recommended && styles.depthBarMet, { width: `${Math.min(item.count / Math.max(item.recommended ?? item.count, 1), 1) * 100}%` }]} />
-                    </View>
-                    <Text style={[styles.depthCount, item.recommended !== null && item.count >= item.recommended && styles.depthCountMet]}>{item.count}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} onChoosePlayer={() => router.push('/position-assignment')} />}
 
             <Text style={styles.sectionTitle}>Player roles</Text>
             {loading ? <Text style={styles.helperText}>Loading roster coverage...</Text> : error ? <Text style={styles.errorText}>{error}</Text> : (
@@ -280,6 +330,24 @@ const styles = StyleSheet.create({
   summaryIcon: { alignItems: 'center', backgroundColor: palette.panel, borderRadius: 14, height: 50, justifyContent: 'center', width: 50 },
   noticeList: { backgroundColor: '#fff4d8', borderColor: palette.yellow, borderRadius: 14, borderWidth: 1, gap: 8, marginBottom: 24, padding: 14 },
   noticeText: { color: palette.ink, fontSize: 12, lineHeight: 18 },
+  builderCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 24, padding: 15 },
+  builderTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
+  builderSubtitle: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  builderHint: { color: palette.muted, fontSize: 11, marginBottom: 8, marginTop: 4 },
+  builderRecommendations: { backgroundColor: '#f7f4ed', borderRadius: 10, marginBottom: 8, padding: 10 },
+  builderRecommendationTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
+  builderRecommendation: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  builderRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
+  builderRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
+  builderGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
+  builderCounts: { color: palette.muted, fontSize: 11 },
+  builderBarTrack: { backgroundColor: palette.greenSoft, borderRadius: 4, height: 7, marginTop: 8, overflow: 'hidden' },
+  builderBarFill: { backgroundColor: palette.green, borderRadius: 4, height: 7 },
+  builderNames: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  builderStatus: { color: palette.ink, fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 5 },
+  builderCritical: { color: '#8f3928' },
+  builderWarning: { color: '#795b08' },
+  builderGood: { color: palette.green },
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800', marginBottom: 10 },
   depthList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 24, padding: 15 },
   depthRow: { marginBottom: 18 },

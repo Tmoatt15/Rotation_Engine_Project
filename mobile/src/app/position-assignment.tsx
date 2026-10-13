@@ -454,15 +454,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                 );
               })}
             </View>}
-            {formationConfigured && (
-              <PositionDepthPanel
-                players={players}
-                positionRows={positionRows}
-                formation={formation}
-                gameFormat={gameFormat}
-                onAddBackup={(player) => openPositionPicker(player, 'backup_positions')}
-              />
-            )}
             {message && <Text style={styles.successText}>{message}</Text>}
             {error && <Text style={styles.errorText}>{error}</Text>}
             {!embedded && !loading && (
@@ -609,112 +600,6 @@ function positionGroupForRow(row: { label?: string }): 'D' | 'M' | 'F' | null {
   if (row.label?.includes('MIDFIELD')) return 'M';
   if (row.label?.includes('FORWARD')) return 'F';
   return null;
-}
-
-function PositionDepthPanel({
-  players,
-  positionRows,
-  formation,
-  gameFormat,
-  onAddBackup,
-}: {
-  players: Player[];
-  positionRows: Array<{ label: string; exactPositions: string[] }>;
-  formation: string;
-  gameFormat: string;
-  onAddBackup: (player: Player) => void;
-}) {
-  const groups = positionRows
-    .map((row) => ({ group: positionGroupForRow(row), positions: row.exactPositions }))
-    .filter((item): item is { group: 'D' | 'M' | 'F'; positions: string[] } => item.group !== null);
-  const groupNames: Record<'D' | 'M' | 'F', string> = { D: 'DEFENDERS', M: 'MIDFIELDERS', F: 'FORWARDS' };
-  const groupPlayers = (group: 'D' | 'M' | 'F', positions: string[]) => players.filter((player) => {
-    const general = player.general_positions.map((position) => position.toUpperCase());
-    const primary = player.primary_positions.map((position) => position.toUpperCase());
-    return general.includes(group) || general.includes(ANY_POSITION) || primary.includes(group) || primary.some((position) => positions.includes(position));
-  });
-  const backupPlayers = (group: 'D' | 'M' | 'F', positions: string[]) => players.filter((player) => {
-    const backup = player.backup_positions.map((position) => position.toUpperCase());
-    const primary = groupPlayers(group, positions).some((candidate) => candidate.name === player.name);
-    return !primary && (backup.includes(group) || backup.some((position) => positions.includes(position)));
-  });
-  const suggestions = (group: 'D' | 'M' | 'F', positions: string[]) => players
-    .filter((player) => !groupPlayers(group, positions).some((candidate) => candidate.name === player.name)
-      && !backupPlayers(group, positions).some((candidate) => candidate.name === player.name)
-      && !isGoalkeeperAllowed(player))
-    .sort((left, right) => {
-      const leftHasBackup = left.backup_positions.length ? 1 : 0;
-      const rightHasBackup = right.backup_positions.length ? 1 : 0;
-      const leftProximity = left.general_positions.includes(group) || left.primary_positions.includes(group) ? 0 : 1;
-      const rightProximity = right.general_positions.includes(group) || right.primary_positions.includes(group) ? 0 : 1;
-      return leftHasBackup - rightHasBackup || leftProximity - rightProximity || left.name.localeCompare(right.name);
-    });
-  const showSuggestions = (group: 'D' | 'M' | 'F', positions: string[], label: string) => {
-    const candidates = suggestions(group, positions).slice(0, 3);
-    if (!candidates.length) return;
-    Alert.alert(`Improve ${label.toLowerCase()} coverage`, 'Choose a player to review for a backup position.', [
-      ...candidates.map((player) => ({ text: player.name, onPress: () => onAddBackup(player) })),
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-  const formationParts = formation.split('-').map(Number);
-  const formationNeeds = { D: formationParts[0] ?? 0, M: formationParts[1] ?? 0, F: formationParts[2] ?? 0 };
-  const positionsForGroup = (group: 'D' | 'M' | 'F') => groups.find((item) => item.group === group)?.positions ?? [group];
-  const forwardBackupCandidates = suggestions('F', positionsForGroup('F')).filter((player) => player.general_positions.includes('M') || player.primary_positions.includes('M')).slice(0, Math.max(0, formationNeeds.F - 1));
-  const defensiveBackupCandidates = suggestions('D', positionsForGroup('D')).filter((player) => !forwardBackupCandidates.some((candidate) => candidate.name === player.name)
-    && (player.general_positions.includes('M') || player.primary_positions.includes('M'))).slice(0, 1);
-  const keeperFieldCandidates = players.filter((player) => isGoalkeeperAllowed(player)
-    && !player.backup_positions.some((position) => position.toUpperCase() === 'M'));
-  return (
-    <View style={styles.depthCard}>
-      <Text style={styles.depthTitle}>Optimal Roster Setup</Text>
-      <Text style={styles.depthSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
-      <Text style={styles.depthHint}>Tap a row to review specific backup recommendations.</Text>
-      <View style={styles.depthRecommendations}>
-        <Text style={styles.depthRecommendationTitle}>To reach optimal:</Text>
-        <Text style={styles.depthRecommendation}>• Give F backup to {forwardBackupCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'additional midfielders'}.</Text>
-        <Text style={styles.depthRecommendation}>• Give D backup to {defensiveBackupCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'one defensive-minded midfielder'}.</Text>
-        <Text style={styles.depthRecommendation}>• Give M backup to {keeperFieldCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'both keepers'}.</Text>
-      </View>
-      {groups.map(({ group, positions }) => {
-        const primary = groupPlayers(group, positions);
-        const backup = backupPlayers(group, positions);
-        const slots = formationNeeds[group] || positions.length;
-        const minimum = slots + 1;
-        const optimal = slots + 2;
-        const have = primary.length;
-        const total = primary.length + backup.length;
-        const status = have < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
-        const label = groupNames[group];
-        return (
-          <Pressable key={group} onPress={() => showSuggestions(group, positions, label)} style={styles.depthRow} accessibilityRole="button">
-            <View style={styles.depthRowHeader}>
-              <Text style={styles.depthGroup}>{label}</Text>
-              <Text style={styles.depthNeed}>Current {have} · Minimum {minimum} · Optimal {optimal}</Text>
-            </View>
-            <View style={styles.depthBarTrack}><View style={[styles.depthBarFill, { width: `${Math.min(100, (have / Math.max(1, optimal)) * 100)}%` }]} /></View>
-            <Text style={styles.depthNames}>Primary: {have ? primary.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
-            <Text style={styles.depthNames}>Backups: {backup.length ? backup.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
-            <Text style={[styles.depthStatus, status === 'critical' && styles.depthCritical, status === 'warning' && styles.depthWarning, status === 'good' && styles.depthGood]}>
-              {status === 'critical'
-                ? `⚠ Below minimum by ${minimum - have}. Tap for recommendations.`
-                : status === 'warning'
-                  ? `⚠ ${optimal - total} more coverage player(s) recommended. Tap to review.`
-                  : `✓ Optimal coverage`}
-            </Text>
-          </Pressable>
-        );
-      })}
-      <View style={styles.depthRow}>
-        <Text style={styles.depthGroup}>GOALKEEPER</Text>
-        <Text style={styles.depthNames}>Primary: {players.filter(isGoalkeeperAllowed).map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
-        <Text style={styles.depthNames}>Recommendation: 2 keepers, both with M backup</Text>
-        <Text style={[styles.depthStatus, players.filter(isGoalkeeperAllowed).length >= 2 ? styles.depthGood : styles.depthWarning]}>
-          {players.filter(isGoalkeeperAllowed).length >= 2 ? '✓ Minimum keeper coverage' : '⚠ Add another goalkeeper'}
-        </Text>
-      </View>
-    </View>
-  );
 }
 
 function PositionHealthPanel({ health, collapsed, onToggle, onSelect }: { health: PositionHealth[]; collapsed: boolean; onToggle: () => void; onSelect: (value: PositionHealth) => void }) {
