@@ -1,7 +1,7 @@
 import { blockStartMinutes, SeasonSetup } from '@/engine/season';
 import { formationSlots, parseFormation } from '@/engine/timeline';
 import type { LiveSchedule, ScheduleBlock, SeasonRosterPlayer } from '@/engine/models';
-import { assignQuotas, buildDemandModel, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
+import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
 import type { RedesignPlayerInput } from '@/engine-redesign/model';
 import { replanLateArrival } from '@/engine-redesign/stage5';
 import { offerForFailure } from '@/engine-redesign/stage6';
@@ -42,6 +42,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     };
   }
   const groups = ['D', 'M', 'F'] as const;
+  const feasibilityIssue = checkRosterFeasibility(game, demand);
   const quotas = assignQuotas(game, demand).quotas;
   const groupLabel = (group: typeof groups[number]): string => group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
   const minimumForPlayer = (player: typeof game.players[number]): number => {
@@ -164,13 +165,13 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   }
   return {
     kind: 'impossible',
-    message: 'Can\'t generate a schedule with the current roster setup.\n\nThis is unexpected — the roster looks complete. Try adding more backup flexibility, or generate with relaxed minimums.',
+    message: feasibilityIssue?.message ?? 'Can\'t generate a schedule with the current roster setup.\n\nThis is unexpected — the roster looks complete. Try adding more backup flexibility, or generate with relaxed minimums.',
     buttons: [
       { label: 'Add Backup Positions', action: 'go-to-builder' },
       { label: 'Generate Anyway', action: 'allow-relaxed' },
       { label: 'Cancel', action: 'cancel' },
     ],
-    context: { failureType: 'impossible' },
+    context: { failureType: 'impossible', feasibility: feasibilityIssue },
   };
 }
 

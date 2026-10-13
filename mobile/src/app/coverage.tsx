@@ -11,6 +11,7 @@ import { getRoster, getSeasonSettings } from '@/services/team-service';
 import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';
 import { GAME_FORMATS } from '@/engine/season';
 import type { GameFormat } from '@/engine/models';
+import { buildDemandModel, checkRosterFeasibility, normalizeGame } from '@/engine-redesign';
 
 const palette = {
   ink: '#17221f',
@@ -81,10 +82,11 @@ function belongsToRoleGroup(position: string, group: string): boolean {
   return position === 'D' || ['CB', 'LB', 'RB', 'LCB', 'RCB', 'LWB', 'RWB'].includes(position);
 }
 
-function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }: {
+function OptimalRosterBuilder({ players, formation, gameFormat, totalBlocks, onChoosePlayer }: {
   players: Player[];
   formation: string;
   gameFormat: GameFormat;
+  totalBlocks: number;
   onChoosePlayer: (playerName?: string) => void;
 }) {
   const rows = (['D', 'M', 'F'] as const).map((group) => ({
@@ -127,11 +129,47 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
     ]);
   };
   const keeperEligible = players.filter((player) => player.keeper_eligible === true);
+  const feasibilityIssue = useMemo(() => {
+    if (gameFormat === '5v5') {
+      return { kind: 'position-shortage' as const, message: 'Feasibility checks are not available for 5v5 rosters.' };
+    }
+    if (gameFormat !== '4v4' && keeperEligible.length === 0) {
+      return { kind: 'keeper', message: 'No available keeper-eligible player is configured.' };
+    }
+    const keeper = keeperEligible[0]?.name ?? null;
+    const normalized = normalizeGame({
+      format: gameFormat,
+      formation,
+      totalBlocks,
+      firstHalfKeeper: keeper,
+      secondHalfKeeper: keeper,
+    }, players.map((player) => ({
+      name: player.name,
+      group: player.group,
+      general_positions: player.general_positions,
+      primary_positions: player.primary_positions,
+      backup_positions: player.backup_positions,
+      excluded_positions: player.excluded_positions,
+      keeper_eligible: player.keeper_eligible,
+      keeper: player.keeper_eligible === true && player.general_positions.length === 0,
+    })));
+    return checkRosterFeasibility(normalized, buildDemandModel(normalized));
+  }, [formation, gameFormat, keeperEligible, players, totalBlocks]);
+  const overallFeasible = !feasibilityIssue;
   return (
     <View style={styles.builderCard}>
       <Text style={styles.builderTitle}>Optimal Roster Setup</Text>
       <Text style={styles.builderSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
       <Text style={styles.builderHint}>Tap a row to review ranked backup recommendations.</Text>
+      <View style={styles.builderFeasibility}>
+        <Text style={[styles.builderStatus, overallFeasible ? styles.builderGood : styles.builderCritical]}>
+          {overallFeasible ? '✓ Ready to generate' : '⚠ Won\'t generate yet'}
+        </Text>
+        <Text style={styles.builderRecommendation}>
+          {feasibilityIssue?.message ?? 'Your roster can produce a schedule with the current setup.'}
+        </Text>
+        {feasibilityIssue && <Text style={styles.builderRecommendation}>See details below.</Text>}
+      </View>
       <View style={styles.builderRecommendations}>
         <Text style={styles.builderRecommendationTitle}>Backup coverage</Text>
         <Text style={styles.builderRecommendation}>Enough to handle up to 2 absences per group:</Text>
@@ -180,7 +218,7 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
             <Text style={styles.builderNames}>Primary: {primary.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
             <Text style={styles.builderNames}>Backups: {backups.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
             <Text style={[styles.builderStatus, status === 'critical' && styles.builderCritical, status === 'warning' && styles.builderWarning, status === 'good' && styles.builderGood]}>
-              {status === 'critical' ? `⚠ Below minimum by ${minimum - total}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : '✓ Optimal coverage'}
+              {status === 'critical' ? `⚠ Below minimum by ${minimum - total}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : overallFeasible ? '✓ Optimal coverage' : '⚠ Review feasibility above.'}
             </Text>
           </Pressable>
         );
@@ -296,7 +334,7 @@ export default function CoverageScreen() {
               {notices.positionCoverageNotice && <Text style={styles.noticeText}>{POSITION_COVERAGE_NOTICE}</Text>}
             </View>}
 
-            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} onChoosePlayer={(playerName) => router.push({ pathname: '/position-assignment', params: playerName ? { player: playerName } : {} })} />}
+            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} totalBlocks={totalBlocks} onChoosePlayer={(playerName) => router.push({ pathname: '/position-assignment', params: playerName ? { player: playerName } : {} })} />}
 
             <Text style={styles.sectionTitle}>Player roles</Text>
             {loading ? <Text style={styles.helperText}>Loading roster coverage...</Text> : error ? <Text style={styles.errorText}>{error}</Text> : (
@@ -367,6 +405,7 @@ const styles = StyleSheet.create({
   builderTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
   builderSubtitle: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 },
   builderHint: { color: palette.muted, fontSize: 11, marginBottom: 8, marginTop: 4 },
+  builderFeasibility: { backgroundColor: '#fff4d8', borderColor: palette.yellow, borderRadius: 10, borderWidth: 1, marginBottom: 8, padding: 10 },
   builderRecommendations: { backgroundColor: '#f7f4ed', borderRadius: 10, marginBottom: 8, padding: 10 },
   builderRecommendationTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
   builderRecommendation: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },

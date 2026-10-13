@@ -8,3 +8,5 @@ export { polishStage4, runStages3And4 } from './stage4';
 export { findPositionGaps } from './position-gap';
 export type { PositionGap, PositionGapPlayer, PositionGapSuggestion } from './position-gap';
 export type { PolishMetrics, PolishedPlacement } from './stage4';
+export { checkRosterFeasibility } from './feasibility';
+export type { FeasibilityIssue, FeasibilityIssueKind } from './feasibility';
