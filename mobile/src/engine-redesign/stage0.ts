@@ -107,12 +107,6 @@ export function normalizeGame(game: RedesignGameInput, roster: RedesignPlayerInp
   if (format.goalkeeper && (!firstHalfKeeper || !secondHalfKeeper)) {
     throw new Error('Choose a goalkeeper for both halves.');
   }
-  const core = players.filter((player) => player.available && player.group === 'core');
-  const coreKeepers = core.filter((player) => player.generalPositions.includes('GK') || player.primaryPositions.includes('GK'));
-  const coreField = core.filter((player) => !player.generalPositions.every((position) => position === 'GK'));
-  if (coreKeepers.length > 1 || coreField.length > format.fieldPlayers) {
-    throw new Error(`Core is limited to ${format.fieldPlayers} field players and 1 core goalkeeper for ${game.format}; found ${coreField.length} core field players and ${coreKeepers.length} core goalkeepers.`);
-  }
   for (const keeper of [firstHalfKeeper, secondHalfKeeper]) {
     if (keeper && !byName.has(keeper)) throw new Error(`Selected goalkeeper is not in the roster: ${keeper}.`);
     const selected = keeper ? byName.get(keeper) : undefined;

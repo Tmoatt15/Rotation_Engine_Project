@@ -34,9 +34,13 @@ describe('redesign stages 0-2', () => {
     expect(() => normalizeGame(game({ secondHalfKeeper: null }), [player('Keeper A', 'rotational', ['GK'])])).toThrow('Choose a goalkeeper for both halves.');
   });
 
-  it('rejects core field over-capacity before quota assignment', () => {
-    const roster = Array.from({ length: 11 }, (_, index) => player(`Core ${index}`, 'core', ['D']));
-    expect(() => normalizeGame(game(), roster)).toThrow(/Core is limited to 10 field players/);
+  it('allows any number of core field players before quota assignment', () => {
+    const roster = [
+      player('Keeper A', 'rotational', ['GK']),
+      player('Keeper B', 'rotational', ['GK']),
+      ...Array.from({ length: 11 }, (_, index) => player(`Core ${index}`, 'core', ['D'])),
+    ];
+    expect(normalizeGame(game(), roster).players).toHaveLength(13);
   });
 
   it('emits deterministic demand and immutable zone constants', () => {
