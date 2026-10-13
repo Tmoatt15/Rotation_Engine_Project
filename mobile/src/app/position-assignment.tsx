@@ -111,6 +111,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [expandedPlayerName, setExpandedPlayerName] = useState<string | null>(null);
   const jerseyRefs = useRef<Record<string, TextInput | null>>({});
   const nameRefs = useRef<Record<string, TextInput | null>>({});
+  const playersRef = useRef<Player[]>([]);
   const filteredPlayers = useMemo(
     () => (filter === 'all' ? players : players.filter((player) => player.group === filter))
       .slice()
@@ -139,7 +140,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         if (!active) return;
         setTeamId(activeTeamId);
         setTeamName(activeTeam.name);
-        setPlayers(rosterPayload.players as Player[]);
+        playersRef.current = rosterPayload.players as Player[];
+        setPlayers(playersRef.current);
         const storedFormation = seasonPayload.formation || '';
         const currentFormation = storedFormation || fallbackFormation;
         setFormationConfigured(Boolean(storedFormation));
@@ -254,7 +256,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     try {
       const activeTeamId = await getActiveTeamId();
         const payload = await updateRoster(activeTeamId, playersToSave);
-      setPlayers(payload.players as Player[]);
+      playersRef.current = payload.players as Player[];
+      setPlayers(playersRef.current);
       setMessage('Season roster saved.');
         if (returnHome) router.replace('/');
     } catch (requestError) {
@@ -286,8 +289,10 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   async function savePlayerNumber(name: string, raw: string) {
       const digits = raw.replace(/\D/g, '').slice(0, 2);
       const parsed = digits === '' ? undefined : Number(digits);
-      const nextPlayers = players.map((player) => player.name === name ? { ...player, number: parsed === undefined ? undefined : Math.min(99, parsed) } : player);
+      const currentPlayers = playersRef.current.length ? playersRef.current : players;
+      const nextPlayers = currentPlayers.map((player) => player.name === name ? { ...player, number: parsed === undefined ? undefined : Math.min(99, parsed) } : player);
       setPlayers(nextPlayers);
+      playersRef.current = nextPlayers;
       await saveRoster(nextPlayers, false);
   }
 
@@ -436,9 +441,13 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                             value={player.number === undefined ? '' : String(player.number)}
                             onChangeText={(value) => {
                               const digits = value.replace(/\D/g, '').slice(0, 2);
-                              setPlayers((current) => current.map((candidate) => candidate.name === player.name
-                                ? { ...candidate, number: digits === '' ? undefined : Number(digits) }
-                                : candidate));
+                              setPlayers((current) => {
+                                const next = current.map((candidate) => candidate.name === player.name
+                                  ? { ...candidate, number: digits === '' ? undefined : Number(digits) }
+                                  : candidate);
+                                playersRef.current = next;
+                                return next;
+                              });
                             }}
                             onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
                             keyboardType="number-pad"
