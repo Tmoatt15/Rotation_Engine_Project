@@ -51,6 +51,22 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   const playersForGroup = (group: typeof groups[number]) => game.players.filter((player) => player.available && !player.keeper
     && demand.fieldSlots.filter((slot) => slot.group === group).some((slot) => positionTier(player, slot.slot) > 0));
   const eligibleCounts = Object.fromEntries(groups.map((group) => [group, playersForGroup(group).length])) as Record<typeof groups[number], number>;
+  const fieldPlayers = game.players.filter((player) => player.available && !player.keeper);
+  const totalMinimum = fieldPlayers.reduce((total, player) => total + minimumForPlayer(player), 0);
+  if (totalMinimum > demand.fieldSlots.length * game.totalBlocks) {
+    return {
+      kind: 'position-shortage',
+      message: 'Your roster has more playing-time commitments than this formation can support. Review player groups and minimums before generating again.',
+      buttons: [{ label: 'Review Players', action: 'go-to-roster' }, { label: 'Cancel', action: 'cancel' }],
+      context: { failureType: 'total-minimums' },
+    };
+  }
+  const endpointPinned = (player: typeof game.players[number]): number => {
+    if (player.group !== 'core' || !player.available) return 0;
+    const hasBlockOnePin = game.pins.some((pin) => pin.block === 1 && pin.player === player.name);
+    return game.lateArrival?.player === player.name || (!hasBlockOnePin && game.pins.length > 0) ? 1 : 2;
+  };
+  const diagnoses: Array<{ group: typeof groups[number]; names: string[]; target: string }> = [];
   for (const group of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const singleGroupPlayers = playersForGroup(group).filter((player) => groups.filter((candidate) => playersForGroup(candidate).some((eligible) => eligible.name === player.name)).length === 1);
@@ -58,20 +74,30 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
       .map((player) => ({ name: player.name, minimum: minimumForPlayer(player) }))
       .filter((player) => player.minimum > 0)
       .sort((left, right) => right.minimum - left.minimum || left.name.localeCompare(right.name));
-    const minimumExcess = minimums.reduce((total, player) => total + player.minimum, 0) - slots.length * game.totalBlocks;
+    const pinnedSlots = playersForGroup(group).reduce((total, player) => total + endpointPinned(player), 0);
+    const minimumExcess = minimums.reduce((total, player) => total + player.minimum, 0) - Math.max(0, slots.length * game.totalBlocks - pinnedSlots);
     if (minimumExcess <= 0 || !minimums.length) continue;
-    const crossTraining = minimums.slice(0, minimums.findIndex((_, index) => minimums.slice(0, index + 1).reduce((total, player) => total + player.minimum, 0) > minimumExcess) + 1);
+    const crossTraining = [...minimums].sort((left, right) => {
+      const leftPlayer = game.players.find((player) => player.name === left.name);
+      const rightPlayer = game.players.find((player) => player.name === right.name);
+      const tier = (player: typeof game.players[number] | undefined): number => player?.group === 'rotational' ? 0 : player?.group === 'developing' ? 1 : 2;
+      return tier(leftPlayer) - tier(rightPlayer) || right.minimum - left.minimum || left.name.localeCompare(right.name);
+    }).slice(0, Math.max(1, minimums.findIndex((_, index) => minimums.slice(0, index + 1).reduce((total, player) => total + player.minimum, 0) >= minimumExcess * 1.5) + 1));
     const targetGroup = groups
       .filter((candidate) => candidate !== group)
       .sort((left, right) => (eligibleCounts[right] - demand.fieldSlots.filter((slot) => slot.group === right).length)
         - (eligibleCounts[left] - demand.fieldSlots.filter((slot) => slot.group === left).length))[0];
     const targetLabel = targetGroup === 'D' ? 'defense' : targetGroup === 'M' ? 'midfield' : 'forward';
-    const names = crossTraining.map((player) => player.name);
+    diagnoses.push({ group, names: crossTraining.map((player) => player.name), target: targetLabel });
+  }
+  if (diagnoses.length) {
+    const message = diagnoses.map(({ group, names, target }) =>
+      `Your ${groupLabel(group)} are overloaded — too many can only play ${groupLabel(group).replace(/s$/, '')}.\n\nTo fix: give a ${target} backup to ${names.length} of these players:\n${names.join(', ')}.`).join('\n\n');
     return {
       kind: 'position-shortage',
-      message: `Your ${groupLabel(group)} are overloaded — too many can only play ${groupLabel(group).replace(/s$/, '')}. To fix: give a ${targetLabel} backup to ${names.length} of these players: ${names.join(', ')}.`,
+      message,
       buttons: [{ label: 'Review Players', action: 'go-to-roster' }, { label: 'Cancel', action: 'cancel' }],
-      context: { failureType: 'position-shortage', positionGroup: group, suggestions: names },
+      context: { failureType: 'position-shortage', positionGroup: diagnoses[0].group, suggestions: diagnoses.flatMap(({ names }) => names) },
     };
   }
   const shortages = groups.map((group) => {
