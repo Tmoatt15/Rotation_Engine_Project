@@ -84,7 +84,7 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
   players: Player[];
   formation: string;
   gameFormat: GameFormat;
-  onChoosePlayer: () => void;
+  onChoosePlayer: (playerName?: string) => void;
 }) {
   const rows = (['D', 'M', 'F'] as const).map((group) => ({
     group,
@@ -99,6 +99,13 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
     return !groupPlayers(group).some((candidate) => candidate.name === player.name)
       && player.backup_positions.some((position) => belongsToRoleGroup(position.toUpperCase(), group));
   });
+  const backupCandidates = (group: 'D' | 'M' | 'F') => players
+    .filter((player) => !player.backup_positions.length
+      && !groupPlayers(group).some((candidate) => candidate.name === player.name))
+    .sort((left, right) => {
+      const tier = (player: Player): number => player.group === 'rotational' ? 0 : player.group === 'core' ? 1 : 2;
+      return tier(left) - tier(right) || left.name.localeCompare(right.name);
+    });
   const suggestions = (group: 'D' | 'M' | 'F') => players
     .filter((player) => !groupPlayers(group).some((candidate) => candidate.name === player.name)
       && !backupPlayers(group).some((candidate) => candidate.name === player.name)
@@ -113,7 +120,7 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
   const showSuggestions = (group: 'D' | 'M' | 'F', label: string) => {
     const candidates = suggestions(group).slice(0, 3);
     Alert.alert(`Improve ${label.toLowerCase()} coverage`, 'Choose a player to review for a backup position.', [
-      ...candidates.map((player) => ({ text: player.name, onPress: onChoosePlayer })),
+      ...candidates.map((player) => ({ text: player.name, onPress: () => onChoosePlayer(player.name) })),
       { text: 'Choose another player', onPress: onChoosePlayer },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -125,10 +132,35 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
       <Text style={styles.builderSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
       <Text style={styles.builderHint}>Tap a row to review ranked backup recommendations.</Text>
       <View style={styles.builderRecommendations}>
-        <Text style={styles.builderRecommendationTitle}>To reach optimal:</Text>
-        <Text style={styles.builderRecommendation}>• Give F backup to additional midfielders.</Text>
-        <Text style={styles.builderRecommendation}>• Give D backup to one defensive-minded midfielder.</Text>
-        <Text style={styles.builderRecommendation}>• Both keepers need M backup.</Text>
+        <Text style={styles.builderRecommendationTitle}>Backup coverage</Text>
+        <Text style={styles.builderRecommendation}>Enough to handle up to 2 absences per group:</Text>
+        {(['D', 'M', 'F'] as const).map((group) => {
+          const label = group === 'D' ? 'Defenders' : group === 'M' ? 'Midfielders' : 'Forwards';
+          const holders = backupPlayers(group);
+          const candidates = backupCandidates(group);
+          const short = Math.max(0, 2 - holders.length);
+          return (
+            <View key={group} style={styles.builderCoverageGroup}>
+              <Text style={styles.builderRecommendationTitle}>{label} — {holders.length} backup{holders.length === 1 ? '' : 's'} {short ? `· Need ${short} more` : '· ✓ Covered'}</Text>
+              <Text style={styles.builderRecommendation}>
+                {holders.length ? `${holders.map((player) => displayPlayerName(player.name)).join(', ')} have ${group} backup ✓` : 'No assigned backups'}
+              </Text>
+              {short > 0 && (
+                <View style={styles.builderCandidateList}>
+                  <Text style={styles.builderRecommendation}>Add {short} more from:</Text>
+                  {candidates.map((player) => (
+                    <Pressable key={player.name} onPress={() => onChoosePlayer(player.name)} accessibilityRole="button">
+                      <Text style={styles.builderCandidate}>{displayPlayerName(player.name)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
+        <Pressable onPress={() => onChoosePlayer()} style={styles.builderRosterButton} accessibilityRole="button">
+          <Text style={styles.builderRosterButtonText}>Review Roster</Text>
+        </Pressable>
       </View>
       {rows.map(({ group, label }) => {
         const primary = groupPlayers(group);
@@ -263,7 +295,7 @@ export default function CoverageScreen() {
               {notices.positionCoverageNotice && <Text style={styles.noticeText}>{POSITION_COVERAGE_NOTICE}</Text>}
             </View>}
 
-            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} onChoosePlayer={() => router.push('/position-assignment')} />}
+            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} onChoosePlayer={(playerName) => router.push({ pathname: '/position-assignment', params: playerName ? { player: playerName } : {} })} />}
 
             <Text style={styles.sectionTitle}>Player roles</Text>
             {loading ? <Text style={styles.helperText}>Loading roster coverage...</Text> : error ? <Text style={styles.errorText}>{error}</Text> : (
@@ -337,6 +369,11 @@ const styles = StyleSheet.create({
   builderRecommendations: { backgroundColor: '#f7f4ed', borderRadius: 10, marginBottom: 8, padding: 10 },
   builderRecommendationTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
   builderRecommendation: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  builderCoverageGroup: { borderTopColor: palette.line, borderTopWidth: 1, marginTop: 8, paddingTop: 8 },
+  builderCandidateList: { marginTop: 2 },
+  builderCandidate: { color: palette.green, fontSize: 11, fontWeight: '800', lineHeight: 18 },
+  builderRosterButton: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  builderRosterButtonText: { color: palette.panel, fontSize: 11, fontWeight: '800' },
   builderRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
   builderRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
   builderGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },

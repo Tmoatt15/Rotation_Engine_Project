@@ -1,4 +1,4 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -90,6 +90,7 @@ function withoutGoalkeeper(positionList: string[]): string[] {
 
 export default function RosterScreen({ embedded = false, seasonSettingsContent }: { embedded?: boolean; seasonSettingsContent?: ReactNode }) {
   const router = useRouter();
+  const { player: requestedPlayer } = useLocalSearchParams<{ player?: string }>();
   const [players, setPlayers] = useState<Player[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [loading, setLoading] = useState(true);
@@ -142,6 +143,9 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         setTeamName(activeTeam.name);
         playersRef.current = rosterPayload.players as Player[];
         setPlayers(playersRef.current);
+        if (requestedPlayer && playersRef.current.some((player) => player.name === requestedPlayer)) {
+          setExpandedPlayerName(requestedPlayer);
+        }
         const storedFormation = seasonPayload.formation || '';
         const currentFormation = storedFormation || fallbackFormation;
         setFormationConfigured(Boolean(storedFormation));
