@@ -93,12 +93,13 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
   })).filter((row) => row.positions.length);
   const groupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
     const entries = playerPositionEntries(player);
-    return !player.primary_positions.includes('GK') && entries.some(({ position }) => belongsToRoleGroup(position, group));
+    return !player.primary_positions.includes('GK')
+      && entries.some(({ position, tier }) => tier !== 'backup' && belongsToRoleGroup(position, group));
   });
   const backupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
-    const entries = playerPositionEntries(player);
     return !groupPlayers(group).some((candidate) => candidate.name === player.name)
-      && entries.some(({ position, tier }) => tier === 'backup' && belongsToRoleGroup(position, group));
+      && !player.primary_positions.includes('GK')
+      && player.backup_positions.some((position) => belongsToRoleGroup(position.toUpperCase(), group));
   });
   const suggestions = (group: 'D' | 'M' | 'F') => players
     .filter((player) => !groupPlayers(group).some((candidate) => candidate.name === player.name)
