@@ -164,8 +164,12 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   }
   return {
     kind: 'impossible',
-    message: 'No eligible placement can satisfy the formation and playing-time requirements.',
-    buttons: [{ label: 'Cancel', action: 'cancel' }],
+    message: 'Can\'t generate a schedule with the current roster setup.\n\nThis is unexpected — the roster looks complete. Try adding more backup flexibility, or generate with relaxed minimums.',
+    buttons: [
+      { label: 'Add Backup Positions', action: 'go-to-builder' },
+      { label: 'Generate Anyway', action: 'allow-relaxed' },
+      { label: 'Cancel', action: 'cancel' },
+    ],
     context: { failureType: 'impossible' },
   };
 }
