@@ -433,9 +433,16 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           <Text style={styles.gridLabel}>JERSEY #</Text>
                           <TextInput
                             ref={(input) => { jerseyRefs.current[player.name] = input; }}
-                            defaultValue={player.number === undefined ? '' : String(player.number)}
+                            value={player.number === undefined ? '' : String(player.number)}
+                            onChangeText={(value) => {
+                              const digits = value.replace(/\D/g, '').slice(0, 2);
+                              setPlayers((current) => current.map((candidate) => candidate.name === player.name
+                                ? { ...candidate, number: digits === '' ? undefined : Number(digits) }
+                                : candidate));
+                            }}
                             onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
                             keyboardType="number-pad"
+                            returnKeyType="done"
                             placeholder="—"
                             placeholderTextColor={palette.muted}
                             style={styles.gridInput}
