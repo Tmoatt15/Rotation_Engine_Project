@@ -102,14 +102,14 @@ export default function RosterTab() {
 
   function renderSeasonSettings() {
     return (
-      <View style={[styles.bar, !configured && styles.barAttention]}>
-        <Pressable onPress={openBar} style={[styles.barHeader, !configured && styles.barHeaderAttention]} accessibilityRole="button">
+      <View style={styles.bar}>
+        <Pressable onPress={openBar} style={styles.barHeader} accessibilityRole="button">
           <View style={styles.setupIcon}>
-            <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} size={18} tintColor={palette.coral} />
+            <SymbolView name={{ ios: 'gearshape.fill', android: 'settings', web: 'settings' }} size={18} tintColor={palette.muted} />
           </View>
           <View style={styles.barCopy}>
-            <Text style={styles.barTitle}>{configured && settings ? `${settings.game_format} · ${settings.formation} · ${settings.total_blocks} blocks` : 'Season Setup Required'}</Text>
-            <Text style={styles.barHint}>{expanded ? '' : 'Season settings'}</Text>
+            <Text style={styles.barTitle}>Season Settings</Text>
+            <Text style={styles.barHint}>{expanded ? '' : configured && settings ? `${settings.game_format} · ${settings.formation}` : 'Configure format and formation'}</Text>
           </View>
           <View style={styles.setupButton}><Text style={styles.setupButtonText}>{expanded ? 'Close' : configured ? 'Edit' : 'Configure'}</Text></View>
         </Pressable>
@@ -117,9 +117,22 @@ export default function RosterTab() {
           <SeasonForm value={draft ?? settings} onChange={setDraft} onCancel={() => { setEditing(false); setExpanded(false); }} onSave={() => void save()} saving={saving} />
         ) : (
           <View style={styles.readOnly}>
-            <Text style={styles.detail}>Format: {settings.game_format}</Text>
-            <Text style={styles.detail}>Formation: {settings.formation}</Text>
-            <Text style={styles.detail}>Games: {settings.total_games} · {settings.game_length_minutes} minutes · {settings.total_blocks} blocks</Text>
+            <View style={styles.settingsGrid}>
+              <View style={styles.settingsColumn}>
+                <Text style={styles.detailLabel}>Format</Text>
+                <Text style={styles.detail}>{settings.game_format}</Text>
+                <Text style={styles.detailLabel}>Formation</Text>
+                <Text style={styles.detail}>{settings.formation}</Text>
+                <Text style={styles.detailLabel}>Game Length</Text>
+                <Text style={styles.detail}>{settings.game_length_minutes} min</Text>
+              </View>
+              <View style={styles.settingsColumn}>
+                <Text style={styles.detailLabel}>Games</Text>
+                <Text style={styles.detail}>{settings.total_games}</Text>
+                <Text style={styles.detailLabel}>Substitution Blocks</Text>
+                <Text style={styles.detail}>{settings.total_blocks}</Text>
+              </View>
+            </View>
             <Pressable onPress={() => setEditing(true)} style={styles.editButton}><Text style={styles.editText}>EDIT</Text></Pressable>
           </View>
         ))}
@@ -180,7 +193,7 @@ const styles = StyleSheet.create({
   barAttention: { backgroundColor: '#fff1e9', borderColor: palette.coral, borderRadius: 12, borderWidth: 1, margin: 8 },
   barHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   barHeaderAttention: { paddingVertical: 2 },
-  setupIcon: { alignItems: 'center', backgroundColor: '#ffe0d4', borderRadius: 9, height: 34, justifyContent: 'center', marginRight: 9, width: 34 },
+  setupIcon: { alignItems: 'center', backgroundColor: '#eef1ed', borderRadius: 9, height: 34, justifyContent: 'center', marginRight: 9, width: 34 },
   barCopy: { flex: 1 },
   barTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   barHint: { color: palette.muted, fontSize: 11, marginTop: 3 },
@@ -188,6 +201,9 @@ const styles = StyleSheet.create({
   setupButton: { backgroundColor: palette.coral, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
   setupButtonText: { color: palette.panel, fontSize: 11, fontWeight: '900' },
   readOnly: { paddingTop: 10 },
+  settingsGrid: { flexDirection: 'row', gap: 24 },
+  settingsColumn: { flex: 1 },
+  detailLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', marginTop: 7, textTransform: 'uppercase' },
   detail: { color: palette.muted, fontSize: 12, marginTop: 4 },
   editButton: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7 },
   editText: { color: palette.panel, fontSize: 11, fontWeight: '800' },

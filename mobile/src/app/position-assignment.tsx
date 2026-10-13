@@ -106,7 +106,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [teamChangeVersion, setTeamChangeVersion] = useState(0);
   const [selectedHealth, setSelectedHealth] = useState<PositionHealth | null>(null);
   const [healthExpanded, setHealthExpanded] = useState(false);
-  const [helpExpanded, setHelpExpanded] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
   const [editingNumber, setEditingNumber] = useState<string | null>(null);
@@ -320,26 +319,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               </View>
             </View>
 
-            <Pressable style={styles.summaryCard} onPress={() => setHelpExpanded((expanded) => !expanded)} accessibilityRole="button" accessibilityState={{ expanded: helpExpanded }}>
-              <View style={styles.summaryIcon}>
-                <SymbolView
-                  name={{ ios: 'person.3.fill', android: 'group', web: 'group' }}
-                  size={22}
-                  tintColor={palette.green}
-                />
-              </View>
-              <View style={styles.summaryCopy}>
-                <View style={styles.summaryTitleRow}>
-                  <Text style={styles.summaryTitle}>{helpExpanded ? 'When assigning player groups and positions remember:' : 'About player groups & positions'}</Text>
-                  <Text style={styles.summaryChevron}>{helpExpanded ? '−' : '›'}</Text>
-                </View>
-                {helpExpanded && <Text style={styles.summaryDetail}>
-                  - Player Groups affect overall playing time (Core = more, Rotational = avg, Developing = less){'\n'}
-                  - Too many Core/Developing players can have negative affects on scheduling.{ '\n' }
-                  - The order that you select specific positions will affect the scheduling logic (first in list = higher priority)
-                </Text>}
-              </View>
-            </Pressable>
             {seasonSettingsContent}
             {positionsNeedReview && (
               <View style={styles.warningCard}>
