@@ -27,7 +27,7 @@ const palette = {
   coral: '#d96f4c',
 };
 
-type RosterPlayer = { name: string; primary_positions?: string[]; general_positions?: string[]; backup_positions?: string[]; excluded_positions?: string[]; group?: string };
+type RosterPlayer = { name: string; keeper_eligible?: boolean; primary_positions?: string[]; general_positions?: string[]; backup_positions?: string[]; excluded_positions?: string[]; group?: string };
 
 function displayPlayerName(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -129,7 +129,7 @@ export default function GameScreen() {
         const rosterPlayers = payload.players as RosterPlayer[];
         setRosterPlayers(rosterPlayers);
         const eligibleGoalkeepers = rosterPlayers
-          .filter((player) => player.primary_positions?.some((position) => position.toUpperCase() === 'GK') || player.group === 'rotational_gk')
+          .filter((player) => player.keeper_eligible === true)
           .map((player) => player.name);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
@@ -411,7 +411,14 @@ export default function GameScreen() {
             {hasGoalkeeper && <View style={styles.goalkeeperCard}>
               <Text style={styles.goalkeeperTitle}>Goalkeepers</Text>
               <Text style={styles.goalkeeperDetail}>Choose who plays each half. Select GK Yes players only.</Text>
-              {goalkeeperNames.length === 0 ? <Text style={styles.helperText}>No GK-eligible players are configured.</Text> : (
+              {goalkeeperNames.length === 0 ? (
+                <View>
+                  <Text style={styles.helperText}>No GK-eligible players are configured. Set keeper eligibility on the Roster.</Text>
+                  <Pressable onPress={() => router.navigate('/position-assignment')} style={styles.rosterLink} accessibilityRole="button">
+                    <Text style={styles.rosterLinkText}>Go to Roster</Text>
+                  </Pressable>
+                </View>
+              ) : (
                 <View style={styles.goalkeeperSelectors}>
                   <View style={styles.goalkeeperSelector}>
                     <Text style={styles.selectorLabel}>First half</Text>
@@ -560,6 +567,8 @@ const styles = StyleSheet.create({
   goalkeeperOptionDisabled: { opacity: 0.4 },
   goalkeeperOptionText: { color: palette.ink, fontSize: 12, fontWeight: '700' },
   goalkeeperOptionTextSelected: { color: palette.panel },
+  rosterLink: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 10, paddingHorizontal: 11, paddingVertical: 8 },
+  rosterLinkText: { color: palette.panel, fontSize: 12, fontWeight: '800' },
   playerList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, overflow: 'hidden' },
   playerRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', minHeight: 64, paddingHorizontal: 13 },
   lastRow: { borderBottomWidth: 0 },
