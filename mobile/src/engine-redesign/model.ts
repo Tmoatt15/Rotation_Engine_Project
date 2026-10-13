@@ -14,6 +14,7 @@ export interface RedesignPlayerInput {
   excluded_positions?: string[];
   forbidden_positions?: string[];
   keeper?: boolean;
+  keeper_eligible?: boolean;
   rest_preset?: 'A' | 'B' | 'none';
   available?: boolean;
   historicalFieldBlocks?: number;
@@ -30,6 +31,7 @@ export interface NormalizedPlayer {
   excludedPositions: string[];
   available: boolean;
   keeper: boolean;
+  keeperEligible: boolean;
   emergencyKeeper: boolean;
   restPreset: 'A' | 'B' | 'none';
   history: {

@@ -29,17 +29,21 @@ function normalizeGroup(group: string): NormalizedPlayer['group'] {
 function normalizePlayer(input: RedesignPlayerInput, game: RedesignGameInput): NormalizedPlayer {
   const generalPositions = positions(input.general_positions ?? input.general_position);
   const primaryPositions = positions(input.primary_positions ?? input.primary_position);
+  const keeperEligible = input.keeper_eligible ?? (generalPositions.includes('GK') || primaryPositions.includes('GK'));
+  const fieldGeneralPositions = generalPositions.filter((position) => position !== 'GK');
+  const fieldPrimaryPositions = primaryPositions.filter((position) => position !== 'GK');
   const excludedPositions = positions(input.excluded_positions ?? input.forbidden_positions);
   const history = game.seasonHistory?.[input.name];
   return {
     name: input.name,
     group: normalizeGroup(input.group),
-    generalPositions,
-    primaryPositions: primaryPositions.length ? primaryPositions : generalPositions,
-    backupPositions: positions(input.backup_positions),
+    generalPositions: fieldGeneralPositions,
+    primaryPositions: fieldPrimaryPositions.length ? fieldPrimaryPositions : fieldGeneralPositions,
+    backupPositions: positions(input.backup_positions).filter((position) => position !== 'GK'),
     excludedPositions,
     available: input.available ?? true,
-    keeper: input.keeper ?? (primaryPositions.includes('GK') || generalPositions.includes('GK')),
+    keeper: input.keeper ?? (keeperEligible && fieldGeneralPositions.length === 0),
+    keeperEligible,
     emergencyKeeper: false,
     restPreset: input.rest_preset ?? 'none',
     history: history ?? {
@@ -97,7 +101,7 @@ export function normalizeGame(game: RedesignGameInput, roster: RedesignPlayerInp
     if (byName.has(name)) throw new Error(`Emergency keeper must not already be in the roster: ${name}.`);
     players.push({
       name, group: 'rotational', generalPositions: ['GK'], primaryPositions: ['GK'], backupPositions: [], excludedPositions: [],
-      available: true, keeper: true, emergencyKeeper: true, restPreset: 'none',
+      available: true, keeper: true, keeperEligible: true, emergencyKeeper: true, restPreset: 'none',
       history: { historicalFieldBlocks: 0, historicalGkBlocks: 0, historicalStarts: 0 },
     });
     byName.set(name, players[players.length - 1]);
@@ -110,7 +114,7 @@ export function normalizeGame(game: RedesignGameInput, roster: RedesignPlayerInp
   for (const keeper of [firstHalfKeeper, secondHalfKeeper]) {
     if (keeper && !byName.has(keeper)) throw new Error(`Selected goalkeeper is not in the roster: ${keeper}.`);
     const selected = keeper ? byName.get(keeper) : undefined;
-    if (selected && !selected.keeper) throw new Error(`Selected goalkeeper is not marked as a keeper: ${keeper}.`);
+    if (selected && !selected.keeperEligible) throw new Error(`Selected goalkeeper is not marked as a keeper: ${keeper}.`);
     if (selected && !selected.available) throw new Error(`Selected goalkeeper is unavailable: ${keeper}.`);
   }
   const normalizedPins = (game.pins ?? []).map((pin) => ({ ...pin, slot: pin.slot.toUpperCase() }));

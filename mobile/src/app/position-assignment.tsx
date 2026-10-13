@@ -27,6 +27,7 @@ type Filter = 'all' | Group;
 type Player = {
   name: string;
   number?: number;
+  keeper_eligible?: boolean;
   group: Group;
   general_positions: string[];
   primary_positions: string[];
@@ -81,7 +82,7 @@ function displayPlayerName(name: string): string {
 }
 
 function isGoalkeeperAllowed(player: Player): boolean {
-  return player.primary_positions.some((position) => position.toUpperCase() === 'GK');
+  return player.keeper_eligible === true;
 }
 
 function withoutGoalkeeper(positionList: string[]): string[] {
@@ -181,9 +182,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     const allowed = isGoalkeeperAllowed(player);
     const nextPlayers = players.map((candidate) => candidate.name === name ? {
       ...candidate,
-      primary_positions: allowed
-        ? player.primary_positions.filter((position) => position.toUpperCase() !== 'GK')
-        : [...player.primary_positions, 'GK'],
+      keeper_eligible: !allowed,
     } : candidate);
     setPlayers(nextPlayers);
     setMessage(null);
@@ -225,15 +224,9 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       : positionPicker.positions.length === 0 && positionPicker.group === 'general_positions'
         ? [ANY_POSITION]
         : positionPicker.positions;
-      const changes: Partial<Player> = {
-      [positionPicker.group]: positionPicker.group === 'primary_positions' && isGoalkeeperAllowed(player)
-        ? [...positions, 'GK']
-        : positions,
-      };
+      const changes: Partial<Player> = { [positionPicker.group]: positions };
       if (positionPicker.group === 'general_positions') {
-        changes.primary_positions = positionPicker.positions.includes('GK')
-          ? [...player.primary_positions.filter((position) => position.toUpperCase() !== 'GK'), 'GK']
-          : player.primary_positions.filter((position) => position.toUpperCase() !== 'GK');
+        changes.primary_positions = positionPicker.positions;
       }
       const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
       setPlayers(updatedPlayers);

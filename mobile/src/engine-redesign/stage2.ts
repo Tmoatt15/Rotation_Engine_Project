@@ -16,7 +16,7 @@ function maximumBlocks(totalBlocks: number, percentage: number): number {
 }
 
 function isDedicatedKeeper(player: NormalizedPlayer): boolean {
-  return player.generalPositions.length > 0 && player.generalPositions.every((position) => position === 'GK');
+  return player.keeper && player.generalPositions.length === 0;
 }
 
 function keeperBlocks(game: NormalizedGame, player: NormalizedPlayer, demand: DemandModel): number {

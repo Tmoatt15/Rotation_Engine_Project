@@ -20,6 +20,7 @@ type PlayerRow = {
   primary_positions_json: string;
   backup_positions_json: string;
   excluded_positions_json: string;
+  keeper_eligible: number;
 };
 
 type SettingsRow = { settings_json: string };
@@ -48,13 +49,18 @@ function parseJson<T>(value: string, fallback: T): T {
 }
 
 function rowToRosterPlayer(row: PlayerRow): SeasonRosterPlayer {
+  const cleanPositions = (positions: string[]): string[] => positions.filter((position) => position.toUpperCase() !== 'GK');
+  const generalPositions = cleanPositions(parseJson(row.general_positions_json, []));
+  const primaryPositions = cleanPositions(parseJson(row.primary_positions_json, []));
+  const backupPositions = cleanPositions(parseJson(row.backup_positions_json, []));
   return {
     name: row.name,
     ...(row.number === null ? {} : { number: row.number }),
+    keeper_eligible: row.keeper_eligible === 1,
     group: row.group_name,
-    general_positions: parseJson(row.general_positions_json, []),
-    primary_positions: parseJson(row.primary_positions_json, []),
-    backup_positions: parseJson(row.backup_positions_json, []),
+    general_positions: generalPositions,
+    primary_positions: primaryPositions,
+    backup_positions: backupPositions,
     excluded_positions: parseJson(row.excluded_positions_json, []),
   };
 }
@@ -63,7 +69,8 @@ async function rosterForTeam(database: SQLiteDatabase, teamId: string): Promise<
   const rows = await database.getAllAsync<PlayerRow>(
     `SELECT players.name, season_roster.number, season_roster.group_name,
       season_roster.general_positions_json, season_roster.primary_positions_json,
-      season_roster.backup_positions_json, season_roster.excluded_positions_json
+      season_roster.backup_positions_json, season_roster.excluded_positions_json,
+      season_roster.keeper_eligible
      FROM players
      INNER JOIN season_roster ON season_roster.player_id = players.id
      WHERE players.team_id = ? ORDER BY players.name COLLATE NOCASE`,
@@ -154,21 +161,30 @@ export async function replaceRoster(
   await database.runAsync('DELETE FROM players WHERE team_id = ?', teamId);
   for (const [index, player] of players.entries()) {
     const playerId = `${teamId}-player-${index + 1}`;
+    const cleanPositions = (positions: string[] | undefined): string[] => (positions ?? []).filter((position) => position.toUpperCase() !== 'GK');
+    const generalPositions = cleanPositions(player.general_positions);
+    const primaryPositions = cleanPositions(player.primary_positions);
+    const backupPositions = cleanPositions(player.backup_positions);
+    const keeperEligible = player.keeper_eligible === true
+      || (player.general_positions ?? []).some((position) => position.toUpperCase() === 'GK')
+      || (player.primary_positions ?? []).some((position) => position.toUpperCase() === 'GK')
+      || (player.backup_positions ?? []).some((position) => position.toUpperCase() === 'GK');
     await database.runAsync(
       'INSERT INTO players (id, team_id, name) VALUES (?, ?, ?)',
       playerId, teamId, player.name.trim(),
     );
     await database.runAsync(
       `INSERT INTO season_roster
-        (player_id, number, group_name, general_positions_json, primary_positions_json,
+        (player_id, number, keeper_eligible, group_name, general_positions_json, primary_positions_json,
          backup_positions_json, excluded_positions_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       playerId,
       player.number ?? null,
+      keeperEligible ? 1 : 0,
       player.group,
-      JSON.stringify(player.general_positions ?? []),
-      JSON.stringify(player.primary_positions ?? []),
-      JSON.stringify(player.backup_positions ?? []),
+      JSON.stringify(generalPositions),
+      JSON.stringify(primaryPositions),
+      JSON.stringify(backupPositions),
       JSON.stringify(player.excluded_positions ?? []),
     );
   }

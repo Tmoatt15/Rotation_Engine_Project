@@ -17,7 +17,7 @@ function reserveShortPositionGroups(
     group,
     demand.fieldSlots.filter((slot) => slot.group === group).length * game.totalBlocks,
   ] as const));
-  const supply = new Map(groups.map((group) => [group, 0] as const));
+  const supply = new Map<'D' | 'M' | 'F', number>(groups.map((group) => [group, 0]));
   for (const player of game.players) {
     const max = fieldMax.get(player.name) ?? 0;
     for (const group of groups) {
@@ -108,7 +108,7 @@ function zoneForSlot(slot: string): RedesignZone {
 }
 
 function isDedicatedKeeper(player: NormalizedPlayer): boolean {
-  return player.generalPositions.length > 0 && player.generalPositions.every((position) => position === 'GK');
+  return player.keeper && player.generalPositions.length === 0;
 }
 
 function isOppositeHalfKeeper(game: NormalizedGame, player: NormalizedPlayer, block: number): boolean {

@@ -178,7 +178,8 @@ function rosterInput(player: SeasonRosterPlayer): RedesignPlayerInput {
     primary_positions: player.primary_positions ?? [],
     backup_positions: player.backup_positions ?? [],
     excluded_positions: player.excluded_positions ?? [],
-    keeper: player.primary_positions?.includes('GK') || player.general_positions?.includes('GK'),
+    keeper_eligible: player.keeper_eligible === true,
+    keeper: player.keeper_eligible === true && !(player.general_positions ?? []).length,
   };
 }
 

@@ -18,6 +18,7 @@ export type PositionUsage = Record<PositionGroup, number>;
 export interface PlayerInput {
   name: string;
   number?: number;
+  keeper_eligible?: boolean;
   group: PlayerGroup;
   primary_position?: PositionCode;
   forbidden_positions?: PositionCode[];
