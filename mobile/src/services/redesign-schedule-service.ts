@@ -42,6 +42,34 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     };
   }
   const groups = ['D', 'M', 'F'] as const;
+  const quotas = assignQuotas(game, demand).quotas;
+  const groupLabel = (group: typeof groups[number]): string => group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
+  const playersForGroup = (group: typeof groups[number]) => game.players.filter((player) => player.available && !player.keeper
+    && demand.fieldSlots.filter((slot) => slot.group === group).some((slot) => positionTier(player, slot.slot) > 0));
+  const eligibleCounts = Object.fromEntries(groups.map((group) => [group, playersForGroup(group).length])) as Record<typeof groups[number], number>;
+  for (const group of groups) {
+    const slots = demand.fieldSlots.filter((slot) => slot.group === group);
+    const singleGroupPlayers = playersForGroup(group).filter((player) => groups.filter((candidate) => playersForGroup(candidate).some((eligible) => eligible.name === player.name)).length === 1);
+    const minimums = singleGroupPlayers
+      .map((player) => ({ name: player.name, minimum: quotas.find((quota) => quota.player === player.name)?.totalMin ?? 0 }))
+      .filter((player) => player.minimum > 0)
+      .sort((left, right) => right.minimum - left.minimum || left.name.localeCompare(right.name));
+    const minimumExcess = minimums.reduce((total, player) => total + player.minimum, 0) - slots.length * game.totalBlocks;
+    if (minimumExcess <= 0 || !minimums.length) continue;
+    const crossTraining = minimums.slice(0, minimums.findIndex((_, index) => minimums.slice(0, index + 1).reduce((total, player) => total + player.minimum, 0) > minimumExcess) + 1);
+    const targetGroup = groups
+      .filter((candidate) => candidate !== group)
+      .sort((left, right) => (eligibleCounts[right] - demand.fieldSlots.filter((slot) => slot.group === right).length)
+        - (eligibleCounts[left] - demand.fieldSlots.filter((slot) => slot.group === left).length))[0];
+    const targetLabel = targetGroup === 'D' ? 'defense' : targetGroup === 'M' ? 'midfield' : 'forward';
+    const names = crossTraining.map((player) => player.name);
+    return {
+      kind: 'position-shortage',
+      message: `Your ${groupLabel(group)} are overloaded — too many can only play ${groupLabel(group).replace(/s$/, '')}. To fix: give a ${targetLabel} backup to ${names.length} of these players: ${names.join(', ')}.`,
+      buttons: [{ label: 'Review Players', action: 'go-to-roster' }, { label: 'Cancel', action: 'cancel' }],
+      context: { failureType: 'position-shortage', positionGroup: group, suggestions: names },
+    };
+  }
   const shortages = groups.map((group) => {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const eligible = game.players.filter((player) => player.available && !player.keeper
@@ -57,7 +85,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
         || left.name.localeCompare(right.name))
       .slice(0, 3)
       .map((player) => player.name);
-    const label = shortage.group === 'D' ? 'defenders' : shortage.group === 'M' ? 'midfielders' : 'forwards';
+    const label = groupLabel(shortage.group);
     return {
       kind: 'position-shortage',
       message: `Not enough ${label}. You have ${shortage.have} eligible players, but this formation needs ${shortage.need} for full coverage.`,
@@ -67,7 +95,6 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
       context: { failureType: 'position-shortage', positionGroup: shortage.group, have: shortage.have, need: shortage.need, suggestions },
     };
   }
-  const quotas = assignQuotas(game, demand).quotas;
   for (const group of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const eligible = game.players.filter((player) => player.available && !player.keeper
@@ -81,7 +108,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
         || left.name.localeCompare(right.name))
       .slice(0, 3)
       .map((player) => player.name);
-    const label = group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
+    const label = groupLabel(group);
     return {
       kind: 'position-shortage',
       message: `Not enough ${label} coverage. Your ${label} can cover ${capacityHave} blocks, but the formation needs ${capacityNeed}.`,
