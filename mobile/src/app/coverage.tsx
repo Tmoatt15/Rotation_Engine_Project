@@ -93,18 +93,16 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
   })).filter((row) => row.positions.length);
   const groupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
     const entries = playerPositionEntries(player);
-    return !player.primary_positions.includes('GK')
-      && entries.some(({ position, tier }) => tier !== 'backup' && belongsToRoleGroup(position, group));
+    return entries.some(({ position, tier }) => tier !== 'backup' && belongsToRoleGroup(position, group));
   });
   const backupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
     return !groupPlayers(group).some((candidate) => candidate.name === player.name)
-      && !player.primary_positions.includes('GK')
       && player.backup_positions.some((position) => belongsToRoleGroup(position.toUpperCase(), group));
   });
   const suggestions = (group: 'D' | 'M' | 'F') => players
     .filter((player) => !groupPlayers(group).some((candidate) => candidate.name === player.name)
       && !backupPlayers(group).some((candidate) => candidate.name === player.name)
-      && !player.primary_positions.includes('GK'))
+    )
     .sort((left, right) => {
       const leftProximity = left.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
       const rightProximity = right.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
@@ -120,6 +118,7 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
+  const keeperEligible = players.filter((player) => player.primary_positions.includes('GK') || player.general_positions.includes('GK'));
   return (
     <View style={styles.builderCard}>
       <Text style={styles.builderTitle}>Optimal Roster Setup</Text>
@@ -155,8 +154,8 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
       })}
       <View style={styles.builderRow}>
         <Text style={styles.builderGroup}>GOALKEEPERS</Text>
-        <Text style={styles.builderNames}>Current {players.filter((player) => player.primary_positions.includes('GK')).length} · Minimum 2 · Optimal 2</Text>
-        <Text style={styles.builderStatus}>{players.filter((player) => player.primary_positions.includes('GK')).length >= 2 ? '✓ Minimum keeper coverage' : '⚠ Add another goalkeeper'}</Text>
+        <Text style={styles.builderNames}>{keeperEligible.length} eligible: {keeperEligible.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
+        <Text style={styles.builderStatus}>{keeperEligible.length >= 2 ? '✓ Keeper eligibility indicator' : '⚠ Add another keeper-eligible player'}</Text>
       </View>
     </View>
   );
