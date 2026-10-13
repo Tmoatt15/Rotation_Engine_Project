@@ -44,6 +44,10 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   const groups = ['D', 'M', 'F'] as const;
   const quotas = assignQuotas(game, demand).quotas;
   const groupLabel = (group: typeof groups[number]): string => group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
+  const minimumForPlayer = (player: typeof game.players[number]): number => {
+    const percentage = player.group === 'core' ? 0.7 : player.group === 'rotational' ? 0.6 : 0.5;
+    return Math.max(0, Math.min(game.totalBlocks, Math.round(game.totalBlocks * percentage)));
+  };
   const playersForGroup = (group: typeof groups[number]) => game.players.filter((player) => player.available && !player.keeper
     && demand.fieldSlots.filter((slot) => slot.group === group).some((slot) => positionTier(player, slot.slot) > 0));
   const eligibleCounts = Object.fromEntries(groups.map((group) => [group, playersForGroup(group).length])) as Record<typeof groups[number], number>;
@@ -51,7 +55,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const singleGroupPlayers = playersForGroup(group).filter((player) => groups.filter((candidate) => playersForGroup(candidate).some((eligible) => eligible.name === player.name)).length === 1);
     const minimums = singleGroupPlayers
-      .map((player) => ({ name: player.name, minimum: quotas.find((quota) => quota.player === player.name)?.totalMin ?? 0 }))
+      .map((player) => ({ name: player.name, minimum: minimumForPlayer(player) }))
       .filter((player) => player.minimum > 0)
       .sort((left, right) => right.minimum - left.minimum || left.name.localeCompare(right.name));
     const minimumExcess = minimums.reduce((total, player) => total + player.minimum, 0) - slots.length * game.totalBlocks;
