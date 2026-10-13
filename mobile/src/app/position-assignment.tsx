@@ -659,11 +659,23 @@ function PositionDepthPanel({
   };
   const formationParts = formation.split('-').map(Number);
   const formationNeeds = { D: formationParts[0] ?? 0, M: formationParts[1] ?? 0, F: formationParts[2] ?? 0 };
+  const positionsForGroup = (group: 'D' | 'M' | 'F') => groups.find((item) => item.group === group)?.positions ?? [group];
+  const forwardBackupCandidates = suggestions('F', positionsForGroup('F')).filter((player) => player.general_positions.includes('M') || player.primary_positions.includes('M')).slice(0, Math.max(0, formationNeeds.F - 1));
+  const defensiveBackupCandidates = suggestions('D', positionsForGroup('D')).filter((player) => !forwardBackupCandidates.some((candidate) => candidate.name === player.name)
+    && (player.general_positions.includes('M') || player.primary_positions.includes('M'))).slice(0, 1);
+  const keeperFieldCandidates = players.filter((player) => isGoalkeeperAllowed(player)
+    && !player.backup_positions.some((position) => position.toUpperCase() === 'M'));
   return (
     <View style={styles.depthCard}>
       <Text style={styles.depthTitle}>Optimal Roster Setup</Text>
       <Text style={styles.depthSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
       <Text style={styles.depthHint}>Tap a row to review specific backup recommendations.</Text>
+      <View style={styles.depthRecommendations}>
+        <Text style={styles.depthRecommendationTitle}>To reach optimal:</Text>
+        <Text style={styles.depthRecommendation}>• Give F backup to {forwardBackupCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'additional midfielders'}.</Text>
+        <Text style={styles.depthRecommendation}>• Give D backup to {defensiveBackupCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'one defensive-minded midfielder'}.</Text>
+        <Text style={styles.depthRecommendation}>• Give M backup to {keeperFieldCandidates.map((player) => displayPlayerName(player.name)).join(', ') || 'both keepers'}.</Text>
+      </View>
       {groups.map(({ group, positions }) => {
         const primary = groupPlayers(group, positions);
         const backup = backupPlayers(group, positions);
@@ -830,6 +842,9 @@ const styles = StyleSheet.create({
   depthTitle: { color: palette.ink, fontSize: 17, fontWeight: '800', marginBottom: 10 },
   depthSubtitle: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: -5 },
   depthHint: { color: palette.muted, fontSize: 11, marginBottom: 8, marginTop: 4 },
+  depthRecommendations: { backgroundColor: '#f7f4ed', borderRadius: 10, marginBottom: 8, padding: 10 },
+  depthRecommendationTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
+  depthRecommendation: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
   depthRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
   depthRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
   depthGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
