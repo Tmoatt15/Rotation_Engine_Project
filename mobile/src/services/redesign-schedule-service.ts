@@ -56,8 +56,8 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   if (totalMinimum > demand.fieldSlots.length * game.totalBlocks) {
     return {
       kind: 'position-shortage',
-      message: 'Your roster has more playing-time commitments than this formation can support. Review player groups and minimums before generating again.',
-      buttons: [{ label: 'Review Players', action: 'go-to-roster' }, { label: 'Cancel', action: 'cancel' }],
+      message: `Can't fit everyone's playing time.\n\nYour roster needs more flexibility to handle ${fieldPlayers.length} players. Adding backup positions gives the engine room to shift players between groups.\n\nTo fix: add backup positions. The Optimal Roster Builder will help you with this.`,
+      buttons: [{ label: 'Optimal Roster Builder', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
       context: { failureType: 'total-minimums' },
     };
   }

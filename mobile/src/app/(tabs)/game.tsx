@@ -259,6 +259,7 @@ export default function GameScreen() {
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
             if (button.action === 'choose-player' && suggestions[index]) void applyBackupAndRegenerate(suggestions[index]);
+            else if (button.action === 'go-to-builder') router.navigate('/coverage');
             else if (button.action === 'go-to-roster' || button.action === 'assign-backup-position' || button.action === 'pick-keeper') router.navigate('/position-assignment');
             else if (button.action === 'full-game-keeper' && keeperNames[0]) {
               const keeper = keeperNames[0];
