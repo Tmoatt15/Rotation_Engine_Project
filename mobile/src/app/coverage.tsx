@@ -137,18 +137,18 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
         const minimum = needs[group] + 1;
         const optimal = needs[group] + 2;
         const total = primary.length + backups.length;
-        const status = primary.length < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
+        const status = total < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
         return (
           <Pressable key={group} onPress={() => showSuggestions(group, label)} style={styles.builderRow} accessibilityRole="button">
             <View style={styles.builderRowHeader}>
               <Text style={styles.builderGroup}>{label}</Text>
-              <Text style={styles.builderCounts}>Current {primary.length} · Minimum {minimum} · Optimal {optimal}</Text>
+              <Text style={styles.builderCounts}>Current {total} · Minimum {minimum} · Optimal {optimal}</Text>
             </View>
-            <View style={styles.builderBarTrack}><View style={[styles.builderBarFill, { width: `${Math.min(100, (primary.length / Math.max(1, optimal)) * 100)}%` }]} /></View>
+            <View style={styles.builderBarTrack}><View style={[styles.builderBarFill, { width: `${Math.min(100, (total / Math.max(1, optimal)) * 100)}%` }]} /></View>
             <Text style={styles.builderNames}>Primary: {primary.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
             <Text style={styles.builderNames}>Backups: {backups.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
             <Text style={[styles.builderStatus, status === 'critical' && styles.builderCritical, status === 'warning' && styles.builderWarning, status === 'good' && styles.builderGood]}>
-              {status === 'critical' ? `⚠ Below minimum by ${minimum - primary.length}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : '✓ Optimal coverage'}
+              {status === 'critical' ? `⚠ Below minimum by ${minimum - total}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : '✓ Optimal coverage'}
             </Text>
           </Pressable>
         );
