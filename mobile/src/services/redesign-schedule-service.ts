@@ -132,7 +132,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     const label = groupLabel(shortage.group);
     return {
       kind: 'position-shortage',
-      message: `Not enough ${label}. You have ${shortage.have} eligible players, but this formation needs ${shortage.need} for full coverage.`,
+      message: `You need ${Math.max(1, shortage.need - shortage.have)} more ${label}.\n\nYour roster doesn't have enough players who can play ${label.slice(0, -1)} to cover the formation.`,
       buttons: suggestions.length
         ? suggestions.map((player) => ({ label: `Add ${label.slice(0, -1)} backup for ${player}`, action: 'choose-player' as const }))
         : [{ label: 'Go to Roster', action: 'go-to-roster' as const }],
@@ -155,7 +155,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     const label = groupLabel(group);
     return {
       kind: 'position-shortage',
-      message: `Not enough ${label} coverage. Your ${label} can cover ${capacityHave} blocks, but the formation needs ${capacityNeed}.`,
+      message: `You need ${Math.max(1, slots.length - eligible.length)} more ${label}.\n\nYour roster doesn't have enough players who can play ${label.slice(0, -1)} to cover the formation.`,
       buttons: suggestions.length
         ? suggestions.map((player) => ({ label: `Add ${label.slice(0, -1)} backup for ${player}`, action: 'choose-player' as const }))
         : [{ label: 'Go to Roster', action: 'go-to-roster' as const }],
