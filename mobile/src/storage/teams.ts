@@ -14,6 +14,7 @@ type PlayerRow = {
   id: string;
   team_id: string;
   name: string;
+  number: number | null;
   group_name: SeasonRosterPlayer['group'];
   general_positions_json: string;
   primary_positions_json: string;
@@ -49,6 +50,7 @@ function parseJson<T>(value: string, fallback: T): T {
 function rowToRosterPlayer(row: PlayerRow): SeasonRosterPlayer {
   return {
     name: row.name,
+    ...(row.number === null ? {} : { number: row.number }),
     group: row.group_name,
     general_positions: parseJson(row.general_positions_json, []),
     primary_positions: parseJson(row.primary_positions_json, []),
@@ -59,7 +61,7 @@ function rowToRosterPlayer(row: PlayerRow): SeasonRosterPlayer {
 
 async function rosterForTeam(database: SQLiteDatabase, teamId: string): Promise<SeasonRosterPlayer[]> {
   const rows = await database.getAllAsync<PlayerRow>(
-    `SELECT players.name, season_roster.group_name,
+    `SELECT players.name, season_roster.number, season_roster.group_name,
       season_roster.general_positions_json, season_roster.primary_positions_json,
       season_roster.backup_positions_json, season_roster.excluded_positions_json
      FROM players
@@ -158,10 +160,11 @@ export async function replaceRoster(
     );
     await database.runAsync(
       `INSERT INTO season_roster
-        (player_id, group_name, general_positions_json, primary_positions_json,
+        (player_id, number, group_name, general_positions_json, primary_positions_json,
          backup_positions_json, excluded_positions_json)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       playerId,
+      player.number ?? null,
       player.group,
       JSON.stringify(player.general_positions ?? []),
       JSON.stringify(player.primary_positions ?? []),

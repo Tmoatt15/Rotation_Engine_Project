@@ -1,7 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 const DATABASE_NAME = 'rotation-engine.db';
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
@@ -68,6 +68,12 @@ const migrations: Migration[] = [
     version: 1,
     apply: async (database) => {
       await database.execAsync(schema);
+    },
+  },
+  {
+    version: 2,
+    apply: async (database) => {
+      await database.execAsync('ALTER TABLE season_roster ADD COLUMN number INTEGER');
     },
   },
 ];
