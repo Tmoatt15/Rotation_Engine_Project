@@ -17,7 +17,7 @@ export class RedesignOfferError extends Error {
   }
 }
 
-function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>): Stage6Offer {
+function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums = false): Stage6Offer {
   const firstHalfAssigned = Boolean(game.firstHalfKeeper);
   const secondHalfAssigned = Boolean(game.secondHalfKeeper);
   const keepers = game.players.filter((player) => player.available && (player.keeper || player.generalPositions.includes('GK') || player.primaryPositions.includes('GK')));
@@ -53,11 +53,25 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   const eligibleCounts = Object.fromEntries(groups.map((group) => [group, playersForGroup(group).length])) as Record<typeof groups[number], number>;
   const fieldPlayers = game.players.filter((player) => player.available && !player.keeper);
   const totalMinimum = fieldPlayers.reduce((total, player) => total + minimumForPlayer(player), 0);
-  if (totalMinimum > demand.fieldSlots.length * game.totalBlocks) {
+  if (totalMinimum > demand.fieldSlots.length * game.totalBlocks && !allowRelaxedMinimums) {
+    let remainingReduction = totalMinimum - demand.fieldSlots.length * game.totalBlocks;
+    const reductions: string[] = [];
+    for (const group of ['developing', 'rotational', 'core'] as const) {
+      const groupPlayers = fieldPlayers.filter((player) => player.group === group);
+      const groupMinimum = groupPlayers.reduce((total, player) => total + minimumForPlayer(player), 0);
+      const reduction = Math.min(remainingReduction, groupMinimum);
+      if (reduction > 0 && groupPlayers.length) {
+        const perPlayer = Math.ceil(reduction / groupPlayers.length);
+        const label = group === 'core' ? 'core' : group === 'rotational' ? 'rotational' : 'developing';
+        reductions.push(`${Math.min(groupPlayers.length, reduction)} ${label} players: ${minimumForPlayer(groupPlayers[0])} blocks → ${Math.max(0, minimumForPlayer(groupPlayers[0]) - perPlayer)} blocks`);
+        remainingReduction -= reduction;
+      }
+      if (!remainingReduction) break;
+    }
     return {
       kind: 'position-shortage',
-      message: `Can't fit everyone's playing time.\n\nYour roster needs more flexibility to handle ${game.players.length} players. Adding backup positions gives the engine room to shift players between groups.\n\nTo fix: add backup positions. The Optimal Roster Builder will help you with this.`,
-      buttons: [{ label: 'Optimal Roster Builder', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
+      message: `Can't fit everyone's minimum playing time.\n\nTo generate a schedule for ${game.players.length} players, these minimums would need to be reduced:\n- ${reductions.join('\n- ')}\n\nOr add backup positions to increase the roster's flexibility.`,
+      buttons: [{ label: 'Generate', action: 'allow-relaxed' }, { label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
       context: { failureType: 'total-minimums' },
     };
   }
@@ -238,10 +252,10 @@ async function context(input: { teamId: string; gameNumber: number; availablePla
 
 type RedesignSchedule = LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'redesign' };
 
-export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null }): Promise<RedesignSchedule> {
+export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean }): Promise<RedesignSchedule> {
   const { settings, team, game, demand } = await context(input);
   const { placement } = placementWithTierFallback(game, demand);
-  if (!placement.complete) throw new RedesignOfferError(generationFailureOffer(game, demand));
+  if (!placement.complete) throw new RedesignOfferError(generationFailureOffer(game, demand, input.allowRelaxedMinimums));
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
   return {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,

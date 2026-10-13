@@ -2,7 +2,7 @@ import type { QuotaAssignment, RedesignGroup } from './model';
 import type { LateArrivalFailure } from './stage5';
 
 export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'position-shortage' | 'keeper-issue' | 'impossible' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
-export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'assign-backup-position' | 'choose-player' | 'go-to-roster' | 'go-to-builder' | 'pick-keeper' | 'full-game-keeper' | 'turn-off-limits';
+export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'allow-relaxed' | 'assign-backup-position' | 'choose-player' | 'go-to-roster' | 'go-to-builder' | 'pick-keeper' | 'full-game-keeper' | 'turn-off-limits';
 
 export interface Stage6Offer {
   kind: Stage6OfferKind;

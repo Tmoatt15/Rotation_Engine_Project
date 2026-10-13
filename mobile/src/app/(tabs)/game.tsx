@@ -212,7 +212,7 @@ export default function GameScreen() {
     setShowGameNumberConfirmation(true);
   }
 
-  async function generateSchedule(keeperOverride?: string) {
+  async function generateSchedule(keeperOverride?: string, allowRelaxedMinimums = false) {
     const selectedFirstHalfGK = keeperOverride ?? firstHalfGK;
     const selectedSecondHalfGK = keeperOverride ?? secondHalfGK;
     const availableGoalkeepers = new Set(goalkeeperNames.filter((name) => !unavailable.has(name)));
@@ -234,7 +234,7 @@ export default function GameScreen() {
     setShowGameNumberConfirmation(false);
     try {
       const activeTeamId = teamId ?? await getActiveTeamId();
-      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK });
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK, allowRelaxedMinimums });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       if (requestError instanceof RedesignOfferError) {
@@ -260,6 +260,7 @@ export default function GameScreen() {
           onPress: () => {
             if (button.action === 'choose-player' && suggestions[index]) void applyBackupAndRegenerate(suggestions[index]);
             else if (button.action === 'go-to-builder') router.navigate('/coverage');
+            else if (button.action === 'allow-relaxed') void generateSchedule(undefined, true);
             else if (button.action === 'go-to-roster' || button.action === 'assign-backup-position' || button.action === 'pick-keeper') router.navigate('/position-assignment');
             else if (button.action === 'full-game-keeper' && keeperNames[0]) {
               const keeper = keeperNames[0];
