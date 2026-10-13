@@ -336,7 +336,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               )}
               <View style={[styles.headerCopy, !embedded && styles.headerCopyWithBack]}>
                 <Text style={styles.eyebrow}>FALL 2026</Text>
-                <Text style={styles.title}>{teamName ? `Player Positions for ${teamName}` : 'Player Positions'}</Text>
+                <Text style={styles.title}>Roster</Text>
               </View>
               <View style={styles.countBadge}>
                 <Text style={styles.countValue}>{players.length}</Text>
@@ -795,7 +795,7 @@ const styles = StyleSheet.create({
   playerRow: { borderBottomColor: palette.line, borderBottomWidth: 1, paddingHorizontal: 13 },
   lastRow: { borderBottomWidth: 0 },
   compactPlayerHeader: { alignItems: 'center', flexDirection: 'row', minHeight: 52 },
-  disclosure: { color: palette.muted, fontSize: 24, marginLeft: 8 },
+  disclosure: { color: palette.muted, fontSize: 24, marginLeft: 12, paddingHorizontal: 4 },
   expandedPlayer: { paddingBottom: 12 },
   positionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   gridCell: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 8, borderWidth: 1, minHeight: 48, padding: 7, width: '48%' },
@@ -813,7 +813,7 @@ const styles = StyleSheet.create({
   gkButtonSelected: { backgroundColor: palette.coral, borderColor: palette.coral },
   gkButtonText: { color: palette.muted, fontSize: 11, fontWeight: '800' },
   gkButtonTextSelected: { color: palette.panel },
-  playerName: { color: palette.ink, flexShrink: 1, fontSize: 15, fontWeight: '800' },
+  playerName: { color: palette.ink, flex: 1, flexShrink: 1, fontSize: 15, fontWeight: '800' },
   formationBanner: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 12, borderWidth: 1, marginBottom: 16, padding: 12 },
   formationHint: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
   nameLine: { alignItems: 'center', flexDirection: 'row', flex: 1 },
