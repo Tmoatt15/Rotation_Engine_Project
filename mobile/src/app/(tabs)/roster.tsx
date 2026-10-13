@@ -36,7 +36,6 @@ export default function RosterTab() {
   const [draft, setDraft] = useState<SeasonSettings | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [configured, setConfigured] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useFocusEffect(useCallback(() => {
@@ -46,7 +45,6 @@ export default function RosterTab() {
       if (!active) return;
       setSettings(season);
       setDraft(season);
-      setConfigured(Boolean(season.formation));
     }).catch(() => undefined);
     return () => { active = false; };
   }, []));
@@ -57,8 +55,7 @@ export default function RosterTab() {
       return;
     }
     setExpanded(true);
-    if (configured) setEditing(false);
-    else setEditing(true);
+    setEditing(false);
   }
 
   async function save() {
@@ -92,7 +89,6 @@ export default function RosterTab() {
       }
       setSettings(saved);
       setDraft(saved);
-      setConfigured(true);
       setEditing(false);
       setExpanded(false);
     } finally {
@@ -109,9 +105,8 @@ export default function RosterTab() {
           </View>
           <View style={styles.barCopy}>
             <Text style={styles.barTitle}>Season Settings</Text>
-            <Text style={styles.barHint}>{expanded ? '' : configured && settings ? `${settings.game_format} · ${settings.formation}` : 'Configure format and formation'}</Text>
           </View>
-          <View style={styles.setupButton}><Text style={styles.setupButtonText}>{expanded ? 'Close' : configured ? 'Edit' : 'Configure'}</Text></View>
+          <View style={styles.setupButton}><Text style={styles.setupButtonText}>{expanded ? 'Close' : 'View'}</Text></View>
         </Pressable>
         {expanded && settings && (editing ? (
           <SeasonForm value={draft ?? settings} onChange={setDraft} onCancel={() => { setEditing(false); setExpanded(false); }} onSave={() => void save()} saving={saving} />
