@@ -28,6 +28,7 @@ type Group = 'core' | 'developing' | 'rotational';
 type Player = {
   name: string;
   group: Group;
+  keeper_eligible?: boolean;
   general_positions: string[];
   primary_positions: string[];
   backup_positions: string[];
@@ -125,7 +126,7 @@ function OptimalRosterBuilder({ players, formation, gameFormat, onChoosePlayer }
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
-  const keeperEligible = players.filter((player) => player.primary_positions.includes('GK') || player.general_positions.includes('GK'));
+  const keeperEligible = players.filter((player) => player.keeper_eligible === true);
   return (
     <View style={styles.builderCard}>
       <Text style={styles.builderTitle}>Optimal Roster Setup</Text>
