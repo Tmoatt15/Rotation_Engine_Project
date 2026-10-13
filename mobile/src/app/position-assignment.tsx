@@ -299,6 +299,15 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     setExpandedPlayerName(name);
   }
 
+  async function savePlayerName(name: string, value: string) {
+    const nextName = value.trim();
+    if (!nextName || nextName === name || players.some((player) => player.name === nextName)) return;
+    const nextPlayers = players.map((player) => player.name === name ? { ...player, name: nextName } : player);
+    setPlayers(nextPlayers);
+    setExpandedPlayerName(nextName);
+    await saveRoster(nextPlayers, false);
+  }
+
   const positionsNeedReview = formationConfigured && !rosterMatchesFormation(formation, players as Player[]);
 
   return (
@@ -404,31 +413,36 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           </Pressable>
                         ))}
                       </View>
-                      <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
-                      <Pressable
-                        onPress={() => toggleGoalkeeper(player.name)}
-                        style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
-                        accessibilityRole="switch"
-                        accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
-                        accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
-                        <SymbolView name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }} size={12} tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted} />
-                        <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
-                      </Pressable>
-                      {formationConfigured ? (
-                        <>
-                          <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
-                          <PositionField label="Backup" value={player.backup_positions} onPress={() => openPositionPicker(player, 'backup_positions')} />
-                          <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} />
-                        </>
-                      ) : null}
-                      <TextInput
-                        defaultValue={player.number === undefined ? '' : String(player.number)}
-                        onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
-                        keyboardType="number-pad"
-                        placeholder="Jersey number"
-                        placeholderTextColor={palette.muted}
-                        style={styles.numberInput}
-                      />
+                      <View style={styles.positionGrid}>
+                        <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
+                        {formationConfigured ? <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} /> : <View style={styles.gridCell} />}
+                        {formationConfigured ? <PositionField label="Backup" value={player.backup_positions} onPress={() => openPositionPicker(player, 'backup_positions')} /> : <View style={styles.gridCell} />}
+                        {formationConfigured ? <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} /> : <View style={styles.gridCell} />}
+                        <Pressable
+                          onPress={() => toggleGoalkeeper(player.name)}
+                          style={[styles.gridCell, styles.keeperCell, isGoalkeeperAllowed(player) && styles.keeperCellSelected]}
+                          accessibilityRole="switch"
+                          accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
+                          accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
+                          <Text style={styles.gridLabel}>KEEPER</Text>
+                          <Text style={styles.gridValue}>{isGoalkeeperAllowed(player) ? 'Yes' : 'No'} ›</Text>
+                        </Pressable>
+                        <View style={styles.gridCell}>
+                          <Text style={styles.gridLabel}>JERSEY #</Text>
+                          <TextInput
+                            defaultValue={player.number === undefined ? '' : String(player.number)}
+                            onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
+                            keyboardType="number-pad"
+                            placeholder="—"
+                            placeholderTextColor={palette.muted}
+                            style={styles.gridInput}
+                          />
+                        </View>
+                        <View style={styles.nameEditCell}>
+                          <Text style={styles.gridLabel}>PLAYER NAME</Text>
+                          <TextInput defaultValue={player.name} onEndEditing={(event) => void savePlayerName(player.name, event.nativeEvent.text)} style={styles.nameEditInput} />
+                        </View>
+                      </View>
                     </View>}
                   </View>
                 );
@@ -470,8 +484,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
 
 function PositionField({ label, value, onPress }: { label: string; value: string[]; onPress: () => void }) {
   return (
-    <Pressable style={styles.positionField} onPress={onPress} accessibilityRole="button">
-      <Text style={styles.positionFieldLabel}>{label}</Text>
+    <Pressable style={styles.gridCell} onPress={onPress} accessibilityRole="button">
+      <Text style={styles.gridLabel}>{label.toUpperCase()}</Text>
       <View style={styles.positionValue}>
         <Text style={styles.positionValueText} numberOfLines={1}>{value.join(', ') || 'None'}</Text>
         <SymbolView name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} size={16} tintColor={palette.muted} />
@@ -757,6 +771,15 @@ const styles = StyleSheet.create({
   compactPlayerHeader: { alignItems: 'center', flexDirection: 'row', minHeight: 52 },
   disclosure: { color: palette.muted, fontSize: 24, marginLeft: 8 },
   expandedPlayer: { paddingBottom: 12 },
+  positionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  gridCell: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 8, borderWidth: 1, minHeight: 48, padding: 7, width: '48%' },
+  gridLabel: { color: palette.muted, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  gridValue: { color: palette.ink, fontSize: 12, fontWeight: '800', marginTop: 5 },
+  gridInput: { color: palette.ink, fontSize: 12, fontWeight: '800', marginTop: 2, padding: 0 },
+  nameEditCell: { backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 8, borderWidth: 1, padding: 7, width: '100%' },
+  nameEditInput: { color: palette.ink, fontSize: 13, fontWeight: '800', marginTop: 3, padding: 0 },
+  keeperCell: { justifyContent: 'center' },
+  keeperCellSelected: { backgroundColor: '#d4edda', borderColor: '#28a745' },
   playerLeft: { flex: 0.67, minWidth: 0 },
   playerRight: { alignItems: 'flex-start', flex: 1, minWidth: 0 },
   avatarColumn: { alignItems: 'center', width: 72 },
