@@ -99,6 +99,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [positionPicker, setPositionPicker] = useState<PositionPickerState>(null);
   const [positionRows, setPositionRows] = useState(() => formationPositionRows(fallbackFormation));
   const [formation, setFormation] = useState(fallbackFormation);
+  const [gameFormat, setGameFormat] = useState('11v11');
   const [formationConfigured, setFormationConfigured] = useState(true);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
@@ -142,6 +143,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         const currentFormation = storedFormation || fallbackFormation;
         setFormationConfigured(Boolean(storedFormation));
         setFormation(currentFormation);
+        setGameFormat(seasonPayload.game_format || '11v11');
         setPositionRows(storedFormation ? formationPositionRows(currentFormation) : []);
       } catch (requestError) {
         if (!active) return;
@@ -456,6 +458,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               <PositionDepthPanel
                 players={players}
                 positionRows={positionRows}
+                formation={formation}
+                gameFormat={gameFormat}
                 onAddBackup={(player) => openPositionPicker(player, 'backup_positions')}
               />
             )}
@@ -610,10 +614,14 @@ function positionGroupForRow(row: { label?: string }): 'D' | 'M' | 'F' | null {
 function PositionDepthPanel({
   players,
   positionRows,
+  formation,
+  gameFormat,
   onAddBackup,
 }: {
   players: Player[];
   positionRows: Array<{ label: string; exactPositions: string[] }>;
+  formation: string;
+  gameFormat: string;
   onAddBackup: (player: Player) => void;
 }) {
   const groups = positionRows
@@ -630,51 +638,67 @@ function PositionDepthPanel({
     const primary = groupPlayers(group, positions).some((candidate) => candidate.name === player.name);
     return !primary && (backup.includes(group) || backup.some((position) => positions.includes(position)));
   });
-  const suggestion = (group: 'D' | 'M' | 'F', positions: string[]) => players
-    .filter((player) => !backupPlayers(group, positions).some((candidate) => candidate.name === player.name))
+  const suggestions = (group: 'D' | 'M' | 'F', positions: string[]) => players
+    .filter((player) => !groupPlayers(group, positions).some((candidate) => candidate.name === player.name)
+      && !backupPlayers(group, positions).some((candidate) => candidate.name === player.name)
+      && !isGoalkeeperAllowed(player))
     .sort((left, right) => {
       const leftHasBackup = left.backup_positions.length ? 1 : 0;
       const rightHasBackup = right.backup_positions.length ? 1 : 0;
-      const leftProximity = left.general_positions.includes(group) ? 0 : 1;
-      const rightProximity = right.general_positions.includes(group) ? 0 : 1;
+      const leftProximity = left.general_positions.includes(group) || left.primary_positions.includes(group) ? 0 : 1;
+      const rightProximity = right.general_positions.includes(group) || right.primary_positions.includes(group) ? 0 : 1;
       return leftHasBackup - rightHasBackup || leftProximity - rightProximity || left.name.localeCompare(right.name);
-    })[0];
+    });
+  const showSuggestions = (group: 'D' | 'M' | 'F', positions: string[], label: string) => {
+    const candidates = suggestions(group, positions).slice(0, 3);
+    if (!candidates.length) return;
+    Alert.alert(`Improve ${label.toLowerCase()} coverage`, 'Choose a player to review for a backup position.', [
+      ...candidates.map((player) => ({ text: player.name, onPress: () => onAddBackup(player) })),
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+  const formationParts = formation.split('-').map(Number);
+  const formationNeeds = { D: formationParts[0] ?? 0, M: formationParts[1] ?? 0, F: formationParts[2] ?? 0 };
   return (
     <View style={styles.depthCard}>
-      <Text style={styles.depthTitle}>Position Depth</Text>
+      <Text style={styles.depthTitle}>Optimal Roster Setup</Text>
+      <Text style={styles.depthSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
+      <Text style={styles.depthHint}>Tap a row to review specific backup recommendations.</Text>
       {groups.map(({ group, positions }) => {
         const primary = groupPlayers(group, positions);
         const backup = backupPlayers(group, positions);
-        const slots = positions.length;
-        const recommended = slots + 2;
+        const slots = formationNeeds[group] || positions.length;
+        const minimum = slots + 1;
+        const optimal = slots + 2;
         const have = primary.length;
-        const total = have + backup.length;
-        const status = have < slots ? 'critical' : total < recommended ? 'warning' : 'good';
-        const next = status === 'good' ? null : suggestion(group, positions);
+        const total = primary.length + backup.length;
+        const status = have < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
+        const label = groupNames[group];
         return (
-          <Pressable key={group} onPress={next ? () => onAddBackup(next) : undefined} disabled={!next} style={styles.depthRow} accessibilityRole={next ? 'button' : undefined}>
+          <Pressable key={group} onPress={() => showSuggestions(group, positions, label)} style={styles.depthRow} accessibilityRole="button">
             <View style={styles.depthRowHeader}>
-              <Text style={styles.depthGroup}>{groupNames[group]}</Text>
-              <Text style={styles.depthNeed}>need {slots} · recommend {recommended}</Text>
+              <Text style={styles.depthGroup}>{label}</Text>
+              <Text style={styles.depthNeed}>Current {have} · Minimum {minimum} · Optimal {optimal}</Text>
             </View>
+            <View style={styles.depthBarTrack}><View style={[styles.depthBarFill, { width: `${Math.min(100, (have / Math.max(1, optimal)) * 100)}%` }]} /></View>
             <Text style={styles.depthNames}>Primary: {have ? primary.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
-            <Text style={styles.depthNames}>Backup: {backup.length ? backup.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
+            <Text style={styles.depthNames}>Backups: {backup.length ? backup.map((player) => displayPlayerName(player.name)).join(', ') : 'None'}</Text>
             <Text style={[styles.depthStatus, status === 'critical' && styles.depthCritical, status === 'warning' && styles.depthWarning, status === 'good' && styles.depthGood]}>
               {status === 'critical'
-                ? `✗ Critical — Need ${slots - have} more ${groupNames[group].toLowerCase().replace(/s$/, '')}.`
+                ? `⚠ Below minimum by ${minimum - have}. Tap for recommendations.`
                 : status === 'warning'
-                  ? `⚠ Warning — Recommend ${recommended - total} more ${groupNames[group].toLowerCase().replace(/s$/, '')} backup(s) for coverage.`
-                  : `✓ Good (${total} total)`}
+                  ? `⚠ ${optimal - total} more coverage player(s) recommended. Tap to review.`
+                  : `✓ Optimal coverage`}
             </Text>
-            {next && <Text style={styles.depthActionText}>Add backup: {displayPlayerName(next.name)}</Text>}
           </Pressable>
         );
       })}
       <View style={styles.depthRow}>
         <Text style={styles.depthGroup}>GOALKEEPER</Text>
         <Text style={styles.depthNames}>Primary: {players.filter(isGoalkeeperAllowed).map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
+        <Text style={styles.depthNames}>Recommendation: 2 keepers, both with M backup</Text>
         <Text style={[styles.depthStatus, players.filter(isGoalkeeperAllowed).length >= 2 ? styles.depthGood : styles.depthWarning]}>
-          {players.filter(isGoalkeeperAllowed).length >= 2 ? '✓ Good' : '⚠ Warning — Recommend another goalkeeper.'}
+          {players.filter(isGoalkeeperAllowed).length >= 2 ? '✓ Minimum keeper coverage' : '⚠ Add another goalkeeper'}
         </Text>
       </View>
     </View>
@@ -804,10 +828,14 @@ const styles = StyleSheet.create({
   healthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
   depthCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 13 },
   depthTitle: { color: palette.ink, fontSize: 17, fontWeight: '800', marginBottom: 10 },
+  depthSubtitle: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: -5 },
+  depthHint: { color: palette.muted, fontSize: 11, marginBottom: 8, marginTop: 4 },
   depthRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
   depthRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
   depthGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
   depthNeed: { color: palette.muted, fontSize: 11 },
+  depthBarTrack: { backgroundColor: palette.greenSoft, borderRadius: 4, height: 7, marginTop: 8, overflow: 'hidden' },
+  depthBarFill: { backgroundColor: palette.green, borderRadius: 4, height: 7 },
   depthNames: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   depthStatus: { fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 5 },
   depthCritical: { color: '#8f3928' },
