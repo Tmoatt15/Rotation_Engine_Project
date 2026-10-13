@@ -108,7 +108,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [healthExpanded, setHealthExpanded] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
-  const [editingNumber, setEditingNumber] = useState<string | null>(null);
+  const [expandedPlayerName, setExpandedPlayerName] = useState<string | null>(null);
   const filteredPlayers = useMemo(
     () => (filter === 'all' ? players : players.filter((player) => player.group === filter))
       .slice()
@@ -286,8 +286,17 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       const parsed = digits === '' ? undefined : Number(digits);
       const nextPlayers = players.map((player) => player.name === name ? { ...player, number: parsed === undefined ? undefined : Math.min(99, parsed) } : player);
       setPlayers(nextPlayers);
-      setEditingNumber(null);
       await saveRoster(nextPlayers, false);
+  }
+
+  async function togglePlayerExpanded(name: string) {
+    if (expandedPlayerName === name) {
+      setExpandedPlayerName(null);
+      await saveRoster(players, false);
+      return;
+    }
+    if (expandedPlayerName) await saveRoster(players, false);
+    setExpandedPlayerName(name);
   }
 
   const positionsNeedReview = formationConfigured && !rosterMatchesFormation(formation, players as Player[]);
@@ -364,12 +373,6 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               <Text style={styles.resultCount}>{filteredPlayers.length} shown</Text>
             </View>
 
-            <View style={styles.addPlayerCard}>
-              <TextInput value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={() => void addPlayer()} placeholder="Player name" placeholderTextColor={palette.muted} style={[styles.addInput, styles.addNameInput]} returnKeyType="done" />
-              <TextInput value={newPlayerNumber} onChangeText={(value) => setNewPlayerNumber(value.replace(/\D/g, '').slice(0, 2))} placeholder="#" placeholderTextColor={palette.muted} keyboardType="number-pad" style={[styles.addInput, styles.numberInput]} />
-              <Pressable onPress={() => void addPlayer()} disabled={!newPlayerName.trim() || saving} style={styles.addButton}><Text style={styles.addButtonText}>Add</Text></Pressable>
-            </View>
-
             {loading ? <Text style={styles.helperText}>Loading season roster...</Text> : players.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyText}>{error ?? 'No players were returned.'}</Text>
@@ -379,34 +382,15 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               </View>
             ) : <View style={styles.playerList}>
               {filteredPlayers.map((player, index) => {
+                const expanded = expandedPlayerName === player.name;
                 return (
                   <View key={player.name} style={[styles.playerRow, index === filteredPlayers.length - 1 && styles.lastRow]}>
-                    <View style={styles.playerLeft}>
-                      <View style={styles.nameLine}>
-                        <Text style={styles.playerName} numberOfLines={1}>{displayPlayerName(player.name)}</Text>
-                        {editingNumber === player.name ? (
-                          <TextInput autoFocus defaultValue={player.number === undefined ? '' : String(player.number)} onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)} keyboardType="number-pad" style={styles.numberEdit} />
-                        ) : (
-                          <Pressable onPress={() => setEditingNumber(player.name)} accessibilityLabel={`Edit jersey number for ${player.name}`}>
-                            <Text style={styles.numberBadge}>{player.number === undefined ? '#' : `#${player.number}`}</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                      <Pressable
-                        onPress={() => toggleGoalkeeper(player.name)}
-                        style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
-                        accessibilityRole="switch"
-                        accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
-                        accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
-                        <SymbolView
-                          name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }}
-                          size={12}
-                          tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted}
-                        />
-                        <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
-                      </Pressable>
-                    </View>
-                    <View style={styles.playerRight}>
+                    <Pressable onPress={() => void togglePlayerExpanded(player.name)} style={styles.compactPlayerHeader} accessibilityRole="button" accessibilityState={{ expanded }}>
+                      <Text style={styles.numberBadge}>{player.number === undefined ? '' : `#${player.number}`}</Text>
+                      <Text style={styles.playerName} numberOfLines={1}>{displayPlayerName(player.name)}</Text>
+                      <Text style={styles.disclosure}>{expanded ? '⌃' : '›'}</Text>
+                    </Pressable>
+                    {expanded && <View style={styles.expandedPlayer}>
                       <View style={styles.groupPicker}>
                         {(Object.keys(groupLabels) as Filter[]).filter((group): group is Group => group !== 'all').map((group) => (
                           <Pressable key={group} onPress={() => updateGroup(player.name, group)} style={[styles.groupOption, player.group === group && { backgroundColor: groupColors[group].background }]}>
@@ -421,6 +405,15 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                         ))}
                       </View>
                       <PositionField label="General" value={player.general_positions} onPress={() => openPositionPicker(player, 'general_positions')} />
+                      <Pressable
+                        onPress={() => toggleGoalkeeper(player.name)}
+                        style={[styles.gkButton, isGoalkeeperAllowed(player) && styles.gkButtonSelected]}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: isGoalkeeperAllowed(player) }}
+                        accessibilityLabel={`${displayPlayerName(player.name)} goalkeeper eligibility`}>
+                        <SymbolView name={{ ios: 'checkmark.shield', android: 'verified_user', web: 'verified_user' }} size={12} tintColor={isGoalkeeperAllowed(player) ? palette.panel : palette.muted} />
+                        <Text style={[styles.gkButtonText, isGoalkeeperAllowed(player) && styles.gkButtonTextSelected]}>{isGoalkeeperAllowed(player) ? 'GK Yes' : 'GK No'}</Text>
+                      </Pressable>
                       {formationConfigured ? (
                         <>
                           <PositionField label="Primary" value={withoutGoalkeeper(player.primary_positions)} onPress={() => openPositionPicker(player, 'primary_positions')} />
@@ -428,10 +421,23 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           <PositionField label="Excluded" value={player.excluded_positions} onPress={() => openPositionPicker(player, 'excluded_positions')} />
                         </>
                       ) : null}
-                    </View>
+                      <TextInput
+                        defaultValue={player.number === undefined ? '' : String(player.number)}
+                        onEndEditing={(event) => void savePlayerNumber(player.name, event.nativeEvent.text)}
+                        keyboardType="number-pad"
+                        placeholder="Jersey number"
+                        placeholderTextColor={palette.muted}
+                        style={styles.numberInput}
+                      />
+                    </View>}
                   </View>
                 );
               })}
+            </View>}
+            {!loading && <View style={styles.addPlayerCard}>
+              <TextInput value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={() => void addPlayer()} placeholder="Player name" placeholderTextColor={palette.muted} style={[styles.addInput, styles.addNameInput]} returnKeyType="done" />
+              <TextInput value={newPlayerNumber} onChangeText={(value) => setNewPlayerNumber(value.replace(/\D/g, '').slice(0, 2))} placeholder="#" placeholderTextColor={palette.muted} keyboardType="number-pad" style={[styles.addInput, styles.numberInput]} />
+              <Pressable onPress={() => void addPlayer()} disabled={!newPlayerName.trim() || saving} style={styles.addButton}><Text style={styles.addButtonText}>Add</Text></Pressable>
             </View>}
             {message && <Text style={styles.successText}>{message}</Text>}
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -746,8 +752,11 @@ const styles = StyleSheet.create({
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
   resultCount: { color: palette.muted, fontSize: 11 },
   playerList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, overflow: 'hidden' },
-  playerRow: { alignItems: 'stretch', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', gap: 10, minHeight: 75, paddingHorizontal: 13, paddingVertical: 10 },
+  playerRow: { borderBottomColor: palette.line, borderBottomWidth: 1, paddingHorizontal: 13 },
   lastRow: { borderBottomWidth: 0 },
+  compactPlayerHeader: { alignItems: 'center', flexDirection: 'row', minHeight: 52 },
+  disclosure: { color: palette.muted, fontSize: 24, marginLeft: 8 },
+  expandedPlayer: { paddingBottom: 12 },
   playerLeft: { flex: 0.67, minWidth: 0 },
   playerRight: { alignItems: 'flex-start', flex: 1, minWidth: 0 },
   avatarColumn: { alignItems: 'center', width: 72 },
