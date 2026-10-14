@@ -1,5 +1,8 @@
 import type { DemandModel, NormalizedGame, NormalizedPlayer, PlayerQuota, QuotaAssignment, RedesignZone } from './model';
 import { ZONE_POSITIONS } from './stage1';
+import { createPlayer } from '../engine/rotation';
+import { buildTimeline } from '../engine/timeline';
+import type { Game, Player } from '../engine/models';
 
 export interface FrozenBlock {
   block: number;
@@ -26,6 +29,7 @@ function reserveShortPositionGroups(
       if (primary) supply.set(group, (supply.get(group) ?? 0) + max);
       else if (backup) supply.set(group, (supply.get(group) ?? 0) + max * 0.5);
     }
+
   }
   const reservations = new Map<string, 'D' | 'M' | 'F'>();
   for (const group of groups) {
@@ -46,6 +50,62 @@ function reserveShortPositionGroups(
     }
   }
   return reservations;
+}
+
+function shippingBasicPlacement(game: NormalizedGame, demand: DemandModel, quotas: QuotaAssignment): PlacementBlock[] | null {
+  const shippingPlayers: Player[] = game.players.map((player) => {
+    const keeper = player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper;
+    const shippingPlayer = createPlayer({
+      name: player.name,
+      group: player.group === 'developing' ? 'developing' : player.group,
+      general_positions: player.generalPositions,
+      primary_positions: keeper ? [...new Set([...player.primaryPositions, 'GK'])] : player.primaryPositions,
+      backup_positions: player.backupPositions,
+      excluded_positions: player.excludedPositions,
+      keeper_eligible: player.keeperEligible,
+    });
+    const quota = quotas.quotas.find((candidate) => candidate.player === player.name);
+    if (quota) {
+      shippingPlayer.target_blocks = quota.fieldMin;
+      shippingPlayer.minimum_blocks = quota.fieldMin;
+      shippingPlayer.hard_minimum_blocks = quota.fieldMin;
+      shippingPlayer.maximum_blocks = quota.fieldMax;
+      shippingPlayer.hard_maximum_blocks = quota.fieldMax;
+      shippingPlayer.max_blocks_per_half = game.totalBlocks;
+    }
+    return shippingPlayer;
+  });
+  const shippingGame: Game = {
+    total_blocks: game.totalBlocks,
+    formation: game.formation,
+    game_format: game.format,
+    has_goalkeeper: Boolean(game.firstHalfKeeper || game.secondHalfKeeper),
+    gk_assignment: null,
+    first_half_gk: game.firstHalfKeeper,
+    second_half_gk: game.secondHalfKeeper,
+    season_total_games: 1,
+    season_game_number: 1,
+    season_seed: 2026,
+    allow_emergency_assignments: false,
+    disable_maximum_limits: false,
+    core_high_names: null,
+    replacement_credits: [],
+    replacement_bonuses: {},
+    availability_changes: [],
+    quota_exempt_players: new Set<string>(),
+    timeline: [],
+  };
+  const result = buildTimeline(shippingGame, shippingPlayers);
+  if (result.timeline.length !== game.totalBlocks || result.errors.length > 0) return null;
+  const blocks = result.timeline.map((block, index) => ({
+    block: index + 1,
+    assignments: new Map<string, string>(
+      demand.fieldSlots.map((slot) => [slot.slot, block.positions[slot.slot] ?? 'UNASSIGNED']),
+    ),
+  }));
+  if (blocks.some((block) => [...block.assignments.values()].some((player) => player === 'UNASSIGNED')
+    || new Set(block.assignments.values()).size !== demand.slotsPerBlock)) return null;
+  return blocks;
 }
 
 export interface PlacementBlock {
@@ -676,6 +736,25 @@ export function placeStage3(
   allowRelaxedMinimums = false,
 ): PlacementResult {
   const restPins = deriveRestPins(game, quotas);
+  const basicShippingPath = game.format === '9v9'
+    && frozen.length === 0
+    && quotas.quotas.every((quota) => quota.pinnedBlocks.length === 0)
+    && game.players.every((player) => player.restPreset === 'none');
+  if (basicShippingPath) {
+    const shippingBlocks = shippingBasicPlacement(game, demand, quotas);
+    if (shippingBlocks) {
+      return {
+        blocks: shippingBlocks,
+        complete: true,
+        audit: {
+          restPins,
+          softRestFallback: softRest,
+          outOfPositionBlocks: {},
+          errors: [],
+        },
+      };
+    }
+  }
   const rest = new Map(restPins.map((pin) => [pin.player, new Set(pin.blocks)]));
   const pinnedByBlock = new Map<number, Set<string>>();
   for (const quota of quotas.quotas) {
