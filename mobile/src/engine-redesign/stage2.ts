@@ -38,7 +38,7 @@ function endpointPins(game: NormalizedGame, player: NormalizedPlayer): number[] 
   return [1, game.totalBlocks];
 }
 
-export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0): QuotaAssignment {
+export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0, allowRelaxedMinimums = false): QuotaAssignment {
   const available = game.players.filter((player) => player.available);
   const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player));
   const fieldSlots = demand.slotsPerBlock * game.totalBlocks;
@@ -55,7 +55,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     targets.set(player.name, base.get(player.name)!.min);
   }
   const sum = (key: 'min' | 'max'): number => [...base.values()].reduce((total, value) => total + value[key], 0);
-  const audit: QuotaAssignment['audit'] = { relaxedGroups: [], surplusAssignments: [], unfillableWithinMax: 0 };
+  const audit: QuotaAssignment['audit'] = { relaxedGroups: [], relaxedPlayers: [], surplusAssignments: [], unfillableWithinMax: 0 };
   if (sum('min') < fieldSlots) {
     let remaining = fieldSlots - sum('min');
     for (const group of ['core', 'rotational', 'developing'] as const) {
@@ -74,7 +74,10 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     audit.unfillableWithinMax = remaining;
   } else if (sum('min') > fieldSlots) {
     const order: RedesignGroup[] = ['developing', 'rotational', 'core'];
-    const startingPercent: Record<RedesignGroup, number> = { core: 70, rotational: 60, developing: 50 };
+    const startingPercent: Record<RedesignGroup, number> = allowRelaxedMinimums
+      ? { core: 60, rotational: 50, developing: 40 }
+      : { core: 70, rotational: 60, developing: 50 };
+    const initialMinimums = new Map(fieldPlayers.map((player) => [player.name, base.get(player.name)!.min]));
     const groupPercent = { ...startingPercent };
     const reduceStep = (minimumPercent: number): void => {
       const group = order[steps % order.length];
@@ -88,7 +91,6 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       for (const player of fieldPlayers.filter((candidate) => candidate.group === group && !isHalfKeeper(game, candidate, demand))) {
         const value = base.get(player.name)!;
         if (value.min > target) {
-          audit.relaxedGroups.push({ group, amount: value.min - target });
           value.min = target;
         }
       }
@@ -101,6 +103,15 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       if (Object.values(groupPercent).every((percent) => percent === 0)) break;
       reduceStep(0);
     }
+    for (const group of ['core', 'rotational', 'developing'] as const) {
+      const amount = fieldPlayers
+        .filter((player) => player.group === group)
+        .reduce((total, player) => total + (initialMinimums.get(player.name)! - base.get(player.name)!.min), 0);
+      if (amount > 0) audit.relaxedGroups.push({ group, amount });
+    }
+    audit.relaxedPlayers = fieldPlayers
+      .map((player) => ({ player: player.name, group: player.group, before: initialMinimums.get(player.name)!, after: base.get(player.name)!.min }))
+      .filter((entry) => entry.before > entry.after);
   }
   const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
     const value = base.get(player.name)!;

@@ -96,6 +96,7 @@ export interface DemandModel {
 
 export interface QuotaAudit {
   relaxedGroups: Array<{ group: RedesignGroup; amount: number }>;
+  relaxedPlayers?: Array<{ player: string; group: RedesignGroup; before: number; after: number }>;
   surplusAssignments: Array<{ group: RedesignGroup; player: string; amount: number }>;
   unfillableWithinMax: number;
 }

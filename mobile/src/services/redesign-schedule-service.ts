@@ -233,10 +233,10 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, placement: Retur
   });
 }
 
-function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>) {
+function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums = false) {
   let last: { placement: ReturnType<typeof runStages3And4>; quotas: ReturnType<typeof assignQuotas>; tier: number } | null = null;
   for (let tier = 0; tier <= 3; tier += 1) {
-    const quotas = assignQuotas(game, demand, tier);
+    const quotas = assignQuotas(game, demand, tier, allowRelaxedMinimums);
     const placement = runStages3And4(game, demand, quotas);
     placement.audit.relaxationTier = tier;
     last = { placement, quotas, tier };
@@ -272,18 +272,21 @@ type RedesignSchedule = LiveSchedule & { warnings: string[]; errors: string[]; a
 
 export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean }): Promise<RedesignSchedule> {
   const { settings, team, game, demand } = await context(input);
-  const { placement } = placementWithTierFallback(game, demand);
+  const { placement, quotas } = placementWithTierFallback(game, demand, input.allowRelaxedMinimums);
   if (!placement.complete) {
     const offer = generationFailureOffer(game, demand, input.allowRelaxedMinimums);
     if (input.allowRelaxedMinimums && offer.kind === 'impossible') throw new RedesignOfferError(relaxedGenerationFailureOffer());
     throw new RedesignOfferError(offer);
   }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
+  const relaxedWarnings = input.allowRelaxedMinimums && quotas.audit.relaxedPlayers?.length
+    ? [`Minimums relaxed for: ${quotas.audit.relaxedPlayers.map((entry) => `${entry.player} (${entry.before} -> ${entry.after} blocks)`).join(', ')}.`]
+    : [];
   return {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name),
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
-    blocks: scheduleBlocks(game, placement), warnings: ['Engine: redesign (Stages 0–6)'], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
+    blocks: scheduleBlocks(game, placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedWarnings], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
 }
 
