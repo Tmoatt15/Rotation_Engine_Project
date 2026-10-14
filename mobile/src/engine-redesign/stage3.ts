@@ -270,7 +270,13 @@ function placeDeterministically(
     }
   }
   const order = groupOrder(game, demand);
-  const coreRestsPerBlock = new Map<number, number>();
+  const groupRestsPerBlock = new Map<string, number>();
+  for (const player of game.players) {
+    for (const block of rest.get(player.name) ?? []) {
+      const key = `${player.group}:${block}`;
+      groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+    }
+  }
   const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F'): number[] => {
     const needed = state.remainingMin.get(player.name) ?? 0;
     const frozenBlocks = new Set(frozen.map((block) => block.block));
@@ -293,8 +299,8 @@ function placeDeterministically(
         .map((block, candidateIndex) => ({ block, candidateIndex }))
         .filter(({ block }) => !selected.has(block))
         .sort((left, right) => {
-          const leftLoad = player.group === 'core' ? (coreRestsPerBlock.get(left.block) ?? 0) : 0;
-          const rightLoad = player.group === 'core' ? (coreRestsPerBlock.get(right.block) ?? 0) : 0;
+          const leftLoad = groupRestsPerBlock.get(`${player.group}:${left.block}`) ?? 0;
+          const rightLoad = groupRestsPerBlock.get(`${player.group}:${right.block}`) ?? 0;
           return Number(leftLoad >= 2) - Number(rightLoad >= 2)
             || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
             || left.block - right.block;
@@ -302,7 +308,8 @@ function placeDeterministically(
       const choice = candidates[0]?.block;
       if (choice === undefined) continue;
       selected.add(choice);
-      if (player.group === 'core') coreRestsPerBlock.set(choice, (coreRestsPerBlock.get(choice) ?? 0) + 1);
+      const key = `${player.group}:${choice}`;
+      groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
     }
     return eligible.filter((block) => !selected.has(block));
   };
