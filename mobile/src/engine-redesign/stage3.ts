@@ -97,6 +97,12 @@ interface PlacementState {
   slack?: number;
 }
 
+const FEASIBLE_DIAGNOSTICS = true;
+
+function feasibleLog(message: string): void {
+  if (FEASIBLE_DIAGNOSTICS) console.log(`[feasible] ${message}`);
+}
+
 function groupForSlot(slot: string): 'D' | 'M' | 'F' {
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
   if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
@@ -286,12 +292,48 @@ function futureFeasible(
   fromBlock: number,
   softRest: boolean,
   pinnedByBlock: Map<number, Set<string>>,
+  decision?: { block: number; candidate: string },
 ): boolean {
+  const decisionLabel = decision ? ` at Block ${decision.block} after ${decision.candidate}` : '';
+  const remainingSummary = [...state.remainingMin.entries()]
+    .map(([name, minimum]) => `${name}: min ${minimum}, max ${state.remainingMax.get(name) ?? 0}`)
+    .join(', ');
+  const filledBlocks = blocks.map((block) => block.block).join(', ') || 'none';
+  const keeperSummary = [game.firstHalfKeeper, game.secondHalfKeeper]
+    .filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index)
+    .map((name) => {
+      const minimum = state.remainingMin.get(name) ?? 0;
+      const eligible = Array.from({ length: game.totalBlocks - fromBlock }, (_, index) => fromBlock + index + 1)
+        .filter((block) => !isOppositeHalfKeeper(game, game.players.find((player) => player.name === name)!, block)
+          && (softRest || !rest.get(name)?.has(block))).length;
+      return `${name}: ${eligible} eligible blocks, ${minimum} min needed`;
+    }).join('; ') || 'none';
+  const reject = (reason: string, futureBlock?: number, futureSlot?: string): false => {
+    feasibleLog(`REJECT${decisionLabel}: ${reason}`);
+    if (futureBlock !== undefined && futureSlot) {
+      feasibleLog(`  Future slot: Block ${futureBlock}, slot ${futureSlot}`);
+      const existing = blocks.find((block) => block.block === futureBlock)?.assignments;
+      for (const player of players) {
+        let playerReason = 'unknown';
+        if (positionTier(player, futureSlot) === 0) playerReason = 'wrong-position';
+        else if (excludedFromSlot(player, futureSlot)) playerReason = 'excluded';
+        else if (isOppositeHalfKeeper(game, player, futureBlock)) playerReason = 'opposite-half-keeper';
+        else if (!softRest && rest.get(player.name)?.has(futureBlock)) playerReason = 'rest-pin';
+        else if ((state.remainingMax.get(player.name) ?? 0) <= 0) playerReason = 'max-reached';
+        else if (existing?.has(player.name)) playerReason = 'already-assigned';
+        feasibleLog(`    ${player.name}: ${playerReason}`);
+      }
+    }
+    feasibleLog(`  Remaining mins/maxes: ${remainingSummary}`);
+    feasibleLog(`  Blocks placed: ${filledBlocks}`);
+    feasibleLog(`  Half-keeper windows: ${keeperSummary}`);
+    return false;
+  };
   const futurePinnedSlots = Array.from({ length: game.totalBlocks - fromBlock }, (_, index) => fromBlock + index + 1)
     .reduce((total, block) => total + (pinnedByBlock.get(block)?.size ?? 0), 0);
   const remainingSlots = demand.slotsPerBlock * (game.totalBlocks - fromBlock) - futurePinnedSlots;
   const totalMax = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0);
-  if (totalMax < remainingSlots) return false;
+  if (totalMax < remainingSlots) return reject(`maximum-capacity-exhausted: total max ${totalMax} < remaining slots ${remainingSlots}`);
   for (const player of players) {
     const minimum = state.remainingMin.get(player.name) ?? 0;
     if (!minimum) continue;
@@ -312,8 +354,9 @@ function futureFeasible(
             pinnedByBlock.get(block)?.has(player.name) ?? false,
           ));
       }).length;
-    if (eligibleBlocks < minimum) return false;
+    if (eligibleBlocks < minimum) return reject(`minimum-window-exhausted: ${player.name} has ${eligibleBlocks} eligible blocks for ${minimum} minimum`, fromBlock + 1, 'any eligible slot');
   }
+  let rejectionCount = 0;
   for (let block = fromBlock + 1; block <= game.totalBlocks; block += 1) {
     const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
     for (const slot of demand.fieldSlots.map((candidate) => candidate.slot)) {
@@ -329,7 +372,12 @@ function futureFeasible(
         softRest,
         pinnedByBlock,
         pinnedByBlock.get(block)?.has(player.name) ?? false,
-      ))) return false;
+      ))) {
+        rejectionCount += 1;
+        const result = reject(`no-eligible-player (rejection ${rejectionCount})`, block, slot);
+        feasibleLog(`  Total future-slot rejections in this check: ${rejectionCount}`);
+        return result;
+      }
     }
   }
   return true;
@@ -641,7 +689,10 @@ export function placeStage3(
       }
       const nextState = cloneState(currentState);
       const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, new Set(), true);
-      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock))) return null;
+      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock, {
+        block: blockNumber,
+        candidate: [...candidate.assignments.values()].join(', ') || 'none',
+      }))) return null;
       return searchFeasible(blockNumber + 1, [...currentBlocks, candidate], nextState);
     };
     return searchFeasible(1, [], cloneState(state));
@@ -670,7 +721,10 @@ export function placeStage3(
       if (excluded.size && depth >= 2) continue;
       const nextState = cloneState(snapshot);
       const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, excluded);
-      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock))) continue;
+      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock, {
+        block: blockNumber,
+        candidate: [...candidate.assignments.values()].join(', ') || 'none',
+      }))) continue;
       const result = search(blockNumber + 1, [...currentBlocks, candidate], nextState, excluded.size ? depth + 1 : depth);
       if (result) {
         const score = turnoverScore(result);
