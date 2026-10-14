@@ -361,6 +361,23 @@ function placeBlock(
     }
     return true;
   };
+  const constrainedness = (player: NormalizedPlayer): number => {
+    const eligibleBlocksRemaining = Array.from({ length: game.totalBlocks - blockNumber + 1 }, (_, index) => blockNumber + index)
+      .filter((block) => !isDedicatedKeeper(player)
+        && !isOppositeHalfKeeper(game, player, block)
+        && !rest.get(player.name)?.has(block)
+        && demand.fieldSlots.some((candidate) => isEligible(player, candidate.slot)))
+      .length;
+    return eligibleBlocksRemaining - (state.remainingMin.get(player.name) ?? 0);
+  };
+  const constrainedPriority = (player: NormalizedPlayer): number => {
+    const isHalfKeeper = player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper;
+    return isHalfKeeper && constrainedness(player) <= 0 ? 0 : 1;
+  };
+  const constrainedOrdering = (left: NormalizedPlayer, right: NormalizedPlayer): number => {
+    if (constrainedPriority(left) !== 0 || constrainedPriority(right) !== 0) return 0;
+    return constrainedness(left) - constrainedness(right);
+  };
   for (const playerName of [...pinned].sort()) {
     if (excludedCandidates.has(playerName)) return null;
     const player = players.find((candidate) => candidate.name === playerName);
@@ -382,11 +399,15 @@ function placeBlock(
     const candidates = players
       .filter((player) => !excludedCandidates.has(player.name) && candidateAllowed(game, player, slot, blockNumber, assigned, state, rest, softRest, pinnedByBlock))
       .sort((left, right) => feasibilityMode
-        ? (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
-          || ((state.remainingMax.get(left.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0))
-            - ((state.remainingMax.get(right.name) ?? 0) - (state.remainingMin.get(right.name) ?? 0))
-          || left.name.localeCompare(right.name)
-        : compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
+          ? constrainedPriority(left) - constrainedPriority(right)
+            || constrainedOrdering(left, right)
+            || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
+            || ((state.remainingMax.get(left.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0))
+              - ((state.remainingMax.get(right.name) ?? 0) - (state.remainingMin.get(right.name) ?? 0))
+            || left.name.localeCompare(right.name)
+          : constrainedPriority(left) - constrainedPriority(right)
+            || constrainedOrdering(left, right)
+            || compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
   return { block: blockNumber, assignments };
