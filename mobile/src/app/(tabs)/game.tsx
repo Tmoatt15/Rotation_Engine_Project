@@ -12,7 +12,6 @@ import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
-import { isRedesignEngineEnabled, setRedesignEngineEnabled } from '@/services/redesign-feature-flag';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
 
@@ -100,7 +99,9 @@ export default function GameScreen() {
   const [capacityWarnings, setCapacityWarnings] = useState<string[]>([]);
   const [capacityDeficits, setCapacityDeficits] = useState<PositionCapacityDeficit[]>([]);
   const [showCapacityWarning, setShowCapacityWarning] = useState(false);
-  const [useRedesignEngine, setUseRedesignEngine] = useState(isRedesignEngineEnabled);
+  // TEMPORARY (2026-10-14): Shipping engine hidden per Tim's request.
+  // To restore: re-enable the engine selector below and restore the feature-flag state.
+  const useRedesignEngine = true;
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
   const gameScrollRef = useRef<ScrollView>(null);
@@ -444,18 +445,14 @@ export default function GameScreen() {
               )}
             </View>}
 
-            <Pressable
-              onPress={() => {
-                const next = !useRedesignEngine;
-                setUseRedesignEngine(next);
-                setRedesignEngineEnabled(next);
-              }}
+            {false && <Pressable
+              onPress={() => undefined}
               style={styles.engineToggle}
               accessibilityRole="switch"
               accessibilityState={{ checked: useRedesignEngine }}>
               <Text style={styles.engineToggleLabel}>ENGINE</Text>
-              <Text style={styles.engineToggleValue}>{useRedesignEngine ? 'REDESIGN (Stages 0–6)' : 'SHIPPING ENGINE'}</Text>
-            </Pressable>
+              <Text style={styles.engineToggleValue}>REDESIGN (Stages 0–6)</Text>
+            </Pressable>}
 
             {loadingRoster ? <Text style={styles.helperText}>Loading season roster...</Text> : <View style={styles.playerList}>
               {playerNames.map((name, index) => {
