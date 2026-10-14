@@ -97,7 +97,7 @@ interface PlacementState {
   slack?: number;
 }
 
-const FEASIBLE_DIAGNOSTICS = true;
+const FEASIBLE_DIAGNOSTICS = false;
 
 function feasibleLog(message: string): void {
   if (FEASIBLE_DIAGNOSTICS) console.log(`[feasible] ${message}`);
@@ -686,7 +686,7 @@ export function placeStage3(
   const blocks: PlacementBlock[] = [];
   const frozenByBlock = new Map(frozen.map((block) => [block.block, block]));
   const reservedGroups = reserveShortPositionGroups(game, demand, quotas);
-  const playerCentric = game.players.length === 12 ? null : placeByTier(game, demand, quotas, frozen, softRest, reservedGroups);
+  const playerCentric = placeByTier(game, demand, quotas, frozen, softRest, reservedGroups);
   if (playerCentric) {
     return {
       blocks: playerCentric,
@@ -783,7 +783,14 @@ export function placeStage3(
   };
   const feasibleBlocks = findFeasible();
   const resultBlocks = feasibleBlocks ?? search(1, blocks, state, 0);
-  const errors: string[] = resultBlocks ? [] : ['Unable to place the schedule without stranding a future slot.'];
+  const unfilledMinimums = quotas.quotas
+    .filter((quota) => quota.remainingMin > 0)
+    .map((quota) => `${quota.player} needs ${quota.remainingMin} field blocks`);
+  const errors: string[] = resultBlocks
+    ? []
+    : [`Cannot complete placement: ${unfilledMinimums.length
+      ? unfilledMinimums.join(', ')
+      : 'no eligible slot was available for a required assignment'}. Quotas may be infeasible.`];
   const failureReason = resultBlocks ? undefined : (() => {
     const remainingSlots = demand.slotsPerBlock * game.totalBlocks - quotas.quotas.reduce((total, quota) => total + quota.pinnedBlocks.length, 0);
     const totalMax = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0);
