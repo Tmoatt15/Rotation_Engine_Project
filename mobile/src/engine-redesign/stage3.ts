@@ -83,6 +83,14 @@ export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 
   return 0;
 }
 
+function slotPriority(player: NormalizedPlayer, slot: string): number {
+  const group = groupForSlot(slot);
+  if (player.primaryPositions.some((position) => position !== 'ANY' && position === slot)) return 3;
+  if (positionTier(player, slot) === 2) return 2;
+  if (player.backupPositions.some((position) => position === slot)) return 1;
+  return player.generalPositions.includes(group) ? 1 : 0;
+}
+
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
@@ -252,7 +260,7 @@ function placeDeterministically(
       if (!player || assignmentsHasPlayer(block.assignments, name) || isKeeperHalf(game, player, blockNumber)) continue;
       const slot = demand.fieldSlots
         .filter((candidate) => candidate.group === groupForSlot(candidate.slot) && !block.assignments.has(candidate.slot))
-        .sort((left, right) => positionTier(player, right.slot) - positionTier(player, left.slot))
+        .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot))
         .find((candidate) => isEligible(player, candidate.slot));
       if (!slot) continue;
       block.assignments.set(slot.slot, player.name);
@@ -313,7 +321,7 @@ function placeDeterministically(
         for (const blockNumber of playBlocks) {
           if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
           const slots = demand.fieldSlots.filter((slot) => slot.group === group && !blocks[blockNumber - 1].assignments.has(slot.slot))
-            .sort((left, right) => positionTier(player, right.slot) - positionTier(player, left.slot));
+            .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
           const slot = slots.find((candidate) => canPlace(player, blockNumber, candidate.slot));
           if (slot) assign(player, blockNumber, slot.slot);
         }
@@ -328,7 +336,7 @@ function placeDeterministically(
         .sort((left, right) => Number(previous?.has(left.name)) - Number(previous?.has(right.name))
           || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
           || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
-          || positionTier(right, slot.slot) - positionTier(left, slot.slot)
+          || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name));
       if (candidates[0]) assign(candidates[0], block.block, slot.slot);
       else console.log(`[placement] Unfilled: Block ${block.block}, slot ${slot.slot}. No eligible player with remaining capacity.`);
