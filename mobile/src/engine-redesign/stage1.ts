@@ -25,7 +25,7 @@ function slotsForFormation(formation: string): string[] {
   const numbers = formation.split('-').map(Number);
   if (numbers.length === 2) return [...Array.from({ length: numbers[0] }, (_, index) => `D${index + 1}`), ...Array.from({ length: numbers[1] }, (_, index) => `F${index + 1}`)];
   const [defenders, midfielders, forwards] = numbers;
-  const defense = defenders === 4 ? ['LB', 'LCB', 'RCB', 'RB'] : defenders === 3 ? ['LCB', 'CB', 'RCB'] : Array.from({ length: defenders }, (_, index) => `D${index + 1}`);
+  const defense = defenders === 4 ? ['LB', 'LCB', 'RCB', 'RB'] : defenders === 3 ? ['LB', 'CB', 'RB'] : Array.from({ length: defenders }, (_, index) => `D${index + 1}`);
   const midfield = midfielders === 4 ? ['LM', 'LCM', 'RCM', 'RM'] : midfielders === 3 ? ['LM', 'CM', 'RM'] : Array.from({ length: midfielders }, (_, index) => `M${index + 1}`);
   const attack = forwards === 3 ? ['LF', 'CF', 'RF'] : forwards === 2 ? ['LF', 'RF'] : forwards === 1 ? ['ST'] : Array.from({ length: forwards }, (_, index) => `F${index + 1}`);
   return [...defense, ...midfield, ...attack];
