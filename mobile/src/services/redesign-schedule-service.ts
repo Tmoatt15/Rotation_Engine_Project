@@ -175,10 +175,11 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   };
 }
 
-function relaxedGenerationFailureOffer(): Stage6Offer {
+function relaxedGenerationFailureOffer(placementError?: string): Stage6Offer {
+  const detail = placementError ? ` (${placementError})` : '';
   return {
     kind: 'impossible',
-    message: "Even with relaxed minimums, a schedule couldn't be generated. Try adding more backup positions.",
+    message: `Even with relaxed minimums, a schedule couldn't be generated${detail}. Try adding more backup positions.`,
     buttons: [
       { label: 'Add Backup Positions', action: 'go-to-builder' },
       { label: 'Cancel', action: 'cancel' },
@@ -274,9 +275,14 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   const { settings, team, game, demand } = await context(input);
   const { placement, quotas } = placementWithTierFallback(game, demand, input.allowRelaxedMinimums);
   if (!placement.complete) {
+    const placementErrors = placement.audit.errors ?? [];
+    const placementError = placementErrors.map((error) => error.trim()).find(Boolean);
+    console.error('[redesign] placement failed:', placementErrors);
     const offer = generationFailureOffer(game, demand, input.allowRelaxedMinimums);
-    if (input.allowRelaxedMinimums && offer.kind === 'impossible') throw new RedesignOfferError(relaxedGenerationFailureOffer());
-    throw new RedesignOfferError(offer);
+    if (input.allowRelaxedMinimums && offer.kind === 'impossible') throw new RedesignOfferError(relaxedGenerationFailureOffer(placementError));
+    throw new RedesignOfferError(placementError && offer.kind === 'impossible'
+      ? { ...offer, message: `${offer.message}\n\nPlacement detail: ${placementError}` }
+      : offer);
   }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
   const relaxedWarnings = input.allowRelaxedMinimums && quotas.audit.relaxedPlayers?.length
