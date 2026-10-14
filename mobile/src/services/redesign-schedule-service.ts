@@ -238,10 +238,19 @@ function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, deman
   let last: { placement: ReturnType<typeof runStages3And4>; quotas: ReturnType<typeof assignQuotas>; tier: number } | null = null;
   for (let tier = 0; tier <= 3; tier += 1) {
     const quotas = assignQuotas(game, demand, tier, allowRelaxedMinimums);
-    const placement = runStages3And4(game, demand, quotas, [], allowRelaxedMinimums);
-    placement.audit.relaxationTier = tier;
-    last = { placement, quotas, tier };
-    if (placement.complete) return last;
+    const strictPlacement = runStages3And4(game, demand, quotas, [], false);
+    strictPlacement.audit.relaxationTier = tier;
+    last = { placement: strictPlacement, quotas, tier };
+    if (strictPlacement.complete) return last;
+    if (allowRelaxedMinimums) {
+      const relaxedPlacement = runStages3And4(game, demand, quotas, [], true);
+      relaxedPlacement.audit.relaxationTier = tier;
+      if (relaxedPlacement.complete) {
+        relaxedPlacement.audit.relaxedLookaheadFallback = true;
+        return { placement: relaxedPlacement, quotas, tier };
+      }
+      last = { placement: relaxedPlacement, quotas, tier };
+    }
   }
   return last!;
 }
@@ -288,6 +297,7 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   const relaxedWarnings = input.allowRelaxedMinimums && quotas.audit.relaxedPlayers?.length
     ? [`Minimums relaxed for: ${quotas.audit.relaxedPlayers.map((entry) => `${entry.player} (${entry.before} -> ${entry.after} blocks)`).join(', ')}.`]
     : [];
+  if (placement.audit.relaxedLookaheadFallback) relaxedWarnings.push('Used relaxed placement look-ahead.');
   return {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name),

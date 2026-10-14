@@ -64,6 +64,8 @@ export interface PlacementAudit {
   outOfPositionBlocks: Record<string, number>;
   errors: string[];
   relaxationTier?: number;
+  relaxedLookaheadFallback?: boolean;
+  failureReason?: 'no-eligible-player' | 'minimum-window-exhausted' | 'maximum-capacity-exhausted' | 'search-budget-exhausted';
 }
 
 export interface PlacementResult {
@@ -294,9 +296,22 @@ function futureFeasible(
     const minimum = state.remainingMin.get(player.name) ?? 0;
     if (!minimum) continue;
     const eligibleBlocks = Array.from({ length: game.totalBlocks - fromBlock }, (_, index) => fromBlock + index + 1)
-      .filter((block) => !isDedicatedKeeper(player)
-        && !((block <= game.totalBlocks / 2 ? game.firstHalfKeeper : game.secondHalfKeeper) === player.name)
-        && (softRest || !rest.get(player.name)?.has(block))).length;
+      .filter((block) => {
+        const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
+        return demand.fieldSlots.some((slot) => !existing?.has(slot.slot)
+          && candidateAllowed(
+            game,
+            player,
+            slot.slot,
+            block,
+            new Set(existing?.values()),
+            state,
+            rest,
+            softRest,
+            pinnedByBlock,
+            pinnedByBlock.get(block)?.has(player.name) ?? false,
+          ));
+      }).length;
     if (eligibleBlocks < minimum) return false;
   }
   for (let block = fromBlock + 1; block <= game.totalBlocks; block += 1) {
@@ -671,6 +686,23 @@ export function placeStage3(
   const feasibleBlocks = findFeasible();
   const resultBlocks = feasibleBlocks ?? search(1, blocks, state, 0);
   const errors: string[] = resultBlocks ? [] : ['Unable to place the schedule without stranding a future slot.'];
+  const failureReason = resultBlocks ? undefined : (() => {
+    const remainingSlots = demand.slotsPerBlock * game.totalBlocks - quotas.quotas.reduce((total, quota) => total + quota.pinnedBlocks.length, 0);
+    const totalMax = [...state.remainingMax.values()].reduce((sum, value) => sum + value, 0);
+    if (totalMax < remainingSlots) return 'maximum-capacity-exhausted' as const;
+    for (const player of players) {
+      const minimum = state.remainingMin.get(player.name) ?? 0;
+      if (minimum > 0 && minimum > game.totalBlocks) return 'minimum-window-exhausted' as const;
+    }
+    for (let block = 1; block <= game.totalBlocks; block += 1) {
+      const existing = blocks.find((candidate) => candidate.block === block)?.assignments;
+      if (demand.fieldSlots.some((slot) => !existing?.has(slot.slot)
+        && !players.some((player) => candidateAllowed(game, player, slot.slot, block, new Set(existing?.values()), state, rest, softRest, pinnedByBlock, pinnedByBlock.get(block)?.has(player.name) ?? false)))) {
+        return 'no-eligible-player' as const;
+      }
+    }
+    return 'search-budget-exhausted' as const;
+  })();
   const finalBlocks = resultBlocks ?? blocks;
   return {
     blocks: finalBlocks,
@@ -680,6 +712,7 @@ export function placeStage3(
       softRestFallback: softRest,
       outOfPositionBlocks: Object.fromEntries(state.outOfPosition),
       errors,
+      failureReason,
     },
   };
 }
