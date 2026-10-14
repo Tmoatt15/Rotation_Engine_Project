@@ -221,7 +221,10 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, placement: Retur
     const positions: Record<string, string> = {};
     if (game.firstHalfKeeper && block.block <= game.totalBlocks / 2) positions.GK = game.firstHalfKeeper;
     if (game.secondHalfKeeper && block.block > game.totalBlocks / 2) positions.GK = game.secondHalfKeeper;
-    for (const [slot, player] of block.assignments) positions[slot] = player;
+    for (const [slot, player] of block.assignments) {
+      if (player === positions.GK) continue;
+      positions[slot] = player;
+    }
     const playing = new Set(Object.values(positions));
     return {
       GK: positions.GK ?? '',
