@@ -299,7 +299,7 @@ function placeDeterministically(
         .sort((left, right) => {
           const leftLoad = groupRestsPerBlock.get(`${player.group}:${left.block}`) ?? 0;
           const rightLoad = groupRestsPerBlock.get(`${player.group}:${right.block}`) ?? 0;
-          return Number(leftLoad >= 2) - Number(rightLoad >= 2)
+          return leftLoad - rightLoad
             || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
             || left.block - right.block;
         });
