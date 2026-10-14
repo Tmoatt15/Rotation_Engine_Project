@@ -286,9 +286,7 @@ function placeDeterministically(
         && !isKeeperHalf(game, player, block.block)
         && player.available
         && (softRest || !rest.get(player.name)?.has(block.block))
-        && demand.fieldSlots.some((slot) => slot.group === group
-          && !block.assignments.has(slot.slot)
-          && isFieldEligible(game, player, block.block, slot.slot)))
+        && demand.fieldSlots.some((slot) => slot.group === group && isFieldEligible(game, player, block.block, slot.slot)))
       .map((block) => block.block);
     const restCount = eligible.length - needed;
     if (restCount <= 0) return eligible;
@@ -331,6 +329,15 @@ function placeDeterministically(
             .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
           const slot = slots.find((candidate) => canPlace(player, blockNumber, candidate.slot));
           if (slot) assign(player, blockNumber, slot.slot);
+        }
+        if ((state.remainingMin.get(player.name) ?? 0) > 0) {
+          for (const block of blocks) {
+            if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
+            const slots = demand.fieldSlots.filter((slot) => slot.group === group && !block.assignments.has(slot.slot))
+              .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
+            const slot = slots.find((candidate) => canPlace(player, block.block, candidate.slot));
+            if (slot) assign(player, block.block, slot.slot);
+          }
         }
       }
     }
