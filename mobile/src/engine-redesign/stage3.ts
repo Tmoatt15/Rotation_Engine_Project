@@ -535,6 +535,7 @@ export function placeStage3(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
   softRest = false,
+  allowRelaxedMinimums = false,
 ): PlacementResult {
   const restPins = deriveRestPins(game, quotas);
   const rest = new Map(restPins.map((pin) => [pin.player, new Set(pin.blocks)]));
@@ -604,7 +605,7 @@ export function placeStage3(
       }
       const nextState = cloneState(currentState);
       const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, new Set(), true);
-      if (!candidate || !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock)) return null;
+      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock))) return null;
       return searchFeasible(blockNumber + 1, [...currentBlocks, candidate], nextState);
     };
     return searchFeasible(1, [], cloneState(state));
@@ -633,7 +634,7 @@ export function placeStage3(
       if (excluded.size && depth >= 2) continue;
       const nextState = cloneState(snapshot);
       const candidate = placeBlock(game, demand, players, nextState, rest, blockNumber, currentBlocks, softRest, pinnedByBlock, excluded);
-      if (!candidate || !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock)) continue;
+      if (!candidate || (!allowRelaxedMinimums && !futureFeasible(game, demand, players, nextState, [...currentBlocks, candidate], rest, blockNumber, softRest, pinnedByBlock))) continue;
       const result = search(blockNumber + 1, [...currentBlocks, candidate], nextState, excluded.size ? depth + 1 : depth);
       if (result) {
         const score = turnoverScore(result);

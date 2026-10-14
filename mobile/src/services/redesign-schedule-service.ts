@@ -238,7 +238,7 @@ function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, deman
   let last: { placement: ReturnType<typeof runStages3And4>; quotas: ReturnType<typeof assignQuotas>; tier: number } | null = null;
   for (let tier = 0; tier <= 3; tier += 1) {
     const quotas = assignQuotas(game, demand, tier, allowRelaxedMinimums);
-    const placement = runStages3And4(game, demand, quotas);
+    const placement = runStages3And4(game, demand, quotas, [], allowRelaxedMinimums);
     placement.audit.relaxationTier = tier;
     last = { placement, quotas, tier };
     if (placement.complete) return last;

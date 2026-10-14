@@ -17,10 +17,11 @@ export function runStages3And4(
   demand: DemandModel,
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
+  allowRelaxedMinimums = false,
 ): PolishedPlacement {
-  const hard = placeStage3(game, demand, quotas, frozen);
+  const hard = placeStage3(game, demand, quotas, frozen, false, allowRelaxedMinimums);
   if (hard.complete) return polishStage4(game, demand, quotas, hard);
-  const soft = placeStage3(game, demand, quotas, frozen, true);
+  const soft = placeStage3(game, demand, quotas, frozen, true, allowRelaxedMinimums);
   if (soft.complete) {
     soft.audit.softRestFallback = true;
     return polishStage4(game, demand, quotas, soft);
