@@ -624,7 +624,7 @@ export function placeStage3(
     return baseScore + turnoverVariance(candidateBlocks) * 0.001;
   };
   const findFeasible = (): PlacementBlock[] | null => {
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + Math.min(4500, 350 * game.totalBlocks);
     const searchFeasible = (blockNumber: number, currentBlocks: PlacementBlock[], currentState: PlacementState): PlacementBlock[] | null => {
       if (Date.now() > deadline) return null;
       if (blockNumber > game.totalBlocks) {
