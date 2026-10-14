@@ -140,6 +140,12 @@ export default function ScheduleScreen() {
   }, [schedule]);
   const positionOrder = new Set(positionRows.flatMap((row) => row.positions));
   const [blocks, setBlocks] = useState<ScheduleBlock[]>(schedule?.blocks ?? []);
+  const holeSummary = useMemo(() => blocks.map((block, index) => {
+    const holes = positionRows.flatMap((row) => row.positions)
+      .filter((position) => !block.positions?.[position] || (position !== 'GK' && block.positions[position] === block.GK));
+    return { block: index + 1, positions: holes };
+  }).filter((entry) => entry.positions.length > 0), [blocks, positionRows]);
+  const holeCount = holeSummary.reduce((total, entry) => total + entry.positions.length, 0);
   const [selectedPosition, setSelectedPosition] = useState<SelectedPosition | null>(null);
   const [showPlayerBlocks, setShowPlayerBlocks] = useState(false);
   const [showSaveSchedule, setShowSaveSchedule] = useState(false);
@@ -292,6 +298,10 @@ export default function ScheduleScreen() {
                     <Text style={styles.summaryTitle}>{schedule.available_player_names.length} players scheduled</Text>
                     <Text style={styles.summaryDetail}>{selectedPosition ? 'Tap another field player in this block to swap positions.' : 'Tap two field players in the same block to swap positions.'}</Text>
                   </View>
+                  {holeCount > 0 && <View style={styles.holeSummaryCard}>
+                    <Text style={styles.holeSummaryTitle}>⚠ {holeCount} unfilled {holeCount === 1 ? 'slot' : 'slots'} across {holeSummary.length} {holeSummary.length === 1 ? 'block' : 'blocks'}</Text>
+                    {holeSummary.map((entry) => <Text key={`holes-${entry.block}`} style={styles.holeSummaryText}>Block {entry.block}: {entry.positions.join(', ')}</Text>)}
+                  </View>}
                 </View>
                 <Pressable
                   onPress={() => setShowReviewDiagnostics((expanded) => !expanded)}
@@ -373,6 +383,7 @@ export default function ScheduleScreen() {
                   const displayedSubstitutionTime = blockNumber > secondHalfBlock && substitutionTime !== undefined
                     ? substitutionTime - halftimeStart
                     : substitutionTime;
+                  const blockHoleCount = holeSummary.find((entry) => entry.block === blockNumber)?.positions.length ?? 0;
                   return (
                     <View key={`block-${blockNumber}`}>
                       {blockNumber === secondHalfBlock && (
@@ -385,6 +396,7 @@ export default function ScheduleScreen() {
                       <View style={styles.blockCard}>
                       <View style={styles.blockHeader}>
                           <Text style={styles.blockTitle}>{blockTitle}</Text>
+                          {blockHoleCount > 0 && <Text style={styles.blockHoleText}>— {blockHoleCount} {blockHoleCount === 1 ? 'hole' : 'holes'}</Text>}
                           {displayedSubstitutionTime !== undefined && blockNumber !== 1 && blockNumber !== secondHalfBlock && <View style={styles.blockTiming}>
                             <SymbolView name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} size={15} tintColor={palette.green} />
                             <Text style={styles.blockTimingText}>{formatSubstitutionTime(displayedSubstitutionTime)}</Text>
@@ -392,22 +404,22 @@ export default function ScheduleScreen() {
                       </View>
                       <View style={styles.assignmentList}>
                         {positionRows.map((row) => {
-                          const assignments = row.positions
-                            .filter((position) => block.positions?.[position])
-                            .map((position) => [position, block.positions[position]] as const);
-                          if (assignments.length === 0) return null;
+                          const assignments = row.positions.map((position) => {
+                            const player = block.positions?.[position];
+                            return [position, player && (position === 'GK' || player !== block.GK) ? player : undefined] as const;
+                          });
                           return (
                             <View key={`${index}-${row.label}`} style={styles.positionRow}>
                               {assignments.map(([position, player]) => (
                                 <Pressable
                                   key={`${index}-${position}`}
-                                  onPress={() => handlePositionPress(index, position)}
-                                  disabled={position === 'GK'}
-                                  style={[styles.assignmentCell, playerHighlight(blocks, index + 1, position, player) === 'subbedIn' && styles.subbedInCell, playerHighlight(blocks, index + 1, position, player) === 'positionChanged' && styles.positionChangedCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
+                                  onPress={() => player && handlePositionPress(index, position)}
+                                  disabled={!player || position === 'GK'}
+                                  style={[styles.assignmentCell, !player && styles.emptyAssignmentCell, player && playerHighlight(blocks, index + 1, position, player) === 'subbedIn' && styles.subbedInCell, player && playerHighlight(blocks, index + 1, position, player) === 'positionChanged' && styles.positionChangedCell, selectedPosition?.blockIndex === index && selectedPosition.position === position && styles.assignmentCellSelected]}
                                   accessibilityRole="button"
-                                  accessibilityState={{ disabled: position === 'GK', selected: selectedPosition?.blockIndex === index && selectedPosition.position === position }}>
+                                  accessibilityState={{ disabled: !player || position === 'GK', selected: selectedPosition?.blockIndex === index && selectedPosition.position === position }}>
                                   <Text style={styles.positionLabel}>{position}</Text>
-                                  <Text style={styles.assignmentName} numberOfLines={1}>{displayPlayerName(player)}</Text>
+                                  <Text style={[styles.assignmentName, !player && styles.emptyAssignmentName]} numberOfLines={1}>{player ? displayPlayerName(player) : '—'}</Text>
                                 </Pressable>
                               ))}
                             </View>
@@ -552,13 +564,14 @@ const styles = StyleSheet.create({
   acceptEyebrow: { color: '#c7e5d5', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
   acceptTitle: { color: '#fffaf3', fontSize: 19, fontWeight: '800', marginTop: 6 },
   acceptDetail: { color: '#d8eee1', fontSize: 12, marginTop: 4 },
-  blockTimingText: { color: palette.green, fontSize: 12, fontWeight: '800' },
+  blockTimingText: { color: palette.green, fontSize: 12, fontWeight: '800' }, emptyAssignmentCell: { backgroundColor: '#fffaf3', borderColor: palette.coral, borderStyle: 'dashed' }, emptyAssignmentName: { color: palette.coral },
   container: { flex: 1, backgroundColor: palette.paper }, safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 }, header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 },
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 }, headerCopy: { flex: 1, marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 }, title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 }, countBadge: { alignItems: 'flex-end' }, countValue: { color: palette.green, fontSize: 23, fontWeight: '800' }, countLabel: { color: palette.muted, fontSize: 11, marginTop: 1 },
   summaryCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 17, flexDirection: 'row', marginBottom: 20, padding: 15 }, summaryIcon: { alignItems: 'center', backgroundColor: palette.panel, borderRadius: 13, height: 44, justifyContent: 'center', width: 44 }, summaryCopy: { flex: 1, marginLeft: 12 }, summaryTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' }, summaryDetail: { color: palette.muted, fontSize: 12, marginTop: 3 },
+  holeSummaryCard: { backgroundColor: '#fbe9e4', borderColor: '#e8b4a6', borderRadius: 14, borderWidth: 1, marginBottom: 16, padding: 14 }, holeSummaryTitle: { color: palette.coral, fontSize: 13, fontWeight: '900' }, holeSummaryText: { color: palette.ink, fontSize: 12, lineHeight: 18, marginTop: 3 },
   reviewCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 16, padding: 15 }, reviewHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, reviewTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' }, reviewStatus: { color: palette.green, fontSize: 10, fontWeight: '900', letterSpacing: 1 }, reviewStatusManual: { color: palette.coral }, metricGrid: { flexDirection: 'row', gap: 8, marginTop: 14 }, metricCell: { backgroundColor: '#f7f4ed', borderRadius: 10, flex: 1, padding: 10 }, metricValue: { color: palette.green, fontSize: 20, fontWeight: '900' }, metricLabel: { color: palette.muted, fontSize: 10, marginTop: 2 }, reviewDetail: { color: palette.muted, fontSize: 11, marginTop: 8 }, issueCard: { backgroundColor: '#fbe9e4', borderColor: '#e8b4a6', borderRadius: 14, borderWidth: 1, marginBottom: 12, padding: 14 }, warningCard: { backgroundColor: '#fff4d8', borderColor: '#e8cc82', borderRadius: 14, borderWidth: 1, marginBottom: 12, padding: 14 }, additionalPlayersCard: { backgroundColor: palette.greenSoft, borderColor: '#9dc5ae', borderRadius: 14, borderWidth: 1, marginBottom: 12, padding: 14 }, additionalPlayersCopy: { flex: 1 }, additionalPlayersText: { color: palette.green, fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 4 }, makeChangesButton: { alignItems: 'center', alignSelf: 'flex-start', backgroundColor: palette.coral, borderRadius: 10, flexDirection: 'row', gap: 7, marginTop: 12, paddingHorizontal: 12, paddingVertical: 10 }, makeChangesButtonText: { color: palette.panel, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 }, issueHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, issueTitle: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase' },
   legend: { alignItems: 'center', flexDirection: 'row', gap: 16, marginBottom: 14, paddingHorizontal: 3 }, legendItem: { alignItems: 'center', flexDirection: 'row', gap: 6 }, legendSwatch: { borderRadius: 4, height: 12, width: 12 }, legendText: { color: palette.muted, fontSize: 11, fontWeight: '700' }, benchSubbedOutName: { color: palette.coral },
-  halftimeDivider: { alignItems: 'center', backgroundColor: palette.halftimeSoft, borderRadius: 17, flexDirection: 'row', gap: 12, marginBottom: 12, marginTop: 4, paddingHorizontal: 15, paddingVertical: 13 }, halftimeLine: { backgroundColor: palette.halftimeLine, flex: 1, height: 2 }, halftimeText: { color: palette.halftime, fontSize: 14, fontWeight: '800', letterSpacing: 2 }, blockCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, overflow: 'hidden' }, blockHeader: { alignItems: 'baseline', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 12 }, blockTitle: { color: palette.green, fontSize: 16, fontWeight: '800' }, benchText: { color: palette.muted, fontSize: 11 }, assignmentList: { paddingHorizontal: 15, paddingVertical: 6 }, positionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 6 }, assignmentCell: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 0, paddingHorizontal: 4, paddingVertical: 8, width: '22%' }, subbedInCell: { backgroundColor: '#dcebe2', borderColor: palette.green }, positionChangedCell: { backgroundColor: '#f8e5b2', borderColor: '#b4872e' }, assignmentCellSelected: { backgroundColor: '#f6e8c7', borderColor: palette.coral, borderWidth: 2 }, positionLabel: { color: palette.muted, fontSize: 10, fontWeight: '800' }, assignmentName: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 }, benchList: { backgroundColor: '#f7f4ed', borderTopColor: palette.line, borderTopWidth: 1, paddingHorizontal: 15, paddingVertical: 11 }, benchLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, benchNames: { color: palette.ink, fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 4 }, emptyCard: { backgroundColor: palette.panel, borderRadius: 17, padding: 18 }, emptyText: { color: palette.muted, fontSize: 13 }, warningText: { color: '#956d1b', fontSize: 12, lineHeight: 18, marginTop: 4 }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  halftimeDivider: { alignItems: 'center', backgroundColor: palette.halftimeSoft, borderRadius: 17, flexDirection: 'row', gap: 12, marginBottom: 12, marginTop: 4, paddingHorizontal: 15, paddingVertical: 13 }, halftimeLine: { backgroundColor: palette.halftimeLine, flex: 1, height: 2 }, halftimeText: { color: palette.halftime, fontSize: 14, fontWeight: '800', letterSpacing: 2 }, blockCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, overflow: 'hidden' }, blockHeader: { alignItems: 'baseline', backgroundColor: palette.greenSoft, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 12 }, blockTitle: { color: palette.green, fontSize: 16, fontWeight: '800' }, blockHoleText: { color: palette.coral, fontSize: 12, fontWeight: '900' }, benchText: { color: palette.muted, fontSize: 11 }, assignmentList: { paddingHorizontal: 15, paddingVertical: 6 }, positionRow: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'center', paddingVertical: 6 }, assignmentCell: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 9, borderWidth: 1, minWidth: 0, paddingHorizontal: 4, paddingVertical: 8, width: '22%' }, subbedInCell: { backgroundColor: '#dcebe2', borderColor: palette.green }, positionChangedCell: { backgroundColor: '#f8e5b2', borderColor: '#b4872e' }, assignmentCellSelected: { backgroundColor: '#f6e8c7', borderColor: palette.coral, borderWidth: 2 }, positionLabel: { color: palette.muted, fontSize: 10, fontWeight: '800' }, assignmentName: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 }, benchList: { backgroundColor: '#f7f4ed', borderTopColor: palette.line, borderTopWidth: 1, paddingHorizontal: 15, paddingVertical: 11 }, benchLabel: { color: palette.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, benchNames: { color: palette.ink, fontSize: 12, fontWeight: '600', lineHeight: 18, marginTop: 4 }, emptyCard: { backgroundColor: palette.panel, borderRadius: 17, padding: 18 }, emptyText: { color: palette.muted, fontSize: 13 }, warningText: { color: '#956d1b', fontSize: 12, lineHeight: 18, marginTop: 4 }, errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginTop: 4 },
 });
