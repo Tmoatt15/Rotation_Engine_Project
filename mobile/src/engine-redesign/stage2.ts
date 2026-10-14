@@ -6,6 +6,12 @@ const BANDS: Record<RedesignGroup, { min: number; max: number; midpoint: number 
   developing: { min: 0.5, max: 0.6, midpoint: 0.55 },
 };
 
+const QUOTA_DIAGNOSTICS = true;
+
+function quotaLog(message: string): void {
+  if (QUOTA_DIAGNOSTICS) console.log(`[quota] ${message}`);
+}
+
 function percentageBlocks(totalBlocks: number, percentage: number, minimum: number): number {
   return Math.max(minimum, Math.min(totalBlocks, Math.round(totalBlocks * percentage)));
 }
@@ -46,11 +52,14 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
   const targets = new Map<string, number>();
   for (const player of fieldPlayers) {
     const band = BANDS[player.group];
+    const rawMin = percentageBlocks(game.totalBlocks, band.min, 0);
+    const rawMax = maximumBlocks(game.totalBlocks, band.max);
     const halfKeeper = isHalfKeeper(game, player, demand);
     const keeper = keeperBlocks(game, player, demand);
+    quotaLog(`${player.name} group=${player.group} band.min=${band.min} rawMin=${rawMin} rawMax=${rawMax} halfKeeper=${halfKeeper} keeperBlocks=${keeper}`);
     base.set(player.name, {
-      min: halfKeeper ? Math.min(2, game.totalBlocks - keeper) : percentageBlocks(game.totalBlocks, band.min, 0),
-      max: halfKeeper ? Math.min(4, game.totalBlocks - keeper) : maximumBlocks(game.totalBlocks, band.max),
+      min: halfKeeper ? Math.min(2, game.totalBlocks - keeper) : rawMin,
+      max: halfKeeper ? Math.min(4, game.totalBlocks - keeper) : rawMax,
     });
     targets.set(player.name, base.get(player.name)!.min);
   }
@@ -73,6 +82,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     }
     audit.unfillableWithinMax = remaining;
   } else if (sum('min') > fieldSlots) {
+    quotaLog(`RELAXATION triggered: sumMin=${sum('min')} slots=${fieldSlots} allowRelaxedMinimums=${allowRelaxedMinimums}`);
     const order: RedesignGroup[] = ['developing', 'rotational', 'core'];
     const startingPercent: Record<RedesignGroup, number> = allowRelaxedMinimums
       ? { core: 60, rotational: 50, developing: 40 }
@@ -112,6 +122,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     audit.relaxedPlayers = fieldPlayers
       .map((player) => ({ player: player.name, group: player.group, before: initialMinimums.get(player.name)!, after: base.get(player.name)!.min }))
       .filter((entry) => entry.before > entry.after);
+    quotaLog(`After relaxation: sumMin=${sum('min')}`);
   }
   const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
     const value = base.get(player.name)!;
@@ -168,7 +179,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     const fieldMax = dedicated ? 0 : Math.max(fieldMin, Math.min(field.max - pins.length, game.totalBlocks - gk - pins.length));
     const gkMin = dedicated ? gk : gk;
     const gkMax = dedicated ? gk : gk;
-    return {
+    const quota = {
       player: player.name,
       group: player.group,
       totalMin: fieldMin + pins.length + gkMin,
@@ -184,6 +195,12 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       keeperBlocks: gk,
       history: player.history,
     };
+    if (QUOTA_DIAGNOSTICS && !isDedicatedKeeper(player)) {
+      const rawMin = percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0);
+      const rawMax = maximumBlocks(game.totalBlocks, BANDS[player.group].max);
+      quotaLog(`${player.name} FINAL: raw=${rawMin}-${rawMax} pins=${pins.length} field=${quota.fieldMin}-${quota.fieldMax} total=${quota.totalMin}-${quota.totalMax}`);
+    }
+    return quota;
   });
   const arrival = game.lateArrival;
   if (arrival) {
