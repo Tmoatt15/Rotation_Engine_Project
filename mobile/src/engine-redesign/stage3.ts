@@ -146,6 +146,42 @@ export function isEligible(player: NormalizedPlayer, slot: string): boolean {
   return positionTier(player, slot) > 0 && !excludedFromSlot(player, slot);
 }
 
+function countEligibleFutureBlocks(
+  player: NormalizedPlayer,
+  fromBlock: number,
+  game: NormalizedGame,
+  demand: DemandModel,
+  rest: Map<string, Set<number>>,
+  softRest: boolean,
+  state: PlacementState,
+): number {
+  if (isDedicatedKeeper(player) || (state.remainingMax.get(player.name) ?? 0) <= 0) return 0;
+  let count = 0;
+  for (let block = fromBlock; block <= game.totalBlocks; block += 1) {
+    if (isOppositeHalfKeeper(game, player, block) || (!softRest && rest.get(player.name)?.has(block))) continue;
+    if (demand.fieldSlots.some((slot) => isEligible(player, slot.slot))) count += 1;
+  }
+  return count;
+}
+
+function getUrgencyLevel(
+  player: NormalizedPlayer,
+  currentBlock: number,
+  game: NormalizedGame,
+  state: PlacementState,
+  demand: DemandModel,
+  rest: Map<string, Set<number>>,
+  softRest: boolean,
+): number {
+  const remainingMin = state.remainingMin.get(player.name) ?? 0;
+  if (remainingMin <= 0) return 2;
+  const eligibleBlocks = countEligibleFutureBlocks(player, currentBlock, game, demand, rest, softRest, state);
+  const slack = eligibleBlocks - remainingMin;
+  if (slack <= 0) return 0;
+  if (slack <= 2) return 1;
+  return 2;
+}
+
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
@@ -235,6 +271,7 @@ export function compareCandidates(
   previousPlayers: Set<string> = new Set(),
   previousSlots: Map<string, string> = new Map(),
   priorPlayers: Set<string> = new Set(),
+  demand?: DemandModel,
 ): number {
   const leftMin = state.remainingMin.get(left.name) ?? 0;
   const rightMin = state.remainingMin.get(right.name) ?? 0;
@@ -250,6 +287,11 @@ export function compareCandidates(
   const leftKeeperUrgency = isOppositeHalfKeeper(game, left, block) && leftMin > 0 ? 1 : 0;
   const rightKeeperUrgency = isOppositeHalfKeeper(game, right, block) && rightMin > 0 ? 1 : 0;
   if (leftKeeperUrgency !== rightKeeperUrgency) return rightKeeperUrgency - leftKeeperUrgency;
+  if (demand) {
+    const leftUrgency = getUrgencyLevel(left, block, game, state, demand, rest, softRest);
+    const rightUrgency = getUrgencyLevel(right, block, game, state, demand, rest, softRest);
+    if (leftUrgency !== rightUrgency) return leftUrgency - rightUrgency;
+  }
   if ((leftMin > 0) !== (rightMin > 0)) return Number(rightMin > 0) - Number(leftMin > 0);
   if (leftMin !== rightMin) return rightMin - leftMin;
   const leftIncumbent = previousPlayers.has(left.name) && (state.remainingMax.get(left.name) ?? 0) > leftMin;
@@ -464,13 +506,15 @@ function placeBlock(
       .sort((left, right) => feasibilityMode
           ? constrainedPriority(left) - constrainedPriority(right)
             || constrainedOrdering(left, right)
+            || getUrgencyLevel(left, blockNumber, game, state, demand, rest, softRest)
+              - getUrgencyLevel(right, blockNumber, game, state, demand, rest, softRest)
             || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
             || ((state.remainingMax.get(left.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0))
               - ((state.remainingMax.get(right.name) ?? 0) - (state.remainingMin.get(right.name) ?? 0))
             || left.name.localeCompare(right.name)
           : constrainedPriority(left) - constrainedPriority(right)
             || constrainedOrdering(left, right)
-            || compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers));
+            || compareCandidates(left, right, slot, blockNumber, game, state, softRest, continuingPlayers, rest, previousPlayers, previousSlots, priorPlayers, demand));
     if (!candidates[0] || !assignPlayer(candidates[0], slot)) return null;
   }
   return { block: blockNumber, assignments };
