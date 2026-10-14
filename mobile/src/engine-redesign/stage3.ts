@@ -588,8 +588,18 @@ function placeByTier(
     for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => {
       const leftReserved = reservedGroups.has(left.name) ? 0 : 1;
       const rightReserved = reservedGroups.has(right.name) ? 0 : 1;
+      const eligibleBlocks = (player: NormalizedPlayer): number => Array.from({ length: game.totalBlocks }, (_, index) => index + 1)
+        .filter((block) => !isDedicatedKeeper(player)
+          && !isOppositeHalfKeeper(game, player, block)
+          && !rest.get(player.name)?.has(block)
+          && (state.remainingMax.get(player.name) ?? 0) > 0
+          && demand.fieldSlots.some((slot) => isEligible(player, slot.slot))).length;
+      const leftSlack = eligibleBlocks(left) - (state.remainingMin.get(left.name) ?? 0);
+      const rightSlack = eligibleBlocks(right) - (state.remainingMin.get(right.name) ?? 0);
       return leftReserved - rightReserved
         || eligibleGroupCount(left) - eligibleGroupCount(right)
+        || leftSlack - rightSlack
+        || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
         || left.name.localeCompare(right.name);
     })) {
       let required = state.remainingMin.get(player.name) ?? 0;
