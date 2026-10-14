@@ -40,6 +40,9 @@ interface PlacementState {
 }
 
 function groupForSlot(slot: string): 'D' | 'M' | 'F' {
+  if (slot.startsWith('D')) return 'D';
+  if (slot.startsWith('M')) return 'M';
+  if (slot.startsWith('F') || slot === 'ST') return 'F';
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
   if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
   return 'F';
@@ -63,6 +66,13 @@ function isKeeperHalf(game: NormalizedGame, player: NormalizedPlayer, block: num
   const half = game.totalBlocks / 2;
   return (player.name === game.firstHalfKeeper && block <= half)
     || (player.name === game.secondHalfKeeper && block > half);
+}
+
+function isFieldEligible(game: NormalizedGame, player: NormalizedPlayer, block: number, slot: string): boolean {
+  if (isEligible(player, slot)) return true;
+  return isDedicatedKeeper(player)
+    && isOppositeHalfKeeper(game, player, block)
+    && !excludedFromSlot(player, slot);
 }
 
 export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
@@ -154,12 +164,14 @@ function eligibleBlocks(
   rest: Map<string, Set<number>>,
   softRest: boolean,
 ): number {
-  if (isDedicatedKeeper(player)) return 0;
+  if (isDedicatedKeeper(player)
+    && player.name !== game.firstHalfKeeper
+    && player.name !== game.secondHalfKeeper) return 0;
   const slots = demand?.fieldSlots.map((candidate) => candidate.slot) ?? ['D', 'M', 'F'];
   return Array.from({ length: game.totalBlocks - fromBlock + 1 }, (_, index) => fromBlock + index)
     .filter((block) => !isKeeperHalf(game, player, block)
       && (softRest || !rest.get(player.name)?.has(block))
-      && slots.some((slot) => isEligible(player, slot))).length;
+      && slots.some((slot) => isFieldEligible(game, player, block, slot))).length;
 }
 
 function groupOrder(game: NormalizedGame, demand: DemandModel): Array<'D' | 'M' | 'F'> {
@@ -214,13 +226,15 @@ function placeDeterministically(
   const canPlace = (player: NormalizedPlayer, block: number, slot: string): boolean => {
     const assignments = blocks[block - 1].assignments;
     return player.available
-      && !isDedicatedKeeper(player)
+      && (!isDedicatedKeeper(player)
+        || player.name === game.firstHalfKeeper
+        || player.name === game.secondHalfKeeper)
       && !isKeeperHalf(game, player, block)
       && !assignmentsHasPlayer(assignments, player.name)
       && !isKeeperHalf(game, player, block)
       && (state.remainingMax.get(player.name) ?? 0) > 0
       && (softRest || !rest.get(player.name)?.has(block))
-      && isEligible(player, slot);
+      && isFieldEligible(game, player, block, slot);
   };
   const assign = (player: NormalizedPlayer, block: number, slot: string): boolean => {
     if (!canPlace(player, block, slot)) return false;
@@ -248,32 +262,60 @@ function placeDeterministically(
     }
   }
   const order = groupOrder(game, demand);
+  const coreRestsPerBlock = new Map<number, number>();
+  const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F'): number[] => {
+    const needed = state.remainingMin.get(player.name) ?? 0;
+    const frozenBlocks = new Set(frozen.map((block) => block.block));
+    const eligible = blocks
+      .filter((block) => !frozenBlocks.has(block.block)
+        && !pinned.get(block.block)?.has(player.name)
+        && !isKeeperHalf(game, player, block.block)
+        && player.available
+        && (softRest || !rest.get(player.name)?.has(block.block))
+        && demand.fieldSlots.some((slot) => slot.group === group
+          && !block.assignments.has(slot.slot)
+          && isFieldEligible(game, player, block.block, slot.slot)))
+      .map((block) => block.block);
+    const restCount = eligible.length - needed;
+    if (restCount <= 0) return eligible;
+    const selected = new Set<number>();
+    for (let index = 1; index <= restCount; index += 1) {
+      const ideal = Math.round(index * (eligible.length + 1) / (restCount + 1)) - 1;
+      const candidates = eligible
+        .map((block, candidateIndex) => ({ block, candidateIndex }))
+        .filter(({ block }) => !selected.has(block))
+        .sort((left, right) => {
+          const leftLoad = player.group === 'core' ? (coreRestsPerBlock.get(left.block) ?? 0) : 0;
+          const rightLoad = player.group === 'core' ? (coreRestsPerBlock.get(right.block) ?? 0) : 0;
+          return Number(leftLoad >= 2) - Number(rightLoad >= 2)
+            || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
+            || left.block - right.block;
+        });
+      const choice = candidates[0]?.block;
+      if (choice === undefined) continue;
+      selected.add(choice);
+      if (player.group === 'core') coreRestsPerBlock.set(choice, (coreRestsPerBlock.get(choice) ?? 0) + 1);
+    }
+    return eligible.filter((block) => !selected.has(block));
+  };
   for (const group of order) {
     for (const tier of ['core', 'rotational', 'developing'] as const) {
       const candidates = game.players
         .filter((player) => player.group === tier && (state.remainingMin.get(player.name) ?? 0) > 0
-          && player.generalPositions.includes('ANY') || player.group === tier && (state.remainingMin.get(player.name) ?? 0) > 0
-          && player.generalPositions.includes(group))
+          && (player.generalPositions.includes('ANY') || player.generalPositions.includes(group)
+            || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
         .sort((left, right) => eligibleBlocks(left, 1, game, demand, rest, softRest) - (state.remainingMin.get(left.name) ?? 0)
           - eligibleBlocks(right, 1, game, demand, rest, softRest) + (state.remainingMin.get(right.name) ?? 0)
           || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
           || left.name.localeCompare(right.name));
       for (const player of candidates) {
-        while ((state.remainingMin.get(player.name) ?? 0) > 0) {
-          let placed = false;
-          const frozenBlocks = new Set(frozen.map((block) => block.block));
-          for (const block of blocks) {
-            if (frozenBlocks.has(block.block)) continue;
-            if (pinned.get(block.block)?.has(player.name)) continue;
-            const slots = demand.fieldSlots.filter((slot) => slot.group === group && !block.assignments.has(slot.slot))
-              .sort((left, right) => positionTier(player, right.slot) - positionTier(player, left.slot));
-            const slot = slots.find((candidate) => canPlace(player, block.block, candidate.slot));
-            if (slot && assign(player, block.block, slot.slot)) {
-              placed = true;
-              break;
-            }
-          }
-          if (!placed) break;
+        const playBlocks = selectSpacedBlocks(player, group);
+        for (const blockNumber of playBlocks) {
+          if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
+          const slots = demand.fieldSlots.filter((slot) => slot.group === group && !blocks[blockNumber - 1].assignments.has(slot.slot))
+            .sort((left, right) => positionTier(player, right.slot) - positionTier(player, left.slot));
+          const slot = slots.find((candidate) => canPlace(player, blockNumber, candidate.slot));
+          if (slot) assign(player, blockNumber, slot.slot);
         }
       }
     }
