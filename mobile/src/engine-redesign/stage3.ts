@@ -52,6 +52,19 @@ function reserveShortPositionGroups(
   return reservations;
 }
 
+function calculateGroupOrder(game: NormalizedGame, demand: DemandModel): Array<'D' | 'M' | 'F'> {
+  const groups: Array<'D' | 'M' | 'F'> = ['D', 'M', 'F'];
+  return groups
+    .map((group, index) => {
+      const generalCount = game.players.filter((player) => player.generalPositions.includes('ANY')
+        || player.generalPositions.includes(group)).length;
+      const slots = demand.fieldSlots.filter((slot) => slot.group === group).length;
+      return { group, ratio: generalCount / Math.max(1, slots), index };
+    })
+    .sort((left, right) => left.ratio - right.ratio || left.index - right.index)
+    .map(({ group }) => group);
+}
+
 function shippingBasicPlacement(game: NormalizedGame, demand: DemandModel, quotas: QuotaAssignment): PlacementBlock[] | null {
   const shippingPlayers: Player[] = game.players.map((player) => {
     const keeper = player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper;
@@ -644,6 +657,8 @@ function placeByTier(
     }
   }
   const tiers: Array<'core' | 'rotational' | 'developing'> = ['core', 'rotational', 'developing'];
+  const groupOrder = calculateGroupOrder(game, demand);
+  const groupRank = new Map(groupOrder.map((group, index) => [group, index]));
   for (const tier of tiers) {
     for (const player of game.players.filter((candidate) => candidate.group === tier).sort((left, right) => {
       const leftReserved = reservedGroups.has(left.name) ? 0 : 1;
@@ -694,6 +709,7 @@ function placeByTier(
                 return constrainedMin / Math.max(1, totalSlots - assigned);
               };
               return rightReserved - leftReserved
+                || (groupRank.get(groupForSlot(left)) ?? 0) - (groupRank.get(groupForSlot(right)) ?? 0)
                 || pressure(groupForSlot(left)) - pressure(groupForSlot(right))
                 || rightHistory - leftHistory
                 || positionTier(player, right) - positionTier(player, left)
