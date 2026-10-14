@@ -5,7 +5,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { calculateMovementMetrics } from '@/engine/timeline';
+import { calculateMovementMetrics, formationSlots, parseFormation } from '@/engine/timeline';
 import { createPlayer } from '@/engine/rotation';
 import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player } from '@/engine/models';
@@ -30,6 +30,7 @@ type ScheduleData = {
   team_id?: string;
   team_name?: string;
   game_number: number;
+  formation?: string;
   available_player_names: string[];
   block_start_minutes?: number[];
   block_lengths_minutes?: number[];
@@ -135,7 +136,15 @@ export default function ScheduleScreen() {
   const params = useLocalSearchParams<{ data?: string }>();
   const schedule = useMemo(() => parseSchedule(params.data), [params.data]);
   const positionRows = useMemo(() => {
-    const rows = schedule?.position_rows?.length ? schedule.position_rows : fallbackPositionRows;
+    const formationRows = schedule?.formation
+      ? [
+        { label: 'FORWARDS', positions: formationSlots(parseFormation(schedule.formation)).F },
+        { label: 'MIDFIELDERS', positions: formationSlots(parseFormation(schedule.formation)).M },
+        { label: 'DEFENDERS', positions: formationSlots(parseFormation(schedule.formation)).D },
+        { label: 'GOALKEEPER', positions: ['GK'] },
+      ].filter((row) => row.positions.length)
+      : [];
+    const rows = formationRows.length ? formationRows : (schedule?.position_rows?.length ? schedule.position_rows : fallbackPositionRows);
     return [...rows].sort((firstRow, secondRow) => positionRowOrder.indexOf(firstRow.label) - positionRowOrder.indexOf(secondRow.label));
   }, [schedule]);
   const positionOrder = new Set(positionRows.flatMap((row) => row.positions));
