@@ -249,7 +249,7 @@ function placeDeterministically(
     if (!block) continue;
     for (const name of names) {
       const player = players.get(name);
-      if (!player || assignmentsHasPlayer(block.assignments, name)) continue;
+      if (!player || assignmentsHasPlayer(block.assignments, name) || isKeeperHalf(game, player, blockNumber)) continue;
       const slot = demand.fieldSlots
         .filter((candidate) => candidate.group === groupForSlot(candidate.slot) && !block.assignments.has(candidate.slot))
         .sort((left, right) => positionTier(player, right.slot) - positionTier(player, left.slot))
