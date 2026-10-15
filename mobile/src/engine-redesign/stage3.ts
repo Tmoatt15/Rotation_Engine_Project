@@ -247,7 +247,8 @@ function placeDeterministically(
       && !assignmentsHasPlayer(assignments, player.name)
       && !isKeeperHalf(game, player, block)
       && (state.remainingMax.get(player.name) ?? 0) > 0
-      && (softRest || !rest.get(player.name)?.has(block))
+      && (softRest || !rest.get(player.name)?.has(block)
+        || (state.remainingMin.get(player.name) ?? 0) > 0)
       && isFieldEligible(game, player, block, slot);
   };
   const assign = (player: NormalizedPlayer, block: number, slot: string): boolean => {
@@ -340,6 +341,11 @@ function placeDeterministically(
       sequentialRestBlocks.get(group)!.add(choice);
       const key = `${group}:${choice}`;
       groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+    }
+    if (restCount <= 2) {
+      const playerRest = rest.get(player.name) ?? new Set<number>();
+      for (const block of selected) playerRest.add(block);
+      rest.set(player.name, playerRest);
     }
     return eligible.filter((block) => !selected.has(block));
   };
