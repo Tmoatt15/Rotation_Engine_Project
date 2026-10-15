@@ -97,6 +97,26 @@ function groupAffinity(player: NormalizedPlayer, slot: string): number {
   return 0;
 }
 
+function isSpecificForGroup(player: NormalizedPlayer, group: 'D' | 'M' | 'F'): boolean {
+  return player.primaryPositions.some((position) => position !== 'ANY'
+    && (position === group || groupForSlot(position) === group));
+}
+
+function hasBackupForGroup(player: NormalizedPlayer, group: 'D' | 'M' | 'F'): boolean {
+  return player.backupPositions.some((position) => position === group || groupForSlot(position) === group);
+}
+
+function placementPriority(player: NormalizedPlayer, group: 'D' | 'M' | 'F'): number {
+  const inGeneralGroup = player.generalPositions.includes(group);
+  if (inGeneralGroup && player.group === 'core' && isSpecificForGroup(player, group)) return 1;
+  if (inGeneralGroup && player.group === 'core' && player.primaryPositions.includes('ANY')) return 2;
+  if (inGeneralGroup && player.group !== 'core' && isSpecificForGroup(player, group)) return 3;
+  if (inGeneralGroup && player.group !== 'core' && player.primaryPositions.includes('ANY')) return 4;
+  if (inGeneralGroup) return 5;
+  if (hasBackupForGroup(player, group)) return 6;
+  return 7;
+}
+
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
@@ -350,16 +370,14 @@ function placeDeterministically(
     return eligible.filter((block) => !selected.has(block));
   };
   for (const group of order) {
-    for (const tier of ['core', 'rotational', 'developing'] as const) {
-      const candidates = game.players
-        .filter((player) => player.group === tier && (state.remainingMin.get(player.name) ?? 0) > 0
-          && (player.generalPositions.includes(group)
-            || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
-        .sort((left, right) => eligibleBlocks(left, 1, game, demand, rest, softRest) - (state.remainingMin.get(left.name) ?? 0)
-          - eligibleBlocks(right, 1, game, demand, rest, softRest) + (state.remainingMin.get(right.name) ?? 0)
-          || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
-          || left.name.localeCompare(right.name));
-      for (const player of candidates) {
+    const candidates = game.players
+      .filter((player) => (state.remainingMin.get(player.name) ?? 0) > 0
+        && (player.generalPositions.includes(group)
+          || hasBackupForGroup(player, group)
+          || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
+      .sort((left, right) => placementPriority(left, group) - placementPriority(right, group)
+        || left.name.localeCompare(right.name));
+    for (const player of candidates) {
         const playBlocks = selectSpacedBlocks(player, group);
         for (const blockNumber of playBlocks) {
           if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
@@ -375,7 +393,6 @@ function placeDeterministically(
               .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
             const slot = slots.find((candidate) => canPlace(player, block.block, candidate.slot));
             if (slot) assign(player, block.block, slot.slot);
-          }
         }
       }
     }
