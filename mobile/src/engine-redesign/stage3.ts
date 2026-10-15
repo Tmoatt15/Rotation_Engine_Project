@@ -91,6 +91,12 @@ function slotPriority(player: NormalizedPlayer, slot: string): number {
   return player.generalPositions.includes(group) ? 1 : 0;
 }
 
+function groupAffinity(player: NormalizedPlayer, slot: string): number {
+  const group = groupForSlot(slot);
+  if (player.generalPositions.includes(group)) return 2;
+  return player.generalPositions.includes('ANY') ? 1 : 0;
+}
+
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
   const zone = zoneForSlot(slot);
   const group = groupForSlot(slot);
@@ -348,6 +354,7 @@ function placeDeterministically(
       const candidates = game.players
         .filter((player) => canPlace(player, block.block, slot.slot))
         .sort((left, right) => Number(previous?.has(left.name)) - Number(previous?.has(right.name))
+          || groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
           || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
           || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
