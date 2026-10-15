@@ -278,9 +278,12 @@ function placeDeterministically(
   const order = groupOrder(game, demand);
   const groupRestsPerBlock = new Map<string, number>();
   for (const player of game.players) {
+    const coveredGroups = (['D', 'M', 'F'] as const).filter((group) => player.generalPositions.includes(group));
     for (const block of rest.get(player.name) ?? []) {
-      const key = `${player.group}:${block}`;
-      groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+      for (const coveredGroup of coveredGroups) {
+        const key = `${coveredGroup}:${block}`;
+        groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+      }
     }
   }
   const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F'): number[] => {
@@ -303,8 +306,8 @@ function placeDeterministically(
         .map((block, candidateIndex) => ({ block, candidateIndex }))
         .filter(({ block }) => !selected.has(block))
         .sort((left, right) => {
-          const leftLoad = groupRestsPerBlock.get(`${player.group}:${left.block}`) ?? 0;
-          const rightLoad = groupRestsPerBlock.get(`${player.group}:${right.block}`) ?? 0;
+          const leftLoad = groupRestsPerBlock.get(`${group}:${left.block}`) ?? 0;
+          const rightLoad = groupRestsPerBlock.get(`${group}:${right.block}`) ?? 0;
           return leftLoad - rightLoad
             || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
             || left.block - right.block;
@@ -312,7 +315,7 @@ function placeDeterministically(
       const choice = candidates[0]?.block;
       if (choice === undefined) continue;
       selected.add(choice);
-      const key = `${player.group}:${choice}`;
+      const key = `${group}:${choice}`;
       groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
     }
     return eligible.filter((block) => !selected.has(block));
