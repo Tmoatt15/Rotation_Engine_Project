@@ -277,6 +277,11 @@ function placeDeterministically(
   }
   const order = groupOrder(game, demand);
   const groupRestsPerBlock = new Map<string, number>();
+  const sequentialRestBlocks = new Map<'D' | 'M' | 'F', Set<number>>([
+    ['D', new Set<number>()],
+    ['M', new Set<number>()],
+    ['F', new Set<number>()],
+  ]);
   for (const player of game.players) {
     const coveredGroups = (['D', 'M', 'F'] as const).filter((group) => player.generalPositions.includes(group));
     for (const block of rest.get(player.name) ?? []) {
@@ -304,7 +309,7 @@ function placeDeterministically(
       const ideal = Math.round(index * (eligible.length + 1) / (restCount + 1)) - 1;
       const candidates = eligible
         .map((block, candidateIndex) => ({ block, candidateIndex }))
-        .filter(({ block }) => !selected.has(block))
+        .filter(({ block }) => !selected.has(block) && !sequentialRestBlocks.get(group)!.has(block))
         .sort((left, right) => {
           const leftLoad = groupRestsPerBlock.get(`${group}:${left.block}`) ?? 0;
           const rightLoad = groupRestsPerBlock.get(`${group}:${right.block}`) ?? 0;
@@ -313,8 +318,26 @@ function placeDeterministically(
             || left.block - right.block;
         });
       const choice = candidates[0]?.block;
-      if (choice === undefined) continue;
+      if (choice === undefined) {
+        const fallback = eligible
+          .map((block, candidateIndex) => ({ block, candidateIndex }))
+          .filter(({ block }) => !selected.has(block))
+          .sort((left, right) => {
+            const leftLoad = groupRestsPerBlock.get(`${group}:${left.block}`) ?? 0;
+            const rightLoad = groupRestsPerBlock.get(`${group}:${right.block}`) ?? 0;
+            return leftLoad - rightLoad
+              || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
+              || left.block - right.block;
+          })[0]?.block;
+        if (fallback === undefined) continue;
+        selected.add(fallback);
+        sequentialRestBlocks.get(group)!.add(fallback);
+        const key = `${group}:${fallback}`;
+        groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+        continue;
+      }
       selected.add(choice);
+      sequentialRestBlocks.get(group)!.add(choice);
       const key = `${group}:${choice}`;
       groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
     }
