@@ -382,10 +382,9 @@ function placeDeterministically(
   }
   for (const block of blocks) {
     for (const slot of demand.fieldSlots.filter((candidate) => !block.assignments.has(candidate.slot))) {
-      const previous = blocks[block.block - 2]?.assignments;
       const candidates = game.players
         .filter((player) => canPlace(player, block.block, slot.slot))
-        .sort((left, right) => Number(previous?.has(left.name)) - Number(previous?.has(right.name))
+        .sort((left, right) => (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
           || groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
           || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
           || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
@@ -398,7 +397,8 @@ function placeDeterministically(
       const relaxedCandidate = game.players
         .filter((player) => player.generalPositions.includes(groupForSlot(slot.slot))
           && canPlace(player, block.block, slot.slot, true))
-        .sort((left, right) => groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
+        .sort((left, right) => (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
+          || groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name))[0];
       if (relaxedCandidate) assign(relaxedCandidate, block.block, slot.slot);
