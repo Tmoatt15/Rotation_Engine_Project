@@ -77,7 +77,7 @@ function isFieldEligible(game: NormalizedGame, player: NormalizedPlayer, block: 
 
 export function positionTier(player: NormalizedPlayer, slot: string): 2 | 1 | 0 {
   const group = groupForSlot(slot);
-  const general = player.generalPositions.includes('ANY') || player.generalPositions.includes(group);
+  const general = player.generalPositions.includes(group);
   if (player.primaryPositions.some((position) => position === 'ANY' ? general : position === slot || position === group)) return 2;
   if (general || player.backupPositions.some((position) => position === slot || position === group)) return 1;
   return 0;
@@ -94,7 +94,7 @@ function slotPriority(player: NormalizedPlayer, slot: string): number {
 function groupAffinity(player: NormalizedPlayer, slot: string): number {
   const group = groupForSlot(slot);
   if (player.generalPositions.includes(group)) return 2;
-  return player.generalPositions.includes('ANY') ? 1 : 0;
+  return 0;
 }
 
 export function excludedFromSlot(player: NormalizedPlayer, slot: string): boolean {
@@ -192,7 +192,7 @@ function groupOrder(game: NormalizedGame, demand: DemandModel): Array<'D' | 'M' 
   return (['D', 'M', 'F'] as const)
     .map((group, index) => ({
       group,
-      ratio: game.players.filter((player) => player.generalPositions.includes('ANY') || player.generalPositions.includes(group)).length
+      ratio: game.players.filter((player) => player.generalPositions.includes(group)).length
         / Math.max(1, demand.fieldSlots.filter((slot) => slot.group === group).length),
       index,
     }))
@@ -321,7 +321,7 @@ function placeDeterministically(
     for (const tier of ['core', 'rotational', 'developing'] as const) {
       const candidates = game.players
         .filter((player) => player.group === tier && (state.remainingMin.get(player.name) ?? 0) > 0
-          && (player.generalPositions.includes('ANY') || player.generalPositions.includes(group)
+          && (player.generalPositions.includes(group)
             || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
         .sort((left, right) => eligibleBlocks(left, 1, game, demand, rest, softRest) - (state.remainingMin.get(left.name) ?? 0)
           - eligibleBlocks(right, 1, game, demand, rest, softRest) + (state.remainingMin.get(right.name) ?? 0)

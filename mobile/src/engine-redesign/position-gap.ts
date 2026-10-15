@@ -31,12 +31,14 @@ const formationCounts = (formation: string): Record<PositionGroup, number> => {
 };
 
 const groupsFor = (player: PositionGapPlayer): Set<PositionGroup> => {
-  const positions = [
-    ...(player.primary_positions ?? []),
-    ...(player.general_positions ?? []),
-    ...(player.backup_positions ?? []),
-  ].map((position) => position.toUpperCase());
-  return new Set((['D', 'M', 'F'] as const).filter((group) => positions.includes(group) || positions.includes('ANY')));
+  const general = (player.general_positions ?? []).map((position) => position.toUpperCase());
+  const primary = (player.primary_positions ?? []).map((position) => position.toUpperCase());
+  const backup = (player.backup_positions ?? []).map((position) => position.toUpperCase());
+  return new Set((['D', 'M', 'F'] as const).filter((group) => (
+    general.includes(group)
+    || primary.includes(group)
+    || backup.includes(group)
+  )));
 };
 
 const proximityFor = (position: PositionGroup): PositionGroup[] => {

@@ -18,12 +18,12 @@ const corePositions: Record<string, string[]> = {
 const coreNames = Object.keys(corePositions);
 const rotationals = ['Frank', 'Artur', 'Brad', 'Ryan', 'Mahaswin', 'Prerith', 'Thanish', 'Extra1', 'Extra2', 'Extra3', 'Extra4'];
 
-function player(name: string, group: string, positions: string[], keeper = false): RedesignPlayerInput {
+function player(name: string, group: string, positions: string[], keeper = false, primaryPositions = positions): RedesignPlayerInput {
   return {
     name,
     group,
     general_positions: positions,
-    primary_positions: positions,
+    primary_positions: primaryPositions,
     keeper,
   };
 }
@@ -38,7 +38,9 @@ function buildGame(count: number): NormalizedGame {
     secondHalfKeeper: 'Eitan',
   }, names.map((name) => {
     if (name === 'Cameron' || name === 'Eitan') return player(name, 'rotational', ['D', 'GK'], true);
-    return player(name, coreNames.includes(name) ? 'core' : 'rotational', corePositions[name] ?? ['ANY']);
+    return coreNames.includes(name)
+      ? player(name, 'core', corePositions[name]!)
+      : player(name, 'rotational', ['D', 'M', 'F'], false, ['ANY']);
   }));
 }
 

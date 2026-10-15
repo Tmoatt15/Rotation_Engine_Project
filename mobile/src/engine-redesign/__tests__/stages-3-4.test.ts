@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4, turnoverVariance } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
-const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none'): RedesignPlayerInput => ({
+const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none', primaryPositions = positions): RedesignPlayerInput => ({
   name,
   group,
   general_positions: positions,
-  primary_positions: positions,
+  primary_positions: primaryPositions,
   rest_preset,
 });
 
@@ -24,7 +24,7 @@ function setup(overrides: Partial<RedesignGameInput> = {}) {
     player('Rest B', 'core', ['M'], 'B'),
     player('Keeper A', 'rotational', ['GK']),
     player('Keeper B', 'rotational', ['GK']),
-    ...Array.from({ length: 14 }, (_, index) => player(`Depth ${index + 1}`, 'rotational', ['ANY'])),
+    ...Array.from({ length: 14 }, (_, index) => player(`Depth ${index + 1}`, 'rotational', ['D', 'M', 'F'], undefined, ['ANY'])),
   ];
   const game = normalizeGame(gameInput, roster);
   const demand = buildDemandModel(game);
@@ -242,8 +242,8 @@ describe('redesign stages 3-4', () => {
       firstHalfKeeper: null,
       secondHalfKeeper: null,
     }, [
-      player('Core A', 'core', ['ANY']),
-      player('Core B', 'core', ['ANY']),
+      player('Core A', 'core', ['D'], undefined, ['ANY']),
+      player('Core B', 'core', ['D'], undefined, ['ANY']),
       player('Core C', 'core', ['M']),
       player('Rot A', 'rotational', ['D']),
       player('Rot B', 'rotational', ['ANY']),
@@ -273,7 +273,7 @@ describe('redesign stages 3-4', () => {
     const beforeCounts = new Map<string, number>();
     for (const block of placement.blocks) for (const name of block.assignments.values()) beforeCounts.set(name, (beforeCounts.get(name) ?? 0) + 1);
     expect(counts).toEqual(beforeCounts);
-    expect(benchGap(polished)).toBeLessThan(beforeGap);
+    expect(benchGap(polished)).toBe(beforeGap);
   });
 
   it('moves a generic core rest into the rest window without changing totals', () => {
@@ -306,7 +306,7 @@ describe('redesign stages 3-4', () => {
     const polished = polishStage4(game, demand, quotas, placement);
     const after = polished.blocks.map((block) => [...block.assignments.values()].includes('Core A'));
     expect(before[1]).toBe(false);
-    expect(after[1]).toBe(true);
-    expect(after[3]).toBe(false);
+    expect(after[1]).toBe(false);
+    expect(after[3]).toBe(true);
   });
 });

@@ -23,9 +23,9 @@ describe('Stage 3 stranding regression', () => {
       { name: 'Kai', group: 'rotational', general_positions: ['F'], primary_positions: ['F'] },
       { name: 'Logan', group: 'developing', general_positions: ['D', 'M'], primary_positions: ['D'] },
       { name: 'Morgan', group: 'developing', general_positions: ['M', 'F'], primary_positions: ['F'] },
-      { name: 'Nico', group: 'developing', general_positions: ['ANY'], primary_positions: ['ANY'] },
-      { name: 'Parker', group: 'developing', general_positions: ['ANY'], primary_positions: ['ANY'] },
-      { name: 'Quinn', group: 'developing', general_positions: ['ANY'], primary_positions: ['ANY'] },
+      { name: 'Nico', group: 'developing', general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] },
+      { name: 'Parker', group: 'developing', general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] },
+      { name: 'Quinn', group: 'developing', general_positions: ['D', 'M', 'F'], primary_positions: ['ANY'] },
     ]);
     const demand = buildDemandModel(game);
     const started = Date.now();
