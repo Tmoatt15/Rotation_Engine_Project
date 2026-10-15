@@ -34,6 +34,7 @@ export interface PlacementResult {
 
 interface PlacementState {
   remainingMin: Map<string, number>;
+  remainingTarget: Map<string, number>;
   remainingMax: Map<string, number>;
   placed?: Map<string, number>;
   outOfPosition?: Map<string, number>;
@@ -231,6 +232,7 @@ function placeDeterministically(
   const rest = new Map(restPins.map((pin) => [pin.player, new Set(pin.blocks)]));
   const state: PlacementState = {
     remainingMin: new Map(quotas.quotas.map((quota) => [quota.player, quota.fieldMin])),
+    remainingTarget: new Map(quotas.quotas.map((quota) => [quota.player, Math.max(quota.fieldTarget, quota.fieldMin)])),
     remainingMax: new Map(quotas.quotas.map((quota) => [quota.player, quota.fieldMax])),
     placed: new Map(),
   };
@@ -246,6 +248,7 @@ function placeDeterministically(
       state.placed!.set(player, (state.placed!.get(player) ?? 0) + 1);
       state.remainingMax.set(player, (state.remainingMax.get(player) ?? 0) - 1);
       state.remainingMin.set(player, Math.max(0, (state.remainingMin.get(player) ?? 0) - 1));
+      state.remainingTarget.set(player, Math.max(0, (state.remainingTarget.get(player) ?? 0) - 1));
     }
   }
   const pinned = new Map<number, Set<string>>();
@@ -276,6 +279,7 @@ function placeDeterministically(
     blocks[block - 1].assignments.set(slot, player.name);
     state.remainingMax.set(player.name, (state.remainingMax.get(player.name) ?? 0) - 1);
     state.remainingMin.set(player.name, Math.max(0, (state.remainingMin.get(player.name) ?? 0) - 1));
+    state.remainingTarget.set(player.name, Math.max(0, (state.remainingTarget.get(player.name) ?? 0) - 1));
     state.placed!.set(player.name, (state.placed!.get(player.name) ?? 0) + 1);
     return true;
   };
@@ -293,6 +297,7 @@ function placeDeterministically(
       block.assignments.set(slot.slot, player.name);
       state.remainingMax.set(player.name, (state.remainingMax.get(player.name) ?? 0) - 1);
       state.remainingMin.set(player.name, Math.max(0, (state.remainingMin.get(player.name) ?? 0) - 1));
+      state.remainingTarget.set(player.name, Math.max(0, (state.remainingTarget.get(player.name) ?? 0) - 1));
       state.placed!.set(player.name, (state.placed!.get(player.name) ?? 0) + 1);
     }
   }
@@ -312,8 +317,8 @@ function placeDeterministically(
       }
     }
   }
-  const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F'): number[] => {
-    const needed = state.remainingMin.get(player.name) ?? 0;
+  const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F', useTarget: boolean): number[] => {
+    const needed = (useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0;
     const frozenBlocks = new Set(frozen.map((block) => block.block));
     const eligible = blocks
       .filter((block) => !frozenBlocks.has(block.block)
@@ -369,30 +374,32 @@ function placeDeterministically(
     }
     return eligible.filter((block) => !selected.has(block));
   };
-  for (const group of order) {
-    const candidates = game.players
-      .filter((player) => (state.remainingMin.get(player.name) ?? 0) > 0
-        && (player.generalPositions.includes(group)
-          || hasBackupForGroup(player, group)
-          || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
-      .sort((left, right) => placementPriority(left, group) - placementPriority(right, group)
-        || left.name.localeCompare(right.name));
-    for (const player of candidates) {
-        const playBlocks = selectSpacedBlocks(player, group);
+  for (const useTarget of [false, true]) {
+    for (const group of order) {
+      const candidates = game.players
+        .filter((player) => ((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) > 0
+          && (player.generalPositions.includes(group)
+            || hasBackupForGroup(player, group)
+            || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
+        .sort((left, right) => placementPriority(left, group) - placementPriority(right, group)
+          || left.name.localeCompare(right.name));
+      for (const player of candidates) {
+        const playBlocks = selectSpacedBlocks(player, group, useTarget);
         for (const blockNumber of playBlocks) {
-          if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
+          if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0) break;
           const slots = demand.fieldSlots.filter((slot) => slot.group === group && !blocks[blockNumber - 1].assignments.has(slot.slot))
             .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
           const slot = slots.find((candidate) => canPlace(player, blockNumber, candidate.slot));
           if (slot) assign(player, blockNumber, slot.slot);
         }
-        if ((state.remainingMin.get(player.name) ?? 0) > 0) {
+        if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) > 0) {
           for (const block of blocks) {
-            if ((state.remainingMin.get(player.name) ?? 0) <= 0) break;
+            if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0) break;
             const slots = demand.fieldSlots.filter((slot) => slot.group === group && !block.assignments.has(slot.slot))
               .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
             const slot = slots.find((candidate) => canPlace(player, block.block, candidate.slot));
             if (slot) assign(player, block.block, slot.slot);
+          }
         }
       }
     }
@@ -401,9 +408,9 @@ function placeDeterministically(
     for (const slot of demand.fieldSlots.filter((candidate) => !block.assignments.has(candidate.slot))) {
       const candidates = game.players
         .filter((player) => canPlace(player, block.block, slot.slot))
-        .sort((left, right) => (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
+        .sort((left, right) => (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
+          || (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
           || groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
-          || (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
           || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name));
@@ -414,7 +421,8 @@ function placeDeterministically(
       const relaxedCandidate = game.players
         .filter((player) => player.generalPositions.includes(groupForSlot(slot.slot))
           && canPlace(player, block.block, slot.slot, true))
-        .sort((left, right) => (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
+        .sort((left, right) => (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
+          || (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
           || groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name))[0];
