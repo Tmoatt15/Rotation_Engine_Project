@@ -237,7 +237,7 @@ function placeDeterministically(
     }
   }
   const players = new Map(game.players.map((player) => [player.name, player]));
-  const canPlace = (player: NormalizedPlayer, block: number, slot: string): boolean => {
+  const canPlace = (player: NormalizedPlayer, block: number, slot: string, ignoreMaximum = false): boolean => {
     const assignments = blocks[block - 1].assignments;
     return player.available
       && (!isDedicatedKeeper(player)
@@ -246,7 +246,7 @@ function placeDeterministically(
       && !isKeeperHalf(game, player, block)
       && !assignmentsHasPlayer(assignments, player.name)
       && !isKeeperHalf(game, player, block)
-      && (state.remainingMax.get(player.name) ?? 0) > 0
+      && (ignoreMaximum || (state.remainingMax.get(player.name) ?? 0) > 0)
       && (softRest || !rest.get(player.name)?.has(block)
         || (state.remainingMin.get(player.name) ?? 0) > 0)
       && isFieldEligible(game, player, block, slot);
@@ -391,7 +391,17 @@ function placeDeterministically(
           || (state.remainingMax.get(right.name) ?? 0) - (state.remainingMax.get(left.name) ?? 0)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name));
-      if (candidates[0]) assign(candidates[0], block.block, slot.slot);
+      if (candidates[0]) {
+        assign(candidates[0], block.block, slot.slot);
+        continue;
+      }
+      const relaxedCandidate = game.players
+        .filter((player) => player.generalPositions.includes(groupForSlot(slot.slot))
+          && canPlace(player, block.block, slot.slot, true))
+        .sort((left, right) => groupAffinity(right, slot.slot) - groupAffinity(left, slot.slot)
+          || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
+          || left.name.localeCompare(right.name))[0];
+      if (relaxedCandidate) assign(relaxedCandidate, block.block, slot.slot);
       else console.log(`[placement] Unfilled: Block ${block.block}, slot ${slot.slot}. No eligible player with remaining capacity.`);
     }
   }
