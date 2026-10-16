@@ -67,7 +67,7 @@ describe('redesign stages 0-2', () => {
     const core = quotas.quotas.find((item) => item.player === 'Core')!;
     expect(core.pinnedBlocks).toEqual([1, 10]);
     expect(core.totalMax).toBeGreaterThanOrEqual(8);
-    expect(core.fieldMin).toBe(5);
+    expect(core.fieldMin + core.pinnedBlocks.length).toBe(4);
     expect(core.fieldTarget).toBe(6);
     expect(core.remainingMax).toBeGreaterThanOrEqual(core.remainingMin);
   });
@@ -82,7 +82,7 @@ describe('redesign stages 0-2', () => {
     const keeper = quotas.quotas.find((item) => item.player === 'Keeper A')!;
     expect(keeper.keeperBlocks).toBe(5);
     expect(keeper.gkMin).toBe(5);
-    expect(keeper.fieldMin).toBe(2);
+    expect(keeper.fieldMin).toBe(3);
     expect(keeper.fieldMax).toBeLessThanOrEqual(5);
     expect(keeper.totalMax).toBeLessThanOrEqual(normalized.totalBlocks);
   });

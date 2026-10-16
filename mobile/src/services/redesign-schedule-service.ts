@@ -23,9 +23,8 @@ function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>): void
   if (!quotas.audit.errors?.length) return;
   throw new RedesignOfferError({
     kind: 'position-shortage',
-    message: `${quotas.audit.errors.join('\n\n')}\n\nTo fix: add one of the listed backup positions or make another player available.`,
+    message: quotas.audit.errors.join('\n\n'),
     buttons: [
-      { label: 'Review Players', action: 'go-to-roster' },
       { label: 'Add Backup Positions', action: 'go-to-builder' },
       { label: 'Cancel', action: 'cancel' },
     ],

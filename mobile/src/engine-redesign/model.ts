@@ -110,6 +110,7 @@ export interface QuotaAudit {
   surplusAssignments: Array<{ group: RedesignGroup; player: string; amount: number }>;
   unfillableWithinMax: number;
   errors?: string[];
+  warnings?: string[];
 }
 
 export interface PlayerQuota {

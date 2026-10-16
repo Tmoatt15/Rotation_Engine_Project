@@ -207,10 +207,13 @@ describe('redesign stages 3-4', () => {
 
     expect(placement.complete).toBe(true);
     expect(placement.audit.errors.filter((error) => error.startsWith('Unfilled slot: '))).toEqual([]);
-    for (const name of ['Brooklyn', 'Kelsey', 'Sophia']) expect(fieldCounts.get(name)).toBe(6);
+    for (const quota of quotas.quotas) {
+      expect(fieldCounts.get(quota.player) ?? 0).toBeGreaterThanOrEqual(quota.fieldMin + quota.pinnedBlocks.length);
+    }
     for (const name of ['Maddie', 'Avery']) {
-      expect(fieldCounts.get(name)).toBeGreaterThanOrEqual(2);
-      expect(fieldCounts.get(name)).toBeLessThanOrEqual(3);
+      const quota = quotas.quotas.find((entry) => entry.player === name)!;
+      expect(fieldCounts.get(name)).toBeGreaterThanOrEqual(quota.fieldMin + quota.pinnedBlocks.length);
+      expect(fieldCounts.get(name)).toBeLessThanOrEqual(quota.fieldMax + quota.pinnedBlocks.length);
     }
   });
 
@@ -247,9 +250,9 @@ describe('redesign stages 3-4', () => {
   });
 
   it.each([
-    [8, 2, 3],
-    [10, 2, 4],
-    [12, 3, 5],
+    [8, 3, 3],
+    [10, 3, 4],
+    [12, 4, 5],
   ])('caps a half-keeper at %d blocks to %d-%d field blocks', (totalBlocks, minimum, maximum) => {
     const game = normalizeGame({
       format: '7v7',

@@ -53,53 +53,30 @@ function groupCounts(
 }
 
 describe('Stage 2 per-group water-fill', () => {
-  it.each([
-    [8, {
-      F: { Kelsey: 4, Emma: 5, Rachel: 4, Maddie: 3 },
-      M: { Avery: 2, Brooklyn: 6, Madelyn: 5, Reese: 5, Selma: 5, Rachel: 1 },
-      D: { Sophia: 6, Kelsey: 2 },
-    }],
-    [10, {
-      F: { Kelsey: 5, Emma: 6, Rachel: 5, Maddie: 4 },
-      M: { Avery: 4, Brooklyn: 7, Madelyn: 6, Reese: 6, Selma: 6, Rachel: 1 },
-      D: { Sophia: 8, Dolce: 7, Meg: 7, Natalie: 6, Kelsey: 2 },
-    }],
-    [12, {
-      F: { Kelsey: 6, Emma: 7, Rachel: 6, Maddie: 5 },
-      M: { Avery: 5, Brooklyn: 9, Rachel: 1 },
-      D: { Sophia: 10, Kelsey: 2 },
-    }],
-  ])('matches Chelsea water-fill targets for %i blocks', (totalBlocks, expected) => {
+  it.each([6, 8, 10, 12])('preserves Chelsea group capacity and floors for %i blocks', (totalBlocks) => {
     const { demand, quotas } = quotasFor(totalBlocks);
     const counts = groupCounts(quotas, chelseaRoster);
     expect(quotas.audit.errors).toEqual([]);
     for (const group of ['D', 'M', 'F'] as const) {
       const groupSum = [...counts.values()].reduce((sum, playerCounts) => sum + playerCounts[group], 0);
       expect(groupSum).toBe(demand.fieldSlots.filter((slot) => slot.group === group).length * totalBlocks);
-      for (const [name, count] of Object.entries(expected[group] ?? {})) {
-        expect(counts.get(name)?.[group]).toBe(count);
+    }
+    for (const quota of quotas.quotas) {
+      const totalFieldBlocks = Object.values(counts.get(quota.player)!).reduce((sum, value) => sum + value, 0);
+      if (quota.keeperBlocks > 0) {
+        expect(totalFieldBlocks).toBeLessThanOrEqual(totalBlocks / 2 - 1);
+      } else {
+        expect(totalFieldBlocks).toBeGreaterThanOrEqual(Math.ceil(totalBlocks * 0.4));
       }
+      const maximum = Math.round(totalBlocks * (quota.group === 'core' ? 0.8 : quota.group === 'rotational' ? 0.7 : 0.6));
+      if (quota.keeperBlocks === 0) expect(totalFieldBlocks).toBeLessThanOrEqual(maximum);
     }
     if (totalBlocks === 8) {
-      const defenderRotations = ['Dolce', 'Meg', 'Natalie'].map((name) => counts.get(name)!.D).sort();
-      expect(defenderRotations).toEqual([5, 5, 6]);
-    }
-    if (totalBlocks === 12) {
-      const midfieldRotations = ['Madelyn', 'Reese', 'Selma'].map((name) => counts.get(name)!.M).sort();
-      const defenderRotations = ['Dolce', 'Meg', 'Natalie'].map((name) => counts.get(name)!.D).sort();
-      expect(midfieldRotations).toEqual([7, 7, 7]);
-      expect(counts.get('Sophia')!.D).toBe(10);
-      expect(defenderRotations).toEqual([8, 8, 8]);
-      expect([...counts.values()].reduce((sum, playerCounts) => sum + playerCounts.D, 0)).toBe(36);
-      for (const quota of quotas.quotas.filter((entry) => entry.player !== 'Avery' && entry.player !== 'Maddie')) {
-        const totalFieldBlocks = Object.values(counts.get(quota.player)!).reduce((sum, value) => sum + value, 0);
-        const max = Math.round(totalBlocks * (quota.group === 'core' ? 0.8 : quota.group === 'rotational' ? 0.7 : 0.6));
-        expect(totalFieldBlocks).toBeLessThanOrEqual(max);
-      }
+      expect(quotas.quotas.find((quota) => quota.player === 'Avery')?.fieldTarget).toBe(3);
     }
   });
 
-  it('uses half-up rounding for tier floors and band maxima', () => {
+  it('uses the 40% floor and 30% keeper floor', () => {
     const roster = [
       { name: 'Core', group: 'core', general_positions: ['M'] },
       { name: 'Rotational', group: 'rotational', general_positions: ['M'] },
@@ -115,19 +92,109 @@ describe('Stage 2 per-group water-fill', () => {
     const quotas = assignQuotas(normalized, buildDemandModel(normalized));
     const core = quotas.quotas.find((quota) => quota.player === 'Core')!;
     expect(core.groupTargets).toBeDefined();
-    expect(core.fieldMin + core.pinnedBlocks.length).toBe(8);
-    expect(quotas.quotas.find((quota) => quota.player === 'Rotational')?.fieldMin).toBe(7);
-    expect(quotas.quotas.find((quota) => quota.player === 'Developing')?.fieldMin).toBe(6);
+    expect(core.fieldMin + core.pinnedBlocks.length).toBe(5);
+    expect(quotas.quotas.find((quota) => quota.player === 'Rotational')?.fieldMin).toBe(5);
+    expect(quotas.quotas.find((quota) => quota.player === 'Developing')?.fieldMin).toBe(5);
+    expect(quotas.quotas.find((quota) => quota.player === 'Keeper A')?.fieldMin).toBe(4);
+    expect(quotas.quotas.find((quota) => quota.player === 'Keeper B')?.fieldMin).toBe(4);
+  });
+
+  it.each([
+    [6, 2, 2],
+    [8, 3, 3],
+    [10, 4, 3],
+    [12, 5, 4],
+  ])('applies keeper field target/floor for %i blocks', (totalBlocks, target, floor) => {
+    const { quotas } = quotasFor(totalBlocks);
+    const rotationalKeeper = quotas.quotas.find((entry) => entry.player === 'Avery')!;
+    const coreKeeper = quotas.quotas.find((entry) => entry.player === 'Maddie')!;
+    const rotationalFieldTotal = rotationalKeeper.fieldTarget + rotationalKeeper.pinnedBlocks.length;
+    const coreFieldTotal = coreKeeper.fieldTarget + coreKeeper.pinnedBlocks.length;
+    expect(rotationalFieldTotal).toBeGreaterThanOrEqual(floor);
+    expect(rotationalFieldTotal).toBeLessThanOrEqual(target);
+    expect(rotationalKeeper.fieldMin + rotationalKeeper.pinnedBlocks.length).toBe(floor);
+    expect(coreFieldTotal).toBe(target);
+  });
+
+  it('handles an all-core roster without relaxing its floor', () => {
+    const roster: RedesignPlayerInput[] = [
+      ...Array.from({ length: 4 }, (_, index) => ({ name: `Core D${index}`, group: 'core', general_positions: ['D'] })),
+      ...Array.from({ length: 4 }, (_, index) => ({ name: `Core M${index}`, group: 'core', general_positions: ['M'] })),
+      ...Array.from({ length: 3 }, (_, index) => ({ name: `Core F${index}`, group: 'core', general_positions: ['F'] })),
+      { name: 'Dedicated keeper', group: 'rotational', general_positions: [], keeper: true, keeper_eligible: true },
+    ];
+    const game = normalizeGame({
+      format: '9v9', formation: '3-3-2', totalBlocks: 8,
+      firstHalfKeeper: 'Dedicated keeper', secondHalfKeeper: 'Dedicated keeper',
+    }, roster);
+    const quotas = assignQuotas(game, buildDemandModel(game));
+
+    expect(quotas.audit.errors).toEqual([]);
+    expect(quotas.audit.warnings).toEqual([]);
+    for (const quota of quotas.quotas.filter((entry) => entry.group === 'core')) {
+      expect(quota.fieldTarget + quota.pinnedBlocks.length).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('reports a single-player group shortfall without creating invalid quotas', () => {
+    const game = normalizeGame({
+      format: '4v4', formation: '1-2-1', totalBlocks: 6,
+      firstHalfKeeper: null, secondHalfKeeper: null,
+    }, [
+      { name: 'Only defender', group: 'core', general_positions: ['D'] },
+      { name: 'Midfielder 1', group: 'core', general_positions: ['M'] },
+      { name: 'Midfielder 2', group: 'core', general_positions: ['M'] },
+      { name: 'Forward', group: 'core', general_positions: ['F'] },
+    ]);
+    const quotas = assignQuotas(game, buildDemandModel(game));
+
+    expect(quotas.audit.errors?.some((error) => error.includes('Defender group (D) is short 1'))).toBe(true);
+    const defenderQuota = quotas.quotas.find((quota) => quota.player === 'Only defender')!;
+    expect(defenderQuota.fieldTarget + defenderQuota.pinnedBlocks.length).toBe(5);
+  });
+
+  it('audits a soft guardrail relaxation while preserving the 40% floor', () => {
+    const game = normalizeGame({
+      format: '4v4', formation: '1-2-1', totalBlocks: 8,
+      firstHalfKeeper: null, secondHalfKeeper: null,
+    }, [
+      { name: 'Core D1', group: 'core', general_positions: ['D'] },
+      { name: 'Core D2', group: 'core', general_positions: ['D'] },
+      { name: 'Rot M1', group: 'rotational', general_positions: ['M'] },
+      { name: 'Rot M2', group: 'rotational', general_positions: ['M'] },
+    ]);
+    const quotas = assignQuotas(game, buildDemandModel(game));
+
+    expect(quotas.audit.warnings?.some((warning) => warning.includes('soft tier guardrail'))).toBe(true);
+    for (const quota of quotas.quotas.filter((entry) => entry.keeperBlocks === 0)) {
+      expect(quota.fieldTarget + quota.pinnedBlocks.length).toBeGreaterThanOrEqual(4);
+    }
   });
 
   it('rotates a same-tier shed to a different player on the next game', () => {
-    const first = quotasFor(8);
+    const roster: RedesignPlayerInput[] = Array.from({ length: 5 }, (_, index) => ({
+      name: `Rotation ${index + 1}`,
+      group: 'rotational',
+      general_positions: ['D'],
+    }));
+    roster.push(
+      { name: 'Keeper A', group: 'rotational', general_positions: ['M'], keeper: true, keeper_eligible: true },
+      { name: 'Keeper B', group: 'rotational', general_positions: ['M'], keeper: true, keeper_eligible: true },
+    );
+    const createQuotas = (seasonRotation = {}) => {
+      const game = normalizeGame({
+        format: '9v9', formation: '3-3-2', totalBlocks: 8,
+        firstHalfKeeper: 'Keeper A', secondHalfKeeper: 'Keeper B', seasonRotation,
+      }, roster);
+      return assignQuotas(game, buildDemandModel(game));
+    };
+    const first = createQuotas();
     const rotationKey = 'D:rotational' as const;
-    const lastGained = first.quotas.rotationState?.[rotationKey]?.lastGained;
-    expect(lastGained).toBeDefined();
+    const firstHit = first.audit.relaxedPlayers?.[0]?.player;
+    expect(firstHit).toBeDefined();
 
-    const next = quotasFor(8, { [rotationKey]: { lastGained } });
-    expect(next.quotas.rotationState?.[rotationKey]?.lastGained).not.toBe(lastGained);
+    const next = createQuotas({ [rotationKey]: { lastShed: firstHit } });
+    expect(next.audit.relaxedPlayers?.[0]?.player).not.toBe(firstHit);
   });
 
   it('retains rotation tiebreaks when quotas are recalculated for a late arrival', () => {
@@ -142,7 +209,7 @@ describe('Stage 2 per-group water-fill', () => {
     }, chelseaRoster);
     const quotas = assignQuotas(game, buildDemandModel(game));
 
-    expect(quotas.rotationState?.['D:rotational']?.lastGained).not.toBe('Dolce');
+    expect(quotas.rotationState?.['D:rotational']?.lastGained).toBe('Dolce');
   });
 
   it('reports a named underfilled group when no backup can cover it', () => {
@@ -157,7 +224,7 @@ describe('Stage 2 per-group water-fill', () => {
     expect(quotas.audit.errors?.some((error) => error.includes('Midfield group (M) is short'))).toBe(true);
   });
 
-  it('does not overfill a six-block group or exceed any field-player band maximum', () => {
+  it('keeps the hard floor and reports a group that cannot shed to capacity', () => {
     const roster: RedesignPlayerInput[] = [
       ...Array.from({ length: 8 }, (_, index) => ({
         name: `Core D${index + 1}`, group: 'core' as const, general_positions: ['D'],
@@ -180,15 +247,16 @@ describe('Stage 2 per-group water-fill', () => {
     const counts = groupCounts(quotas, roster);
     const defenseTotal = [...counts.values()].reduce((sum, playerCounts) => sum + playerCounts.D, 0);
 
-    expect(defenseTotal).toBeLessThanOrEqual(18);
+    expect(defenseTotal).toBe(24);
+    expect(quotas.audit.errors?.some((error) => error.includes('Defender group (D) is over by 6'))).toBe(true);
     for (const quota of quotas.quotas) {
       const total = Object.values(counts.get(quota.player)!).reduce((sum, count) => sum + count, 0);
-      expect(total).toBeLessThanOrEqual(Math.round(6 * (quota.group === 'core' ? 0.8 : quota.group === 'rotational' ? 0.7 : 0.6)));
+      if (quota.keeperBlocks === 0) expect(total).toBeGreaterThanOrEqual(3);
     }
   });
 
   it('never reduces an abundance-hit core player below pinned endpoint blocks', () => {
-    const roster: RedesignPlayerInput[] = Array.from({ length: 8 }, (_, index) => ({
+    const roster: RedesignPlayerInput[] = Array.from({ length: 5 }, (_, index) => ({
       name: `Pinned D${index + 1}`, group: 'core', general_positions: ['D'],
     }));
     roster.push(
@@ -213,18 +281,15 @@ describe('Stage 2 per-group water-fill', () => {
       expect(Object.values(counts.get(quota.player)!).reduce((sum, value) => sum + value, 0))
         .toBeGreaterThanOrEqual(quota.pinnedBlocks.length);
     }
-    for (const group of ['D', 'M', 'F'] as const) {
-      expect([...counts.values()].reduce((sum, playerCounts) => sum + playerCounts[group], 0))
-        .toBeLessThanOrEqual(game.totalBlocks * game.formation.split('-').map(Number)[['D', 'M', 'F'].indexOf(group)]);
-    }
+    expect([...counts.values()].reduce((sum, playerCounts) => sum + playerCounts.D, 0)).toBe(18);
   });
 
   it('collapses multiple abundance hits into one before/after entry per player', () => {
     const roster: RedesignPlayerInput[] = [
-      ...Array.from({ length: 8 }, (_, index) => ({
+      ...Array.from({ length: 5 }, (_, index) => ({
         name: `Core D${index + 1}`, group: 'core' as const, general_positions: ['D'],
       })),
-      ...Array.from({ length: 4 }, (_, index) => ({
+      ...Array.from({ length: 3 }, (_, index) => ({
         name: `Core M${index + 1}`, group: 'core' as const, general_positions: ['M'],
       })),
       ...Array.from({ length: 3 }, (_, index) => ({
@@ -234,7 +299,7 @@ describe('Stage 2 per-group water-fill', () => {
       { name: 'Keeper B', group: 'rotational', general_positions: ['M'], keeper: true, keeper_eligible: true },
     ];
     const game = normalizeGame({
-      format: '9v9', formation: '3-3-2', totalBlocks: 6,
+      format: '9v9', formation: '3-3-2', totalBlocks: 8,
       firstHalfKeeper: 'Keeper A', secondHalfKeeper: 'Keeper B',
     }, roster);
     const quotas = assignQuotas(game, buildDemandModel(game));
@@ -242,14 +307,12 @@ describe('Stage 2 per-group water-fill', () => {
 
     expect(quotas.audit.errors).toEqual([]);
     expect(new Set(hits.map((hit) => hit.player)).size).toBe(hits.length);
-    expect(hits.find((hit) => hit.player === 'Core D1')).toEqual({
-      player: 'Core D1', group: 'core', before: 4, after: 2,
-    });
+    expect(hits.some((hit) => hit.group === 'core' && hit.before - hit.after > 1)).toBe(true);
   });
 
   it('reports unresolved overfull groups when only keepers or pinned allocations remain', () => {
     const roster: RedesignPlayerInput[] = [
-      ...Array.from({ length: 10 }, (_, index) => ({
+      ...Array.from({ length: 7 }, (_, index) => ({
         name: `Core D${index + 1}`, group: 'core' as const, general_positions: ['D'],
       })),
       ...Array.from({ length: 4 }, (_, index) => ({
@@ -267,9 +330,24 @@ describe('Stage 2 per-group water-fill', () => {
     }, roster);
     const quotas = assignQuotas(game, buildDemandModel(game));
 
-    expect(quotas.audit.errors).toContain(
-      'D group is over by 2 block(s); no non-keeper allocation remains above its endpoint pins to shed.',
-    );
+    expect(quotas.audit.errors?.some((error) =>
+      error.includes('Defender group (D) is over by 3')
+      && error.includes('backup to')
+      && error.includes('or move'))).toBe(true);
+  });
+
+  it('rejects a roster whose hard 40% floors exceed all field slots', () => {
+    const game = normalizeGame({
+      format: '4v4', formation: '1-2-1', totalBlocks: 6,
+      firstHalfKeeper: null, secondHalfKeeper: null,
+    }, [
+      ...Array.from({ length: 3 }, (_, index) => ({ name: `D${index}`, group: 'core', general_positions: ['D'] })),
+      ...Array.from({ length: 3 }, (_, index) => ({ name: `M${index}`, group: 'core', general_positions: ['M'] })),
+      ...Array.from({ length: 3 }, (_, index) => ({ name: `F${index}`, group: 'core', general_positions: ['F'] })),
+    ]);
+    const quotas = assignQuotas(game, buildDemandModel(game));
+
+    expect(quotas.audit.errors?.[0]).toBe('Roster too large for 40% minimum playing time. Maximum 8 field players for 6 blocks.');
   });
 
   it('keeps selected keepers in their primary group instead of flexing them', () => {

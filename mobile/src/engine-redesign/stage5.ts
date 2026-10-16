@@ -54,6 +54,7 @@ function cloneQuotas(quotas: QuotaAssignment): QuotaAssignment {
       ...quotas.audit,
       relaxedGroups: quotas.audit.relaxedGroups.map((entry) => ({ ...entry })),
       surplusAssignments: quotas.audit.surplusAssignments.map((entry) => ({ ...entry })),
+      ...(quotas.audit.warnings ? { warnings: [...quotas.audit.warnings] } : {}),
     },
   };
 }

@@ -23,6 +23,18 @@ function maximumBlocks(totalBlocks: number, percentage: number): number {
   return Math.max(1, Math.min(totalBlocks, Math.round(totalBlocks * percentage)));
 }
 
+function keeperFieldTarget(totalBlocks: number): number {
+  return Math.max(0, totalBlocks / 2 - 1);
+}
+
+function keeperFieldFloor(totalBlocks: number): number {
+  return Math.min(keeperFieldTarget(totalBlocks), Math.ceil(totalBlocks * 0.3));
+}
+
+function nonKeeperFieldFloor(totalBlocks: number): number {
+  return Math.ceil(totalBlocks * 0.4);
+}
+
 function isDedicatedKeeper(player: NormalizedPlayer): boolean {
   return player.keeper && player.generalPositions.length === 0;
 }
@@ -41,7 +53,7 @@ function isHalfKeeper(game: NormalizedGame, player: NormalizedPlayer, demand: De
 function maximumFieldBlocks(game: NormalizedGame, player: NormalizedPlayer, demand: DemandModel): number {
   const available = game.totalBlocks - keeperBlocks(game, player, demand);
   return isHalfKeeper(game, player, demand)
-    ? Math.min(available, Math.max(0, Math.floor(game.totalBlocks / 2) - 1))
+    ? Math.min(available, keeperFieldTarget(game.totalBlocks))
     : available;
 }
 
@@ -235,14 +247,20 @@ interface WaterfillPlayer {
   player: NormalizedPlayer;
   primaryGroup: FieldGroup | null;
   keeperBlocks: number;
+  selectedKeeper: boolean;
   floor: number;
+  bandFloor: number;
   maximum: number;
+  pinnedBlocks: number[];
+  pinnedByGroup: Record<FieldGroup, number>;
 }
 
 const FIELD_GROUPS: FieldGroup[] = ['D', 'M', 'F'];
 const SHED_TIERS: RedesignGroup[] = ['developing', 'rotational'];
-const GAIN_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
-const FLEX_TIERS: RedesignGroup[] = ['rotational', 'developing', 'core'];
+const HIT_TIERS: RedesignGroup[] = ['developing', 'rotational', 'core'];
+const SURPLUS_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
+const FLEX_OUT_TIERS: RedesignGroup[] = ['rotational', 'developing', 'core'];
+const FLEX_IN_TIERS: RedesignGroup[] = ['core', 'rotational'];
 
 function groupForPosition(position: string): FieldGroup | null {
   const normalized = position.toUpperCase();
@@ -293,16 +311,30 @@ function allocationTotal(allocation: Map<FieldGroup, number> | undefined): numbe
   return allocation ? [...allocation.values()].reduce((sum, value) => sum + value, 0) : 0;
 }
 
-function cloneAllocations(source: FieldAllocation): FieldAllocation {
-  return new Map([...source].map(([name, counts]) => [name, new Map(counts)]));
-}
-
 function cloneRotation(source: WaterfillRotationState): WaterfillRotationState {
   return Object.fromEntries(Object.entries(source).map(([key, value]) => [key, { ...value }]));
 }
 
 function groupPositionNames(demand: DemandModel, group: FieldGroup): string[] {
   return [...new Set(demand.fieldSlots.filter((slot) => slot.group === group).map((slot) => slot.slot))];
+}
+
+function pinnedBlocksByGroup(
+  game: NormalizedGame,
+  player: NormalizedPlayer,
+  primary: FieldGroup | null,
+): { blocks: number[]; counts: Record<FieldGroup, number> } {
+  const pins = new Map<number, FieldGroup>();
+  for (const block of endpointPins(game, player)) {
+    if (primary) pins.set(block, primary);
+  }
+  for (const pin of game.pins.filter((entry) => entry.player === player.name)) {
+    const group = groupForPosition(pin.slot);
+    if (group) pins.set(pin.block, group);
+  }
+  const counts: Record<FieldGroup, number> = { D: 0, M: 0, F: 0 };
+  for (const group of pins.values()) counts[group] += 1;
+  return { blocks: [...pins.keys()].sort((left, right) => left - right), counts };
 }
 
 function buildWaterfillQuotas(
@@ -317,232 +349,272 @@ function buildWaterfillQuotas(
   const relaxedPlayers: Array<{ player: string; group: RedesignGroup; before: number; after: number }> = [];
   const surplusAssignments: QuotaAssignment['audit']['surplusAssignments'] = [];
   const errors: string[] = [];
-  const endpointPinCounts = new Map<string, number>();
+  const warnings: string[] = [];
 
   for (const player of fieldPlayers) {
     const group = primaryGroup(player);
     const keeper = keeperBlocks(game, player, demand);
     const keeperFieldMax = maximumFieldBlocks(game, player, demand);
+    const keeperFloor = Math.min(keeperFieldMax, keeperFieldFloor(game.totalBlocks));
     const isSelectedKeeper = keeper > 0;
     const lateArrival = game.lateArrival?.player === player.name ? game.lateArrival : undefined;
     const lateTarget = lateArrival
       ? lateArrival.targetBlocks ?? Math.round(BANDS[player.group].midpoint * (game.totalBlocks - lateArrival.arrivalBlock + 1))
       : undefined;
-    const start = lateTarget ?? (isSelectedKeeper
+    const pinData = pinnedBlocksByGroup(game, player, group);
+    const bandFloor = lateTarget ?? (isSelectedKeeper
+      ? player.group === 'rotational' ? keeperFloor : keeperFieldMax
+      : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0));
+    const floor = Math.max(pinData.blocks.length, lateTarget ?? (isSelectedKeeper
+      ? player.group === 'rotational' ? keeperFloor : keeperFieldMax
+      : nonKeeperFieldFloor(game.totalBlocks)));
+    const start = Math.max(pinData.blocks.length, lateTarget ?? (isSelectedKeeper
       ? keeperFieldMax
-      : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0));
-    const floor = lateTarget ?? (isSelectedKeeper
-      ? player.group === 'core' ? start : Math.min(start, Math.ceil(game.totalBlocks * 0.2))
-      : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0));
-    const maximum = lateTarget ?? (isSelectedKeeper ? keeperFieldMax : maximumBlocks(game.totalBlocks, BANDS[player.group].max));
-    info.set(player.name, { player, primaryGroup: group, keeperBlocks: keeper, floor, maximum });
-    allocations.set(player.name, new Map(FIELD_GROUPS.map((fieldGroup) => [fieldGroup, fieldGroup === group ? start : 0])));
-    endpointPinCounts.set(player.name, endpointPins(game, player).length);
+      : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0)));
+    const maximum = Math.max(start, lateTarget ?? (isSelectedKeeper
+      ? keeperFieldMax
+      : maximumBlocks(game.totalBlocks, BANDS[player.group].max)));
+    info.set(player.name, {
+      player,
+      primaryGroup: group,
+      keeperBlocks: keeper,
+      selectedKeeper: isSelectedKeeper,
+      floor,
+      bandFloor: Math.max(pinData.blocks.length, bandFloor),
+      maximum,
+      pinnedBlocks: pinData.blocks,
+      pinnedByGroup: pinData.counts,
+    });
+    const counts = new Map(FIELD_GROUPS.map((fieldGroup) => [fieldGroup, pinData.counts[fieldGroup]]));
+    const unpinnedStart = start - pinData.blocks.length;
+    const startGroup = group ?? FIELD_GROUPS.find((fieldGroup) => pinData.counts[fieldGroup] > 0);
+    if (startGroup && unpinnedStart > 0) {
+      counts.set(startGroup, (counts.get(startGroup) ?? 0) + unpinnedStart);
+    }
+    allocations.set(player.name, counts);
   }
 
   const slots = new Map(FIELD_GROUPS.map((group) => [
     group,
     demand.fieldSlots.filter((slot) => slot.group === group).length * game.totalBlocks,
   ]));
+  const minimumFieldBlocks = [...info.values()].reduce((sum, candidate) => sum + candidate.floor, 0);
+  const totalFieldSlots = FIELD_GROUPS.reduce((sum, group) => sum + (slots.get(group) ?? 0), 0);
+  if (minimumFieldBlocks > totalFieldSlots) {
+    const maximumPlayers = Math.floor(totalFieldSlots / nonKeeperFieldFloor(game.totalBlocks));
+    errors.push(`Roster too large for 40% minimum playing time. Maximum ${maximumPlayers} field players for ${game.totalBlocks} blocks.`);
+  }
   const groupLoad = (group: FieldGroup): number => [...allocations.values()]
     .reduce((sum, count) => sum + (count.get(group) ?? 0), 0);
   const playerTotal = (name: string): number => allocationTotal(allocations.get(name));
-  const playerInfo = (name: string): WaterfillPlayer | undefined => info.get(name);
   const groupMembers = (group: FieldGroup): WaterfillPlayer[] => [...info.values()]
     .filter((candidate) => candidate.primaryGroup === group);
+  const allocationMembers = (group: FieldGroup): WaterfillPlayer[] => [...info.values()]
+    .filter((candidate) => amountInGroup(candidate.player.name, group) > 0);
   const amountInGroup = (name: string, group: FieldGroup): number => allocations.get(name)?.get(group) ?? 0;
 
-  const shedOne = (candidate: WaterfillPlayer, group: FieldGroup): boolean => {
+  const isGuardrailExempt = (candidate: WaterfillPlayer): boolean => candidate.selectedKeeper
+    || game.lateArrival?.player === candidate.player.name
+    || game.pins.some((pin) => pin.player === candidate.player.name);
+  const guardrailAllows = (candidate: WaterfillPlayer, nextTotal: number): boolean => {
+    if (isGuardrailExempt(candidate)) return true;
+    const totals = [...info.values()]
+      .filter((member) => !isGuardrailExempt(member))
+      .map((member) => ({
+        tier: member.player.group,
+        total: member.player.name === candidate.player.name ? nextTotal : playerTotal(member.player.name),
+      }));
+    const core = totals.filter((entry) => entry.tier === 'core').map((entry) => entry.total);
+    const rotational = totals.filter((entry) => entry.tier === 'rotational').map((entry) => entry.total);
+    const developing = totals.filter((entry) => entry.tier === 'developing').map((entry) => entry.total);
+    return (!core.length || !rotational.length || Math.min(...core) >= Math.max(...rotational))
+      && (!rotational.length || !developing.length || Math.min(...rotational) >= Math.max(...developing));
+  };
+  const noteGuardrailRelaxation = (group: FieldGroup, action: string): void => {
+    const warning = `${group} group ${action} proceeded after the soft tier guardrail blocked all valid candidates.`;
+    if (!warnings.includes(warning)) warnings.push(warning);
+  };
+  const shedOne = (
+    candidate: WaterfillPlayer,
+    group: FieldGroup,
+    floor: number,
+  ): boolean => {
     const amount = amountInGroup(candidate.player.name, group);
-    if (amount <= 0 || playerTotal(candidate.player.name) <= candidate.floor) return false;
+    if (amount <= (candidate.pinnedByGroup[group] ?? 0) || playerTotal(candidate.player.name) <= floor) return false;
     allocations.get(candidate.player.name)!.set(group, amount - 1);
     writeRotation(rotationState, group, candidate.player.group, 'lastShed', candidate.player.name);
     return true;
   };
-
-  const shedGroup = (group: FieldGroup): boolean => {
+  const shedBandToFloor = (group: FieldGroup): boolean => {
     let changed = false;
     for (const tier of SHED_TIERS) {
       while (groupLoad(group) > (slots.get(group) ?? 0)) {
-        const tierMembers = groupMembers(group).filter((candidate) => candidate.player.group === tier);
-        const nonKeepers = tierMembers.filter((candidate) => candidate.keeperBlocks === 0
-          && playerTotal(candidate.player.name) > candidate.floor
-          && amountInGroup(candidate.player.name, group) > 0);
-        const candidates = nonKeepers.length
-          ? nonKeepers
-          : tierMembers.filter((candidate) => candidate.keeperBlocks > 0
-            && candidate.player.group !== 'core'
-            && playerTotal(candidate.player.name) > candidate.floor
-            && amountInGroup(candidate.player.name, group) > 0);
-        const next = rotatedPlayers(candidates, rotationState, group, tier, 'lastShed')[0];
-        if (!next || !shedOne(next, group)) break;
+        const tierMembers = allocationMembers(group).filter((candidate) => candidate.player.group === tier);
+        const nonKeepers = tierMembers.filter((candidate) => !candidate.selectedKeeper
+          && playerTotal(candidate.player.name) > candidate.bandFloor
+          && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0));
+        const rotationalKeepers = tier === 'rotational'
+          ? tierMembers.filter((candidate) => candidate.selectedKeeper
+            && playerTotal(candidate.player.name) > candidate.bandFloor
+            && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0))
+          : [];
+        const candidates = rotatedPlayers(
+          nonKeepers.length ? nonKeepers : rotationalKeepers,
+          rotationState,
+          group,
+          tier,
+          'lastShed',
+        );
+        const next = candidates[0];
+        if (!next || !shedOne(next, group, next.bandFloor)) break;
         changed = true;
       }
       if (groupLoad(group) <= (slots.get(group) ?? 0)) break;
     }
     return changed;
   };
-
-  const snapshot = () => ({
-    allocations: cloneAllocations(allocations),
-    rotation: cloneRotation(rotationState),
-    relaxedLength: relaxedPlayers.length,
-    surplusLength: surplusAssignments.length,
-  });
-  const restore = (saved: ReturnType<typeof snapshot>): void => {
-    for (const [name, count] of saved.allocations) allocations.set(name, new Map(count));
-    rotationState = saved.rotation;
-    relaxedPlayers.length = saved.relaxedLength;
-    surplusAssignments.length = saved.surplusLength;
-  };
-
   const transfer = (candidate: WaterfillPlayer, from: FieldGroup, to: FieldGroup): boolean => {
     const counts = allocations.get(candidate.player.name);
-    if (!counts || candidate.keeperBlocks > 0 || (counts.get(from) ?? 0) <= 0) return false;
+    if (!counts || candidate.selectedKeeper
+      || (counts.get(from) ?? 0) <= (candidate.pinnedByGroup[from] ?? 0)) return false;
     counts.set(from, (counts.get(from) ?? 0) - 1);
     counts.set(to, (counts.get(to) ?? 0) + 1);
     writeRotation(rotationState, from, candidate.player.group, 'lastShed', candidate.player.name);
     writeRotation(rotationState, to, candidate.player.group, 'lastGained', candidate.player.name);
     return true;
   };
-
-  const tryFlexMove = (
-    candidate: WaterfillPlayer,
-    from: FieldGroup,
-    to: FieldGroup,
-    visited: Set<FieldGroup>,
-    depth: number,
-  ): boolean => {
-    const saved = snapshot();
+  const tryFlexMove = (candidate: WaterfillPlayer, from: FieldGroup, to: FieldGroup): boolean => {
     if (!transfer(candidate, from, to)) return false;
-    shedGroup(to);
-    if (groupLoad(to) <= (slots.get(to) ?? 0)) return true;
-    if (depth < 2) {
-      for (const tier of FLEX_TIERS) {
-        const chainCandidates = rotatedPlayers(
-          groupMembers(to).filter((member) => member.player.group === tier
-            && amountInGroup(member.player.name, to) > 0
-              && member.keeperBlocks === 0
-              && backupGroups(member.player).some((backup) => !visited.has(backup) && backup !== to)),
+    while (groupLoad(to) > (slots.get(to) ?? 0)) {
+      if (!shedBandToFloor(to)) break;
+    }
+    return true;
+  };
+  const flexOut = (group: FieldGroup): void => {
+    for (const tier of FLEX_OUT_TIERS) {
+      while (groupLoad(group) > (slots.get(group) ?? 0)) {
+        const candidates = rotatedPlayers(
+          allocationMembers(group).filter((candidate) => candidate.player.group === tier
+            && !candidate.selectedKeeper
+            && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0)
+            && backupGroups(candidate.player).some((backup) => backup !== group)),
           rotationState,
-          to,
+          group,
           tier,
           'lastShed',
         );
-        for (const member of chainCandidates) {
-          const destinations = backupGroups(member.player)
-            .filter((backup) => !visited.has(backup) && backup !== to)
+        let movedThisRound = false;
+        for (const candidate of candidates) {
+          if (groupLoad(group) <= (slots.get(group) ?? 0)) break;
+          const destinations = backupGroups(candidate.player)
+            .filter((backup) => backup !== group)
             .sort((left, right) => (slots.get(right)! - groupLoad(right)) - (slots.get(left)! - groupLoad(left))
               || FIELD_GROUPS.indexOf(left) - FIELD_GROUPS.indexOf(right));
           for (const destination of destinations) {
-            if (tryFlexMove(member, to, destination, new Set([...visited, to]), depth + 1)
-              && groupLoad(to) <= (slots.get(to) ?? 0)) return true;
+            if (tryFlexMove(candidate, group, destination)) {
+              movedThisRound = true;
+              break;
+            }
           }
         }
+        if (!movedThisRound) break;
       }
+      if (groupLoad(group) <= (slots.get(group) ?? 0)) break;
     }
-    restore(saved);
-    return false;
   };
 
-  const flexOut = (group: FieldGroup): void => {
-    const flexOneRound = (tier: RedesignGroup): void => {
-      const candidates = rotatedPlayers(
-        groupMembers(group).filter((candidate) => candidate.player.group === tier
-          && candidate.keeperBlocks === 0
-          && amountInGroup(candidate.player.name, group) > 0
-          && backupGroups(candidate.player).length > 0),
-        rotationState,
-        group,
-        tier,
-        'lastShed',
-      );
-      for (const candidate of candidates) {
-        if (groupLoad(group) <= (slots.get(group) ?? 0)) break;
-        const destinations = backupGroups(candidate.player)
-          .filter((backup) => backup !== group)
-          .sort((left, right) => (slots.get(right)! - groupLoad(right)) - (slots.get(left)! - groupLoad(left))
-            || FIELD_GROUPS.indexOf(left) - FIELD_GROUPS.indexOf(right));
-        for (const destination of destinations) {
-          if (tryFlexMove(candidate, group, destination, new Set([group]), 0)) break;
-        }
-      }
-    };
+  for (const group of FIELD_GROUPS) shedBandToFloor(group);
+  for (const group of FIELD_GROUPS) flexOut(group);
 
-    flexOneRound('rotational');
-    flexOneRound('developing');
+  for (const group of FIELD_GROUPS) {
     while (groupLoad(group) > (slots.get(group) ?? 0)) {
       const candidates = rotatedPlayers(
-        groupMembers(group).filter((candidate) => candidate.player.group === 'core'
-          && candidate.keeperBlocks === 0
-          && amountInGroup(candidate.player.name, group) > 0
-          && backupGroups(candidate.player).length > 0),
+        allocationMembers(group).filter((candidate) => candidate.selectedKeeper
+          && candidate.player.group === 'rotational'
+          && playerTotal(candidate.player.name) > candidate.floor
+          && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0)),
         rotationState,
         group,
-        'core',
+        'rotational',
         'lastShed',
       );
-      let changed = false;
-      for (const candidate of candidates) {
-        if (groupLoad(group) <= (slots.get(group) ?? 0)) break;
-        const destinations = backupGroups(candidate.player)
-          .filter((backup) => backup !== group)
-          .sort((left, right) => (slots.get(right)! - groupLoad(right)) - (slots.get(left)! - groupLoad(left))
-            || FIELD_GROUPS.indexOf(left) - FIELD_GROUPS.indexOf(right));
-        for (const destination of destinations) {
-          if (tryFlexMove(candidate, group, destination, new Set([group]), 0)) {
-            changed = true;
+      const next = candidates[0];
+      if (!next || !shedOne(next, group, next.floor)) break;
+    }
+  }
+
+  const hitOne = (candidate: WaterfillPlayer, group: FieldGroup, enforceGuardrail: boolean): boolean => {
+    const name = candidate.player.name;
+    if (playerTotal(name) <= candidate.floor
+      || amountInGroup(name, group) <= (candidate.pinnedByGroup[group] ?? 0)
+      || (enforceGuardrail && !guardrailAllows(candidate, playerTotal(name) - 1))) return false;
+    const before = playerTotal(name);
+    allocations.get(name)!.set(group, amountInGroup(name, group) - 1);
+    writeRotation(rotationState, group, candidate.player.group, 'lastShed', name);
+    relaxedPlayers.push({ player: name, group: candidate.player.group, before, after: before - 1 });
+    return true;
+  };
+  for (const group of FIELD_GROUPS) {
+    while (groupLoad(group) > (slots.get(group) ?? 0)) {
+      let hit = false;
+      let guardrailBlocked = false;
+      for (const tier of HIT_TIERS) {
+        const eligible = allocationMembers(group).filter((candidate) => candidate.player.group === tier
+          && !candidate.selectedKeeper
+          && playerTotal(candidate.player.name) > candidate.floor
+          && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0));
+        const rotationOrder = rotatedPlayers(eligible, rotationState, group, tier, 'lastShed');
+        const rank = new Map(rotationOrder.map((candidate, index) => [candidate.player.name, index]));
+        const candidates = [...eligible].sort((left, right) =>
+          playerTotal(right.player.name) - playerTotal(left.player.name)
+          || (rank.get(left.player.name) ?? 0) - (rank.get(right.player.name) ?? 0)
+          || left.player.name.localeCompare(right.player.name));
+        for (const candidate of candidates) {
+          if (hitOne(candidate, group, true)) {
+            hit = true;
+            break;
+          }
+          if (!guardrailAllows(candidate, playerTotal(candidate.player.name) - 1)) guardrailBlocked = true;
+        }
+        if (hit) break;
+      }
+      if (!hit && guardrailBlocked) {
+        noteGuardrailRelaxation(group, 'abundance hits');
+        for (const tier of HIT_TIERS) {
+          const candidates = rotatedPlayers(
+            allocationMembers(group).filter((candidate) => candidate.player.group === tier
+              && !candidate.selectedKeeper
+              && playerTotal(candidate.player.name) > candidate.floor
+              && amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0)),
+            rotationState,
+            group,
+            tier,
+            'lastShed',
+          ).sort((left, right) => playerTotal(right.player.name) - playerTotal(left.player.name));
+          const next = candidates[0];
+          if (next && hitOne(next, group, false)) {
+            hit = true;
             break;
           }
         }
       }
-      if (!changed) break;
-    }
-  };
-
-  for (const group of FIELD_GROUPS) shedGroup(group);
-  while (FIELD_GROUPS.some((group) => groupLoad(group) > (slots.get(group) ?? 0))) {
-    const source = [...FIELD_GROUPS]
-      .filter((group) => groupLoad(group) > (slots.get(group) ?? 0))
-      .sort((left, right) => (groupLoad(right) - slots.get(right)!) - (groupLoad(left) - slots.get(left)!)
-        || FIELD_GROUPS.indexOf(left) - FIELD_GROUPS.indexOf(right))[0];
-    if (!source) break;
-    const before = groupLoad(source);
-    flexOut(source);
-    if (groupLoad(source) === before) break;
-  }
-
-  for (const group of FIELD_GROUPS) {
-    while (groupLoad(group) > (slots.get(group) ?? 0)) {
-      const highestTier = GAIN_TIERS.find((tier) => groupMembers(group).some((candidate) =>
-        candidate.player.group === tier
-          && candidate.keeperBlocks === 0
-          && amountInGroup(candidate.player.name, group) > (endpointPinCounts.get(candidate.player.name) ?? 0)));
-      if (!highestTier) break;
-      const candidates = rotatedPlayers(
-        groupMembers(group).filter((candidate) => candidate.player.group === highestTier
-          && candidate.keeperBlocks === 0
-          && amountInGroup(candidate.player.name, group) > (endpointPinCounts.get(candidate.player.name) ?? 0)
-          && amountInGroup(candidate.player.name, group) > 0),
-        rotationState,
-        group,
-        highestTier,
-        'lastShed',
-      );
-      const next = candidates[0];
-      if (!next) break;
-      const before = playerTotal(next.player.name);
-      allocations.get(next.player.name)!.set(group, amountInGroup(next.player.name, group) - 1);
-      writeRotation(rotationState, group, highestTier, 'lastShed', next.player.name);
-      relaxedPlayers.push({ player: next.player.name, group: highestTier, before, after: before - 1 });
+      if (!hit) break;
     }
   }
 
+  const groupLabel = (group: FieldGroup): string => group === 'D' ? 'Defender' : group === 'M' ? 'Midfield' : 'Forward';
   for (const group of FIELD_GROUPS) {
     const overage = groupLoad(group) - (slots.get(group) ?? 0);
-    if (overage > 0) {
-      errors.push(`${group} group is over by ${overage} block(s); no non-keeper allocation remains above its endpoint pins to shed.`);
-    }
+    if (overage <= 0) continue;
+    const member = allocationMembers(group).find((candidate) =>
+      amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0))
+      ?? allocationMembers(group)[0];
+    const destination = member
+      ? backupGroups(member.player).find((backup) => backup !== group)
+        ?? FIELD_GROUPS.find((candidate) => candidate !== group)
+      : FIELD_GROUPS.find((candidate) => candidate !== group);
+    const playerName = member?.player.name ?? 'an eligible player';
+    errors.push(`${groupLabel(group)} group (${group}) is over by ${overage} block(s). Add ${destination ?? 'another group'} backup to ${playerName} or move ${playerName} to ${destination ?? 'another group'}.`);
   }
 
   const collapsedRelaxedPlayers = [...relaxedPlayers.reduce((entries, entry) => {
@@ -553,93 +625,95 @@ function buildWaterfillQuotas(
     return entries;
   }, new Map<string, typeof relaxedPlayers[number]>()).values()];
 
-  const gainOne = (candidate: WaterfillPlayer, group: FieldGroup): boolean => {
+  const gainOne = (candidate: WaterfillPlayer, group: FieldGroup, enforceGuardrail: boolean): boolean => {
     if (groupLoad(group) >= (slots.get(group) ?? 0)
-      || playerTotal(candidate.player.name) >= candidate.maximum) return false;
+      || playerTotal(candidate.player.name) >= candidate.maximum
+      || (enforceGuardrail && !guardrailAllows(candidate, playerTotal(candidate.player.name) + 1))) return false;
     allocations.get(candidate.player.name)!.set(group, amountInGroup(candidate.player.name, group) + 1);
     writeRotation(rotationState, group, candidate.player.group, 'lastGained', candidate.player.name);
     surplusAssignments.push({ group: candidate.player.group, player: candidate.player.name, amount: 1 });
     return true;
   };
 
-  const fillGroup = (group: FieldGroup): void => {
+  const gainFrom = (
+    group: FieldGroup,
+    candidates: WaterfillPlayer[],
+    action: string,
+  ): boolean => {
+    const ordered = SURPLUS_TIERS.flatMap((tier) => rotatedPlayers(
+      candidates.filter((candidate) => candidate.player.group === tier),
+      rotationState,
+      group,
+      tier,
+      'lastGained',
+    ));
+    let guardrailBlocked = false;
+    for (const candidate of ordered) {
+      if (playerTotal(candidate.player.name) >= candidate.maximum) continue;
+      if (gainOne(candidate, group, true)) return true;
+      if (!guardrailAllows(candidate, playerTotal(candidate.player.name) + 1)) guardrailBlocked = true;
+    }
+    if (guardrailBlocked) {
+      noteGuardrailRelaxation(group, action);
+      for (const candidate of ordered) {
+        if (gainOne(candidate, group, false)) return true;
+      }
+    }
+    return false;
+  };
+  const fillCandidates = (
+    group: FieldGroup,
+    candidates: () => WaterfillPlayer[],
+    action: string,
+  ): void => {
     while (groupLoad(group) < (slots.get(group) ?? 0)) {
-      let keeperGained = false;
-      for (const tier of GAIN_TIERS) {
-        const keeper = rotatedPlayers(
-          groupMembers(group).filter((candidate) => candidate.player.group === tier
-            && candidate.keeperBlocks > 0
-            && playerTotal(candidate.player.name) < candidate.maximum),
-          rotationState,
-          group,
-          tier,
-          'lastGained',
-        )[0];
-        if (keeper && gainOne(keeper, group)) {
-          keeperGained = true;
-          break;
-        }
-      }
-      if (keeperGained) continue;
-
-      let tierGained = false;
-      for (const tier of GAIN_TIERS) {
-        while (groupLoad(group) < (slots.get(group) ?? 0)) {
-          const candidate = rotatedPlayers(
-            groupMembers(group).filter((member) => member.player.group === tier
-              && member.keeperBlocks === 0
-              && playerTotal(member.player.name) < member.maximum),
-            rotationState,
-            group,
-            tier,
-            'lastGained',
-          )[0];
-          if (!candidate || !gainOne(candidate, group)) break;
-          tierGained = true;
-        }
-        if (groupLoad(group) >= (slots.get(group) ?? 0)) return;
-      }
-      if (groupLoad(group) >= (slots.get(group) ?? 0)) return;
-
-      if (!tierGained) {
-        for (const tier of FLEX_TIERS) {
-          const inbound = rotatedPlayers(
-            [...info.values()].filter((candidate) => candidate.primaryGroup !== group
-              && candidate.player.group === tier
-              && candidate.keeperBlocks === 0
-              && playerTotal(candidate.player.name) < candidate.maximum
-              && backupGroups(candidate.player).includes(group)),
-            rotationState,
-            group,
-            tier,
-            'lastGained',
-          );
-          if (inbound[0] && gainOne(inbound[0], group)) {
-            tierGained = true;
-            break;
-          }
-        }
-      }
-      if (!tierGained) break;
+      if (!gainFrom(group, candidates(), action)) break;
     }
   };
 
-  for (const group of FIELD_GROUPS) fillGroup(group);
+  for (const tier of SURPLUS_TIERS) {
+    if (tier === 'rotational') {
+      for (const group of FIELD_GROUPS) {
+        fillCandidates(group,
+          () => allocationMembers(group).filter((candidate) => candidate.selectedKeeper),
+          'keeper surplus gains');
+      }
+    }
+    for (const group of FIELD_GROUPS) {
+      fillCandidates(group,
+        () => groupMembers(group).filter((candidate) => candidate.player.group === tier && !candidate.selectedKeeper),
+        `${tier} surplus gains`);
+    }
+    if (FLEX_IN_TIERS.includes(tier)) {
+      for (const group of FIELD_GROUPS) {
+        fillCandidates(group,
+          () => [...info.values()].filter((candidate) => candidate.primaryGroup !== group
+            && candidate.player.group === tier
+            && !candidate.selectedKeeper
+            && backupGroups(candidate.player).includes(group)),
+          `${tier} flex-in gains`);
+      }
+    }
+  }
+
+  const guardrailPlayer = [...info.values()].find((candidate) => !isGuardrailExempt(candidate));
+  if (guardrailPlayer && !guardrailAllows(guardrailPlayer, playerTotal(guardrailPlayer.player.name))) {
+    warnings.push('Final tier guardrail is relaxed; the hard field floor remains enforced.');
+  }
 
   const quotas: PlayerQuota[] = available.map((player) => {
     const keeper = keeperBlocks(game, player, demand);
-    const dedicated = isDedicatedKeeper(player);
-    const playerInfoValue = playerInfo(player.name);
-    const pins = playerInfoValue ? endpointPinCounts.get(player.name) ?? 0 : 0;
+    const playerInfoValue = info.get(player.name);
+    const pins = playerInfoValue?.pinnedBlocks.length ?? 0;
     const fieldCount = playerInfoValue ? playerTotal(player.name) : 0;
-    const floor = playerInfoValue ? Math.min(playerInfoValue.floor, fieldCount) : 0;
+    const floor = playerInfoValue?.floor ?? 0;
     const fieldMin = Math.max(0, floor - pins);
     const fieldTarget = Math.max(0, fieldCount - pins);
     const fieldMax = fieldTarget;
     const groupTargets = playerInfoValue
       ? Object.fromEntries(FIELD_GROUPS.map((group) => [
         group,
-        Math.max(0, amountInGroup(player.name, group) - (playerInfoValue.primaryGroup === group ? pins : 0)),
+        Math.max(0, amountInGroup(player.name, group) - playerInfoValue.pinnedByGroup[group]),
       ])) as Record<FieldGroup, number>
       : undefined;
     return {
@@ -647,7 +721,7 @@ function buildWaterfillQuotas(
       group: player.group,
       totalMin: fieldMin + pins + keeper,
       totalMax: fieldMax + pins + keeper,
-      pinnedBlocks: playerInfoValue ? endpointPins(game, player) : [],
+      pinnedBlocks: playerInfoValue?.pinnedBlocks ?? [],
       remainingMin: fieldMin,
       remainingMax: fieldMax,
       fieldMin,
@@ -666,7 +740,9 @@ function buildWaterfillQuotas(
     if (shortfall <= 0) continue;
     const positions = groupPositionNames(demand, group);
     const label = group === 'D' ? 'Defender' : group === 'M' ? 'Midfield' : 'Forward';
-    errors.push(`${label} group (${group}) is short ${shortfall} block(s). Add backup eligibility for ${group} positions${positions.length ? ` (${positions.join(', ')})` : ''}, or add available players.`);
+    const blockLabel = shortfall === 1 ? 'block' : 'blocks';
+    const article = group === 'D' ? 'a' : 'an';
+    errors.push(`${label} group (${group}) is short ${shortfall} ${blockLabel}. Add ${article} ${group} backup${positions.length ? ` (${positions.join(', ')})` : ''} to a player.`);
   }
 
   return {
@@ -678,6 +754,7 @@ function buildWaterfillQuotas(
       unfillableWithinMax: errors.length ? FIELD_GROUPS.reduce((sum, group) =>
         sum + Math.max(0, (slots.get(group) ?? 0) - groupLoad(group)), 0) : 0,
       errors,
+      warnings,
     },
     fieldSlots: demand.fieldSlots.length * game.totalBlocks,
     goalkeeperSlots: demand.goalkeeperBlocks[0] + demand.goalkeeperBlocks[1],

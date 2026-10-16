@@ -83,7 +83,7 @@ function settingsFor(totalBlocks: number): SeasonSettings {
 
 function abundanceRoster(): SeasonRosterPlayer[] {
   return [
-    ...Array.from({ length: 8 }, (_, index) => ({
+    ...Array.from({ length: 5 }, (_, index) => ({
       ...rosterPlayer(`Core D${index + 1}`, 'core', ['D']),
     })),
     ...Array.from({ length: 4 }, (_, index) => ({
@@ -197,6 +197,11 @@ describe('redesign schedule service', () => {
         name: 'RedesignOfferError',
         offer: {
           kind: 'position-shortage',
+          message: expect.stringMatching(/Forward group \(F\) is short \d+ blocks\. Add an F backup \([^)]*\) to a player\./),
+          buttons: [
+            { label: 'Add Backup Positions', action: 'go-to-builder' },
+            { label: 'Cancel', action: 'cancel' },
+          ],
           context: expect.objectContaining({ failureType: 'waterfill-underfill' }),
         },
       });
@@ -211,7 +216,7 @@ describe('redesign schedule service', () => {
     const result = await regenerateRedesignLateArrival(lateArrivalInput(roster, 'Core F1', 5, 2, 'Keeper A', 'Keeper B'));
     const warning = result.warnings.find((entry) => entry.startsWith('Minimums relaxed for:'));
 
-    expect(warning).toContain('Core D1 (4 -> 2 blocks)');
+    expect(warning).toContain('Core D1 (4 -> 3 blocks)');
     expect(warning?.match(/Core D1/g)).toHaveLength(1);
   });
 
