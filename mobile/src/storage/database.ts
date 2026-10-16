@@ -1,7 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 const DATABASE_NAME = 'rotation-engine.db';
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
@@ -85,6 +85,17 @@ const migrations: Migration[] = [
         WHERE general_positions_json LIKE '%"GK"%'
            OR primary_positions_json LIKE '%"GK"%'
            OR backup_positions_json LIKE '%"GK"%'`);
+    },
+  },
+  {
+    version: 4,
+    apply: async (database) => {
+      await database.execAsync(`CREATE TABLE waterfill_rotation_history (
+        team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        game_number INTEGER NOT NULL,
+        state_json TEXT NOT NULL,
+        PRIMARY KEY (team_id, game_number)
+      )`);
     },
   },
 ];

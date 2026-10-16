@@ -1,7 +1,15 @@
 export type RedesignGroup = 'core' | 'rotational' | 'developing';
+export type FieldGroup = 'D' | 'M' | 'F';
 export type RedesignFormat = '4v4' | '7v7' | '9v9' | '11v11';
 export type RedesignZone = 'CM' | 'CB' | 'ST' | 'WIDE';
 export type RedesignPosition = string;
+
+export interface WaterfillRotationEntry {
+  lastShed?: string;
+  lastGained?: string;
+}
+
+export type WaterfillRotationState = Partial<Record<`${FieldGroup}:${RedesignGroup}`, WaterfillRotationEntry>>;
 
 export interface RedesignPlayerInput {
   name: string;
@@ -65,6 +73,7 @@ export interface RedesignGameInput {
   pins?: LineupPin[];
   lateArrival?: LateArrivalInput;
   seasonHistory?: Record<string, NormalizedPlayer['history']>;
+  seasonRotation?: WaterfillRotationState;
   disableMaximumLimits?: boolean;
 }
 
@@ -78,6 +87,7 @@ export interface NormalizedGame {
   secondHalfKeeper: string | null;
   pins: LineupPin[];
   lateArrival: LateArrivalInput | null;
+  seasonRotation?: WaterfillRotationState;
   disableMaximumLimits: boolean;
 }
 
@@ -99,6 +109,7 @@ export interface QuotaAudit {
   relaxedPlayers?: Array<{ player: string; group: RedesignGroup; before: number; after: number }>;
   surplusAssignments: Array<{ group: RedesignGroup; player: string; amount: number }>;
   unfillableWithinMax: number;
+  errors?: string[];
 }
 
 export interface PlayerQuota {
@@ -112,6 +123,7 @@ export interface PlayerQuota {
   fieldMin: number;
   fieldMax: number;
   fieldTarget: number;
+  groupTargets?: Partial<Record<FieldGroup, number>>;
   gkMin: number;
   gkMax: number;
   keeperBlocks: number;
@@ -123,4 +135,5 @@ export interface QuotaAssignment {
   audit: QuotaAudit;
   fieldSlots: number;
   goalkeeperSlots: number;
+  rotationState?: WaterfillRotationState;
 }

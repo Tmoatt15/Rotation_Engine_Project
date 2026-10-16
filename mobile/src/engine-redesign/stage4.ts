@@ -17,11 +17,11 @@ export function runStages3And4(
   demand: DemandModel,
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
-  allowRelaxedMinimums = false,
+  _allowRelaxedMinimums = false,
 ): PolishedPlacement {
-  const hard = placeStage3(game, demand, quotas, frozen, false, allowRelaxedMinimums);
+  const hard = placeStage3(game, demand, quotas, frozen, false);
   if (hard.complete) return polishStage4(game, demand, quotas, hard);
-  const soft = placeStage3(game, demand, quotas, frozen, true, allowRelaxedMinimums);
+  const soft = placeStage3(game, demand, quotas, frozen, true);
   if (soft.complete) {
     soft.audit.softRestFallback = true;
     return polishStage4(game, demand, quotas, soft);
@@ -36,11 +36,21 @@ function coreNames(game: NormalizedGame): Set<string> {
   return new Set(game.players.filter((player) => player.group === 'core').map((player) => player.name));
 }
 
+function isInGoal(game: NormalizedGame, player: string, block: number): boolean {
+  const half = game.totalBlocks / 2;
+  return (player === game.firstHalfKeeper && block <= half)
+    || (player === game.secondHalfKeeper && block > half);
+}
+
+function benchedCoreCount(game: NormalizedGame, block: PlacementBlock, cores: Set<string>): number {
+  const playing = new Set(block.assignments.values());
+  return [...cores].filter((name) => !playing.has(name) && !isInGoal(game, name, block.block)).length;
+}
+
 function metrics(game: NormalizedGame, blocks: PlacementBlock[]): PolishMetrics {
   const cores = coreNames(game);
   const maxCoreBenches = blocks.reduce((maximum, block) => {
-    const playing = new Set(block.assignments.values());
-    return Math.max(maximum, [...cores].filter((name) => !playing.has(name)).length);
+    return Math.max(maximum, benchedCoreCount(game, block, cores));
   }, 0);
   const maxBoundaryTurnovers = blocks.slice(1).reduce((maximum, block, index) => {
     const previous = new Set(blocks[index].assignments.values());
@@ -62,26 +72,15 @@ function playerByName(game: NormalizedGame, name: string) {
   return game.players.find((player) => player.name === name);
 }
 
-function oopCounts(game: NormalizedGame, blocks: PlacementBlock[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const block of blocks) {
-    for (const [slot, playerName] of block.assignments) {
-      const player = playerByName(game, playerName);
-      if (player && positionTier(player, slot) === 0) counts.set(playerName, (counts.get(playerName) ?? 0) + 1);
-    }
-  }
-  return counts;
-}
-
 function exchangeAllowed(game: NormalizedGame, blocks: PlacementBlock[], blockIndex: number, slot: string, incoming: string, rest: Map<string, Set<number>>): boolean {
   const block = blocks[blockIndex];
   const player = playerByName(game, incoming);
   const half = game.totalBlocks / 2;
   const inGoalkeeperHalf = player && ((player.name === game.firstHalfKeeper && block.block <= half)
     || (player.name === game.secondHalfKeeper && block.block > half));
-  if (!player || inGoalkeeperHalf || excludedFromSlot(player, slot) || [...block.assignments.values()].includes(incoming) || rest.get(incoming)?.has(block.block)) return false;
-  const counts = oopCounts(game, blocks);
-  if (positionTier(player, slot) === 0 && (counts.get(incoming) ?? 0) >= 2) return false;
+  if (!player || inGoalkeeperHalf || positionTier(player, slot) === 0
+    || excludedFromSlot(player, slot) || [...block.assignments.values()].includes(incoming)
+    || rest.get(incoming)?.has(block.block)) return false;
   return true;
 }
 
@@ -120,7 +119,7 @@ function restWindowPass(game: NormalizedGame, quotas: QuotaAssignment, blocks: P
 
 function spreadPass(game: NormalizedGame, blocks: PlacementBlock[], rest: Map<string, Set<number>>): PlacementBlock[] {
   const cores = coreNames(game);
-  const counts = blocks.map((block) => [...cores].filter((name) => !new Set(block.assignments.values()).has(name)).length);
+  const counts = blocks.map((block) => benchedCoreCount(game, block, cores));
   const high = counts.indexOf(Math.max(...counts));
   const low = counts.indexOf(Math.min(...counts));
   if (high < 0 || low < 0 || counts[high] - counts[low] <= 1) return blocks;

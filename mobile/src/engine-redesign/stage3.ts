@@ -238,6 +238,9 @@ function placeDeterministically(
     remainingMax: new Map(quotas.quotas.map((quota) => [quota.player, quota.fieldMax])),
     placed: new Map(),
   };
+  const remainingGroupTarget = new Map(quotas.quotas
+    .filter((quota) => quota.groupTargets)
+    .map((quota) => [quota.player, new Map(Object.entries(quota.groupTargets!) as Array<['D' | 'M' | 'F', number]>)]));
   const blocks = Array.from({ length: game.totalBlocks }, (_, index) => ({
     block: index + 1,
     assignments: new Map<string, string>(),
@@ -251,6 +254,9 @@ function placeDeterministically(
       state.remainingMax.set(player, (state.remainingMax.get(player) ?? 0) - 1);
       state.remainingMin.set(player, Math.max(0, (state.remainingMin.get(player) ?? 0) - 1));
       state.remainingTarget.set(player, Math.max(0, (state.remainingTarget.get(player) ?? 0) - 1));
+      const groupTarget = remainingGroupTarget.get(player);
+      const group = groupForSlot(slot);
+      if (groupTarget?.has(group)) groupTarget.set(group, Math.max(0, (groupTarget.get(group) ?? 0) - 1));
     }
   }
   const pinned = new Map<number, Set<string>>();
@@ -297,6 +303,9 @@ function placeDeterministically(
     state.remainingMin.set(player.name, Math.max(0, (state.remainingMin.get(player.name) ?? 0) - 1));
     state.remainingTarget.set(player.name, Math.max(0, (state.remainingTarget.get(player.name) ?? 0) - 1));
     state.placed!.set(player.name, (state.placed!.get(player.name) ?? 0) + 1);
+    const groupTarget = remainingGroupTarget.get(player.name);
+    const group = groupForSlot(slot);
+    if ((groupTarget?.get(group) ?? 0) > 0) groupTarget!.set(group, groupTarget!.get(group)! - 1);
     return true;
   };
   for (const [blockNumber, names] of pinned) {
@@ -321,6 +330,7 @@ function placeDeterministically(
     ['M', new Set<number>()],
     ['F', new Set<number>()],
   ]);
+  const restSelectionDone = new Set<string>();
   for (const player of game.players) {
     const coveredGroups = (['D', 'M', 'F'] as const).filter((group) => player.generalPositions.includes(group));
     for (const block of rest.get(player.name) ?? []) {
@@ -330,72 +340,99 @@ function placeDeterministically(
       }
     }
   }
+  const selectedRestCount = (playerName: string, firstHalf: boolean): number => [...(rest.get(playerName) ?? [])]
+    .filter((block) => (block <= game.totalBlocks / 2) === firstHalf).length;
+  const coreBenchesIfRested = (player: NormalizedPlayer, blockNumber: number): number => {
+    const coreRests = game.players.filter((candidate) => candidate.group === 'core'
+      && !isKeeperHalf(game, candidate, blockNumber)
+      && rest.get(candidate.name)?.has(blockNumber)).length;
+    return coreRests + (player.group === 'core'
+      && !isKeeperHalf(game, player, blockNumber)
+      && !rest.get(player.name)?.has(blockNumber) ? 1 : 0);
+  };
+  const groupRestPressure = (player: NormalizedPlayer, group: 'D' | 'M' | 'F', blockNumber: number): number => {
+    const current = groupRestsPerBlock.get(`${group}:${blockNumber}`) ?? 0;
+    const additional = player.generalPositions.includes(group)
+      && !rest.get(player.name)?.has(blockNumber) ? 1 : 0;
+    const available = game.players.filter((candidate) => candidate.available
+      && candidate.generalPositions.includes(group)
+      && !isKeeperHalf(game, candidate, blockNumber)
+      && demand.fieldSlots.some((slot) => slot.group === group && isFieldEligible(game, candidate, blockNumber, slot.slot))).length;
+    const capacity = Math.max(0, available - demand.fieldSlots.filter((slot) => slot.group === group).length);
+    return Math.max(0, current + additional - capacity) * 100 + current + additional;
+  };
   const selectSpacedBlocks = (player: NormalizedPlayer, group: 'D' | 'M' | 'F', useTarget: boolean): number[] => {
-    const needed = (useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0;
     const frozenBlocks = new Set(frozen.map((block) => block.block));
-    const eligible = blocks
+    if (!restSelectionDone.has(player.name)) {
+      restSelectionDone.add(player.name);
+      const needed = state.remainingTarget.get(player.name) ?? state.remainingMin.get(player.name) ?? 0;
+      const eligible = blocks
+        .filter((block) => !frozenBlocks.has(block.block)
+          && !pinned.get(block.block)?.has(player.name)
+          && !isKeeperHalf(game, player, block.block)
+          && player.available
+          && !assignmentsHasPlayer(block.assignments, player.name)
+          && !rest.get(player.name)?.has(block.block)
+          && demand.fieldSlots.some((slot) => !block.assignments.has(slot.slot)
+            && isFieldEligible(game, player, block.block, slot.slot)))
+        .map((block) => block.block);
+      const restCount = Math.max(0, eligible.length - needed);
+      const selected = new Set<number>();
+      const halfRestOrder = (blockNumber: number): number =>
+        selectedRestCount(player.name, blockNumber <= game.totalBlocks / 2);
+      const sortRestCandidates = (
+        candidates: Array<{ block: number; candidateIndex: number }>,
+        ideal: number,
+      ): Array<{ block: number; candidateIndex: number }> => candidates.sort((left, right) =>
+        halfRestOrder(left.block) - halfRestOrder(right.block)
+        || coreBenchesIfRested(player, left.block) - coreBenchesIfRested(player, right.block)
+        || groupRestPressure(player, group, left.block) - groupRestPressure(player, group, right.block)
+        || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
+        || left.block - right.block);
+      for (let index = 1; index <= restCount; index += 1) {
+        const ideal = Math.round(index * (eligible.length + 1) / (restCount + 1)) - 1;
+        const candidates = sortRestCandidates(eligible
+          .map((block, candidateIndex) => ({ block, candidateIndex }))
+          .filter(({ block }) => !selected.has(block) && !sequentialRestBlocks.get(group)!.has(block)), ideal);
+        const fallback = candidates[0] ?? sortRestCandidates(eligible
+          .map((block, candidateIndex) => ({ block, candidateIndex }))
+          .filter(({ block }) => !selected.has(block)), ideal)[0];
+        const choice = fallback?.block;
+        if (choice === undefined) continue;
+        selected.add(choice);
+        for (const coveredGroup of (['D', 'M', 'F'] as const).filter((candidate) => player.generalPositions.includes(candidate))) {
+          sequentialRestBlocks.get(coveredGroup)!.add(choice);
+          const key = `${coveredGroup}:${choice}`;
+          groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
+        }
+        const playerRest = rest.get(player.name) ?? new Set<number>();
+        const selectedRests = selectedRestBlocks.get(player.name) ?? new Set<number>();
+        playerRest.add(choice);
+        selectedRests.add(choice);
+        rest.set(player.name, playerRest);
+        selectedRestBlocks.set(player.name, selectedRests);
+      }
+    }
+    const totalRemaining = (useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0;
+    const groupRemaining = remainingGroupTarget.get(player.name)?.get(group);
+    if (groupRemaining === 0 || totalRemaining === 0) return [];
+    return blocks
       .filter((block) => !frozenBlocks.has(block.block)
         && !pinned.get(block.block)?.has(player.name)
         && !isKeeperHalf(game, player, block.block)
         && player.available
+        && !assignmentsHasPlayer(block.assignments, player.name)
         && (softRest || !rest.get(player.name)?.has(block.block))
         && demand.fieldSlots.some((slot) => slot.group === group
           && !block.assignments.has(slot.slot)
           && isFieldEligible(game, player, block.block, slot.slot)))
       .map((block) => block.block);
-    const restCount = eligible.length - needed;
-    if (restCount <= 0) return eligible;
-    const selected = new Set<number>();
-    for (let index = 1; index <= restCount; index += 1) {
-      const ideal = Math.round(index * (eligible.length + 1) / (restCount + 1)) - 1;
-      const candidates = eligible
-        .map((block, candidateIndex) => ({ block, candidateIndex }))
-        .filter(({ block }) => !selected.has(block) && !sequentialRestBlocks.get(group)!.has(block))
-        .sort((left, right) => {
-          const leftLoad = groupRestsPerBlock.get(`${group}:${left.block}`) ?? 0;
-          const rightLoad = groupRestsPerBlock.get(`${group}:${right.block}`) ?? 0;
-          return leftLoad - rightLoad
-            || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
-            || left.block - right.block;
-        });
-      const choice = candidates[0]?.block;
-      if (choice === undefined) {
-        const fallback = eligible
-          .map((block, candidateIndex) => ({ block, candidateIndex }))
-          .filter(({ block }) => !selected.has(block))
-          .sort((left, right) => {
-            const leftLoad = groupRestsPerBlock.get(`${group}:${left.block}`) ?? 0;
-            const rightLoad = groupRestsPerBlock.get(`${group}:${right.block}`) ?? 0;
-            return leftLoad - rightLoad
-              || Math.abs(left.candidateIndex - ideal) - Math.abs(right.candidateIndex - ideal)
-              || left.block - right.block;
-          })[0]?.block;
-        if (fallback === undefined) continue;
-        selected.add(fallback);
-        sequentialRestBlocks.get(group)!.add(fallback);
-        const key = `${group}:${fallback}`;
-        groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
-        continue;
-      }
-      selected.add(choice);
-      sequentialRestBlocks.get(group)!.add(choice);
-      const key = `${group}:${choice}`;
-      groupRestsPerBlock.set(key, (groupRestsPerBlock.get(key) ?? 0) + 1);
-    }
-    if (restCount <= 2) {
-      const playerRest = rest.get(player.name) ?? new Set<number>();
-      const selectedRests = selectedRestBlocks.get(player.name) ?? new Set<number>();
-      for (const block of selected) playerRest.add(block);
-      for (const block of selected) selectedRests.add(block);
-      rest.set(player.name, playerRest);
-      selectedRestBlocks.set(player.name, selectedRests);
-    }
-    return eligible.filter((block) => !selected.has(block));
   };
   for (const useTarget of [false, true]) {
     for (const group of order) {
       const candidates = game.players
         .filter((player) => ((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) > 0
+          && ((remainingGroupTarget.get(player.name)?.get(group) ?? 1) > 0)
           && (player.generalPositions.includes(group)
             || hasBackupForGroup(player, group)
             || (group === 'D' && (player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper))))
@@ -406,15 +443,18 @@ function placeDeterministically(
       for (const player of candidates) {
         const playBlocks = selectSpacedBlocks(player, group, useTarget);
         for (const blockNumber of playBlocks) {
-          if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0) break;
+          if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0
+            || (remainingGroupTarget.get(player.name)?.get(group) ?? 1) <= 0) break;
           const slots = demand.fieldSlots.filter((slot) => slot.group === group && !blocks[blockNumber - 1].assignments.has(slot.slot))
             .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
           const slot = slots.find((candidate) => canPlace(player, blockNumber, candidate.slot));
           if (slot) assign(player, blockNumber, slot.slot);
         }
-        if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) > 0) {
+        if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) > 0
+          && (remainingGroupTarget.get(player.name)?.get(group) ?? 1) > 0) {
           for (const block of blocks) {
-            if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0) break;
+            if (((useTarget ? state.remainingTarget : state.remainingMin).get(player.name) ?? 0) <= 0
+              || (remainingGroupTarget.get(player.name)?.get(group) ?? 1) <= 0) break;
             const slots = demand.fieldSlots.filter((slot) => slot.group === group && !block.assignments.has(slot.slot))
               .sort((left, right) => slotPriority(player, right.slot) - slotPriority(player, left.slot));
             const slot = slots.find((candidate) => canPlace(player, block.block, candidate.slot));
@@ -464,26 +504,6 @@ function placeDeterministically(
         assign(lastResortCandidate, block.block, slot.slot, { ignoreMaximum: true, ignoreSelectedRest: true });
         continue;
       }
-      let filledByExchange = false;
-      for (const [sourceSlot, incomingName] of block.assignments) {
-        const incoming = players.get(incomingName);
-        if (!incoming || isKeeperHalf(game, incoming, block.block) || !isFieldEligible(game, incoming, block.block, slot.slot)) continue;
-        const replacement = game.players
-          .filter((player) => !assignmentsHasPlayer(block.assignments, player.name)
-            && canPlace(player, block.block, sourceSlot, { ignoreMaximum: true, ignoreSelectedRest: true }))
-          .sort((left, right) => (state.remainingMin.get(right.name) ?? 0) - (state.remainingMin.get(left.name) ?? 0)
-            || (state.placed!.get(left.name) ?? 0) - (state.placed!.get(right.name) ?? 0)
-            || left.name.localeCompare(right.name))[0];
-        if (!replacement) continue;
-        block.assignments.delete(sourceSlot);
-        if (!assign(replacement, block.block, sourceSlot, { ignoreMaximum: true, ignoreSelectedRest: true })) {
-          block.assignments.set(sourceSlot, incomingName);
-          continue;
-        }
-        block.assignments.set(slot.slot, incomingName);
-        filledByExchange = true;
-        break;
-      }
     }
   }
   const unfilledSlots = blocks.flatMap((block) => demand.fieldSlots
@@ -494,17 +514,6 @@ function placeDeterministically(
     .map(([player, remaining]) => `Cannot place minimum for ${player}: ${remaining} block(s) remain.`);
   const slotErrors = unfilledSlots.map(({ block, slot }) => `Unfilled slot: Block ${block}, slot ${slot}.`);
   const errors = [...minimumErrors, ...slotErrors];
-  const fieldCounts = new Map<string, number>();
-  for (const block of blocks) {
-    for (const player of block.assignments.values()) fieldCounts.set(player, (fieldCounts.get(player) ?? 0) + 1);
-  }
-  for (const quota of quotas.quotas) {
-    const pinnedCount = quota.pinnedBlocks.filter((blockNumber) => {
-      const assignments = blocks[blockNumber - 1]?.assignments;
-      return assignments ? assignmentsHasPlayer(assignments, quota.player) : false;
-    }).length;
-    console.log(`[placement] ${quota.player}: field=${fieldCounts.get(quota.player) ?? 0}, min=${quota.fieldMin + pinnedCount}, target=${quota.fieldTarget + pinnedCount}, max=${quota.fieldMax + pinnedCount}`);
-  }
   return {
     blocks,
     complete: unfilledSlots.length === 0,
@@ -532,7 +541,6 @@ export function placeStage3(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
   softRest = false,
-  _allowRelaxedMinimums = false,
 ): PlacementResult {
   return placeDeterministically(game, demand, quotas, frozen, softRest);
 }

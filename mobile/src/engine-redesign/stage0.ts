@@ -137,6 +137,7 @@ export function normalizeGame(game: RedesignGameInput, roster: RedesignPlayerInp
     secondHalfKeeper,
     pins: normalizedPins,
     lateArrival,
+    seasonRotation: game.seasonRotation,
     disableMaximumLimits: game.disableMaximumLimits ?? false,
   };
 }
