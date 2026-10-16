@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4, turnoverVariance } from '..';
+import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4, runStages3And4, turnoverVariance } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
 const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none', primaryPositions = positions): RedesignPlayerInput => ({
@@ -97,6 +97,7 @@ describe('redesign stages 3-4', () => {
     const [core, rotational] = game.players;
     const state = {
       remainingMin: new Map([['Core More History', 1], ['Rot Less History', 1]]),
+      remainingTarget: new Map([['Core More History', 1], ['Rot Less History', 1]]),
       remainingMax: new Map([['Core More History', 2], ['Rot Less History', 2]]),
       outOfPosition: new Map<string, number>(),
     };
@@ -106,6 +107,7 @@ describe('redesign stages 3-4', () => {
     const lessHistory = game.players.find((candidate) => candidate.name === 'Rot Less History 2')!;
     const tiedState = {
       remainingMin: new Map([[moreHistory.name, 1], [lessHistory.name, 1]]),
+      remainingTarget: new Map([[moreHistory.name, 1], [lessHistory.name, 1]]),
       remainingMax: new Map([[moreHistory.name, 2], [lessHistory.name, 2]]),
       outOfPosition: new Map<string, number>(),
     };
@@ -136,12 +138,80 @@ describe('redesign stages 3-4', () => {
     ]);
     const demand = buildDemandModel(game);
     const quotas = assignQuotas(game, demand);
-    const frozen = [{ block: 1, assignments: new Map([['D1', 'Rest A'], ['M1', 'Rest B'], ['M2', 'Field C'], ['F1', 'Field D']]) }];
+    const frozen = [{ block: 1, assignments: new Map([['D1', 'Rest A'], ['M1', 'Rest B'], ['M2', 'Field C'], ['ST', 'Field D']]) }];
     const first = placeStage3(game, demand, quotas, frozen);
     const second = placeStage3(game, demand, quotas, frozen);
     expect(first.blocks[0].assignments).toEqual(frozen[0].assignments);
     expect(first.complete).toBe(true);
+    expect(first.blocks.every((block) => block.assignments.size === demand.fieldSlots.length)).toBe(true);
     expect(JSON.stringify(first.blocks)).toBe(JSON.stringify(second.blocks));
+  });
+
+  it('reports every unfilled slot in an over-constrained placement', () => {
+    const game = normalizeGame({
+      format: '4v4',
+      formation: '1-2-1',
+      totalBlocks: 6,
+      firstHalfKeeper: null,
+      secondHalfKeeper: null,
+    }, [
+      player('Only defender', 'rotational', ['D']),
+      player('Only midfielder', 'rotational', ['M']),
+      player('Only forward', 'rotational', ['F']),
+    ]);
+    const demand = buildDemandModel(game);
+    const placement = placeStage3(game, demand, assignQuotas(game, demand));
+    const unfilled = placement.blocks.flatMap((block) => demand.fieldSlots
+      .filter((slot) => !block.assignments.has(slot.slot))
+      .map((slot) => `Block ${block.block}, slot ${slot.slot}`));
+
+    expect(placement.complete).toBe(false);
+    expect(placement.audit.errors.filter((error) => error.startsWith('Unfilled slot: ')))
+      .toEqual(unfilled.map((slot) => `Unfilled slot: ${slot}.`));
+    expect(unfilled.length).toBeGreaterThan(0);
+  });
+
+  it('fills the actual Chelsea roster without holes or keeper-half fielding', () => {
+    const game = normalizeGame({
+      format: '9v9',
+      formation: '3-3-2',
+      totalBlocks: 8,
+      firstHalfKeeper: 'Maddie',
+      secondHalfKeeper: 'Avery',
+    }, [
+      { ...player('Avery', 'rotational', ['M'], undefined, ['M']), keeper: true, keeper_eligible: true },
+      { ...player('Brooklyn', 'core', ['M'], undefined, ['CM']), backup_positions: ['D'], keeper: true, keeper_eligible: true },
+      { ...player('Dolce', 'rotational', ['D'], undefined, ['ANY']) },
+      { ...player('Emma', 'rotational', ['F'], undefined, ['LF']) },
+      { ...player('Kelsey', 'core', ['F'], undefined, ['ANY']), backup_positions: ['D'] },
+      { ...player('Maddie', 'core', ['F'], undefined, ['RF']), keeper: true, keeper_eligible: true },
+      { ...player('Madelyn', 'rotational', ['M'], undefined, ['CM']), backup_positions: ['F'] },
+      { ...player('Meg', 'rotational', ['D'], undefined, ['ANY']), backup_positions: ['M'] },
+      { ...player('Natalie', 'rotational', ['D'], undefined, ['LB']) },
+      { ...player('Rachel', 'rotational', ['F'], undefined, ['ANY']), backup_positions: ['M'] },
+      { ...player('Reese', 'rotational', ['M'], undefined, ['ANY']), backup_positions: ['F'] },
+      { ...player('Selma', 'rotational', ['M'], undefined, ['ANY']) },
+      { ...player('Sophia', 'core', ['D'], undefined, ['CB']) },
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+    const placement = runStages3And4(game, demand, quotas);
+    const fieldCounts = new Map<string, number>();
+    for (const block of placement.blocks) {
+      const names = [...block.assignments.values()];
+      expect(names).toHaveLength(demand.fieldSlots.length);
+      expect(new Set(names).size).toBe(names.length);
+      expect(names).not.toContain(block.block <= 4 ? 'Maddie' : 'Avery');
+      for (const name of names) fieldCounts.set(name, (fieldCounts.get(name) ?? 0) + 1);
+    }
+
+    expect(placement.complete).toBe(true);
+    expect(placement.audit.errors.filter((error) => error.startsWith('Unfilled slot: '))).toEqual([]);
+    for (const name of ['Brooklyn', 'Kelsey', 'Sophia']) expect(fieldCounts.get(name)).toBe(6);
+    for (const name of ['Maddie', 'Avery']) {
+      expect(fieldCounts.get(name)).toBeGreaterThanOrEqual(2);
+      expect(fieldCounts.get(name)).toBeLessThanOrEqual(3);
+    }
   });
 
   it('keeps half-keepers out of field slots during their keeper half', () => {
@@ -154,22 +224,7 @@ describe('redesign stages 3-4', () => {
     }, [
       { ...player('Keeper A', 'rotational', ['D']), primary_positions: ['ANY', 'GK'] },
       { ...player('Keeper B', 'rotational', ['D']), primary_positions: ['ANY', 'GK'] },
-      player('Field A', 'rotational', ['ANY']),
-      player('Field B', 'rotational', ['ANY']),
-      player('Field C', 'rotational', ['ANY']),
-      player('Field D', 'rotational', ['ANY']),
-      player('Field E', 'rotational', ['ANY']),
-      player('Field F', 'rotational', ['ANY']),
-      player('Field G', 'rotational', ['ANY']),
-      player('Field H', 'rotational', ['ANY']),
-      player('Field I', 'rotational', ['ANY']),
-      player('Field J', 'rotational', ['ANY']),
-      player('Field K', 'rotational', ['ANY']),
-      player('Field L', 'rotational', ['ANY']),
-      player('Field M', 'rotational', ['ANY']),
-      player('Field N', 'rotational', ['ANY']),
-      player('Field O', 'rotational', ['ANY']),
-      player('Field P', 'rotational', ['ANY']),
+      ...Array.from({ length: 16 }, (_, index) => player(`Field ${String.fromCharCode(65 + index)}`, 'rotational', ['D', 'M', 'F'], undefined, ['ANY'])),
     ]);
     const demand = buildDemandModel(game);
     const quotas = assignQuotas(game, demand);
@@ -191,6 +246,28 @@ describe('redesign stages 3-4', () => {
 
   });
 
+  it.each([
+    [8, 2, 3],
+    [10, 2, 4],
+    [12, 3, 5],
+  ])('caps a half-keeper at %d blocks to %d-%d field blocks', (totalBlocks, minimum, maximum) => {
+    const game = normalizeGame({
+      format: '7v7',
+      formation: '2-3-1',
+      totalBlocks,
+      firstHalfKeeper: 'Keeper A',
+      secondHalfKeeper: 'Keeper B',
+    }, [
+      { ...player('Keeper A', 'rotational', ['D']), keeper_eligible: true },
+      { ...player('Keeper B', 'rotational', ['D']), keeper_eligible: true },
+    ]);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand);
+
+    expect(quotas.quotas.find((quota) => quota.player === 'Keeper A')?.fieldMin).toBe(minimum);
+    expect(quotas.quotas.find((quota) => quota.player === 'Keeper A')?.fieldMax).toBe(maximum);
+  });
+
   it('completes a tight 19-player 11v11 placement deterministically', () => {
     const game = normalizeGame({
       format: '11v11',
@@ -201,7 +278,7 @@ describe('redesign stages 3-4', () => {
     }, [
       { ...player('Keeper A', 'rotational', ['D']), primary_positions: ['ANY', 'GK'], keeper: true },
       { ...player('Keeper B', 'rotational', ['D']), primary_positions: ['ANY', 'GK'], keeper: true },
-      ...Array.from({ length: 17 }, (_, index) => player(`Field ${index + 1}`, 'rotational', ['ANY'])),
+      ...Array.from({ length: 17 }, (_, index) => player(`Field ${index + 1}`, 'rotational', ['D', 'M', 'F'], undefined, ['ANY'])),
     ]);
     const demand = buildDemandModel(game);
     const quotas = assignQuotas(game, demand);
@@ -262,7 +339,7 @@ describe('redesign stages 3-4', () => {
       complete: true,
       audit: { restPins: [], softRestFallback: false, outOfPositionBlocks: {}, errors: [] },
     };
-    const benchGap = (candidate: typeof placement): number => {
+    const benchGap = (candidate: { blocks: Array<{ assignments: Map<string, string> }> }): number => {
       const values = candidate.blocks.map((block) => 3 - ['Core A', 'Core B', 'Core C'].filter((name) => [...block.assignments.values()].includes(name)).length);
       return Math.max(...values) - Math.min(...values);
     };

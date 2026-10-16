@@ -1,8 +1,8 @@
 import type { Formation, GameFormat, SeasonSettings } from './models';
 
 export const BLOCK_ROUNDING_SECONDS = 30;
-export const MIN_TOTAL_BLOCKS = 4;
-export const MAX_TOTAL_BLOCKS = 16;
+export const MIN_TOTAL_BLOCKS = 6;
+export const MAX_TOTAL_BLOCKS = 12;
 export const MIN_GAME_LENGTH_MINUTES = 20;
 export const MAX_GAME_LENGTH_MINUTES = 120;
 

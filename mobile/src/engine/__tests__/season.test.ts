@@ -3,7 +3,7 @@ import { blockDurationSummary, blockStartMinutes, calculateBlockDurations, maxBl
 
 describe('block time selection', () => {
   it.each([
-    [50, 14, [4, 4, 4, 4, 3, 3, 3, 4, 4, 4, 4, 3, 3, 3]],
+    [50, 12, [5, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4]],
     [70, 10, [7, 7, 7, 7, 7, 7, 7, 7, 7, 7]],
     [45, 6, [8, 8, 7, 8, 7, 7]],
   ])('distributes whole minutes for %d minutes and %d blocks', (minutes, blocks, expected) => {
@@ -11,9 +11,16 @@ describe('block time selection', () => {
   });
 
   it('caps blocks at the three-minute average rule', () => {
-    expect(maxBlocksForGameLength(50)).toBe(16);
+    expect(maxBlocksForGameLength(50)).toBe(12);
     expect(maxBlocksForGameLength(30)).toBe(10);
     expect(nearestValidBlockCount(30, 16)).toBe(10);
+    expect(nearestValidBlockCount(50, 16)).toBe(12);
+    expect(nearestValidBlockCount(20, 4)).toBe(6);
+  });
+
+  it('supports only even block counts from 6 through 12', () => {
+    expect(() => new SeasonSetup({ game_length_minutes: 20, game_format: '7v7', total_blocks: 4, formation: '2-3-1' })).toThrow();
+    expect(new SeasonSetup({ game_length_minutes: 50, game_format: '7v7', total_blocks: 12, formation: '2-3-1' }).total_blocks).toBe(12);
   });
 
   it('calculates cumulative clock starts', () => {

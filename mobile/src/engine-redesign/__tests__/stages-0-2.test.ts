@@ -67,7 +67,8 @@ describe('redesign stages 0-2', () => {
     const core = quotas.quotas.find((item) => item.player === 'Core')!;
     expect(core.pinnedBlocks).toEqual([1, 10]);
     expect(core.totalMax).toBeGreaterThanOrEqual(8);
-    expect(core.remainingMin).toBeGreaterThanOrEqual(6);
+    expect(core.fieldMin).toBe(5);
+    expect(core.fieldTarget).toBe(6);
     expect(core.remainingMax).toBeGreaterThanOrEqual(core.remainingMin);
   });
 
@@ -92,7 +93,10 @@ describe('redesign stages 0-2', () => {
       secondHalfKeeper: 'Eitan',
     }), [
       player('Eitan', 'rotational', ['M', 'GK']),
-      ...Array.from({ length: 10 }, (_, index) => player(`Field ${index}`, 'core', ['ANY'])),
+      ...Array.from({ length: 10 }, (_, index) => ({
+        ...player(`Field ${index}`, 'core', ['D', 'M', 'F']),
+        primary_positions: ['ANY'],
+      })),
     ]);
     const demand = buildDemandModel(normalized);
     const quotas = assignQuotas(normalized, demand);

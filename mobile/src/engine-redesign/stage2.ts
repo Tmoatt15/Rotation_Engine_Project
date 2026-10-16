@@ -36,12 +36,21 @@ function isHalfKeeper(game: NormalizedGame, player: NormalizedPlayer, demand: De
   return blocks > 0 && blocks < game.totalBlocks;
 }
 
+function maximumFieldBlocks(game: NormalizedGame, player: NormalizedPlayer, demand: DemandModel): number {
+  const available = game.totalBlocks - keeperBlocks(game, player, demand);
+  return isHalfKeeper(game, player, demand)
+    ? Math.min(available, Math.max(0, Math.floor(game.totalBlocks / 2) - 1))
+    : available;
+}
+
 function endpointPins(game: NormalizedGame, player: NormalizedPlayer): number[] {
   if (player.group !== 'core' || !player.available) return [];
   const blockOnePin = game.pins.some((pin) => pin.block === 1 && pin.player === player.name);
   const late = game.lateArrival?.player === player.name;
-  if (late || (!blockOnePin && game.pins.length > 0)) return [game.totalBlocks];
-  return [1, game.totalBlocks];
+  const pins = late || (!blockOnePin && game.pins.length > 0) ? [game.totalBlocks] : [1, game.totalBlocks];
+  const half = game.totalBlocks / 2;
+  return pins.filter((block) => !((player.name === game.firstHalfKeeper && block <= half)
+    || (player.name === game.secondHalfKeeper && block > half)));
 }
 
 export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0, allowRelaxedMinimums = false): QuotaAssignment {
@@ -58,8 +67,8 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     const keeper = keeperBlocks(game, player, demand);
     quotaLog(`${player.name} group=${player.group} band.min=${band.min} rawMin=${rawMin} rawMax=${rawMax} halfKeeper=${halfKeeper} keeperBlocks=${keeper}`);
     base.set(player.name, {
-      min: halfKeeper ? Math.min(2, game.totalBlocks - keeper) : rawMin,
-      max: halfKeeper ? Math.min(4, game.totalBlocks - keeper) : rawMax,
+      min: halfKeeper ? Math.min(Math.ceil(game.totalBlocks * 0.2), maximumFieldBlocks(game, player, demand)) : rawMin,
+      max: halfKeeper ? Math.min(maximumFieldBlocks(game, player, demand), game.totalBlocks - keeper) : rawMax,
     });
     targets.set(player.name, base.get(player.name)!.min);
   }
@@ -71,8 +80,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       for (const player of fieldPlayers.filter((candidate) => candidate.group === group).sort((left, right) => left.name.localeCompare(right.name))) {
         const value = base.get(player.name)!;
         const amount = Math.min(remaining, value.max - value.min);
-        if (isHalfKeeper(game, player, demand)) targets.set(player.name, (targets.get(player.name) ?? value.min) + amount);
-        else value.min += amount;
+        targets.set(player.name, (targets.get(player.name) ?? value.min) + amount);
         value.max = Math.max(value.max, value.min);
         if (amount) audit.surplusAssignments.push({ group, player: player.name, amount });
         remaining -= amount;
@@ -127,7 +135,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
   const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
     const value = base.get(player.name)!;
     const pins = endpointPins(game, player).length;
-    return total + Math.max(0, Math.min(value.max - pins, game.totalBlocks - keeperBlocks(game, player, demand) - pins));
+    return total + Math.max(0, Math.min(value.max - pins, maximumFieldBlocks(game, player, demand) - pins));
   }, 0);
   const totalPins = fieldPlayers.reduce((total, player) => total + endpointPins(game, player).length, 0);
   if (effectiveMax() < fieldSlots - totalPins) {
@@ -143,7 +151,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       let changed = false;
       for (const player of candidates) {
         const value = base.get(player.name)!;
-        const cap = game.totalBlocks - keeperBlocks(game, player, demand);
+        const cap = maximumFieldBlocks(game, player, demand);
         if (value.max >= cap) continue;
         value.max += 1;
         audit.surplusAssignments.push({ group: player.group, player: player.name, amount: 1 });
@@ -174,7 +182,7 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
     const gk = keeperBlocks(game, player, demand);
     const dedicated = isDedicatedKeeper(player);
     const field = base.get(player.name) ?? { min: 0, max: 0 };
-    const availableField = Math.max(0, game.totalBlocks - gk - pins.length);
+    const availableField = Math.max(0, maximumFieldBlocks(game, player, demand) - pins.length);
     const fieldMin = dedicated ? 0 : Math.max(0, Math.min(field.min - pins.length, availableField));
     const fieldMax = dedicated ? 0 : Math.max(fieldMin, Math.min(field.max - pins.length, game.totalBlocks - gk - pins.length));
     const gkMin = dedicated ? gk : gk;
@@ -189,7 +197,9 @@ export function assignQuotas(game: NormalizedGame, demand: DemandModel, tier = 0
       remainingMax: fieldMax,
       fieldMin,
       fieldMax,
-      fieldTarget: targets.get(player.name) ?? fieldMin,
+      fieldTarget: dedicated
+        ? 0
+        : Math.max(0, Math.min((targets.get(player.name) ?? field.min) - pins.length, availableField)),
       gkMin,
       gkMax,
       keeperBlocks: gk,

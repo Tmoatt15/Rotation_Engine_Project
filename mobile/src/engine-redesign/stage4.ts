@@ -76,7 +76,10 @@ function oopCounts(game: NormalizedGame, blocks: PlacementBlock[]): Map<string, 
 function exchangeAllowed(game: NormalizedGame, blocks: PlacementBlock[], blockIndex: number, slot: string, incoming: string, rest: Map<string, Set<number>>): boolean {
   const block = blocks[blockIndex];
   const player = playerByName(game, incoming);
-  if (!player || excludedFromSlot(player, slot) || [...block.assignments.values()].includes(incoming) || rest.get(incoming)?.has(block.block)) return false;
+  const half = game.totalBlocks / 2;
+  const inGoalkeeperHalf = player && ((player.name === game.firstHalfKeeper && block.block <= half)
+    || (player.name === game.secondHalfKeeper && block.block > half));
+  if (!player || inGoalkeeperHalf || excludedFromSlot(player, slot) || [...block.assignments.values()].includes(incoming) || rest.get(incoming)?.has(block.block)) return false;
   const counts = oopCounts(game, blocks);
   if (positionTier(player, slot) === 0 && (counts.get(incoming) ?? 0) >= 2) return false;
   return true;
