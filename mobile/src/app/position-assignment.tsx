@@ -229,8 +229,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         : positionPicker.positions;
     const changes: Partial<Player> = { [positionPicker.group]: positions };
     if (isGeneralGroup) {
-      changes.primary_positions = positions[0] === NONE_POSITION ? [] : positions;
-      if (positions[0] === NONE_POSITION) changes.keeper_eligible = true;
+      changes.primary_positions = positions[0] === NONE_POSITION ? [] : [ANY_POSITION];
     }
     const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
     setPlayers(updatedPlayers);
@@ -348,7 +347,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
             />}
             {generalGroupIssues.length > 0 && <Text style={styles.errorText}>
               General groups need attention: {generalGroupIssues.map(({ player, reason }) =>
-                `${player} ${reason === 'needs-group' ? 'needs one group (D, M, or F) or Keeper only' : 'must have only one group (D, M, or F)'}`).join('; ')}.
+                `${player} ${reason === 'needs-group' ? 'needs one group (D, M, or F) unless keeper eligible' : 'must have only one group (D, M, or F)'}`).join('; ')}.
             </Text>}
             {!formationConfigured && (
               <View style={styles.formationBanner}>
@@ -506,7 +505,7 @@ function PositionField({ label, value, onPress }: { label: string; value: string
     <Pressable style={styles.gridCell} onPress={onPress} accessibilityRole="button">
       <Text style={styles.gridLabel}>{label.toUpperCase()}</Text>
       <View style={styles.positionValue}>
-        <Text style={styles.positionValueText} numberOfLines={1}>{value.join(', ') || 'None'}</Text>
+        <Text style={styles.positionValueText} numberOfLines={1}>{value.map((position) => position.toUpperCase() === NONE_POSITION ? 'None' : position).join(', ') || 'None'}</Text>
         <SymbolView name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} size={16} tintColor={palette.muted} />
       </View>
     </Pressable>
@@ -546,7 +545,7 @@ function PositionPickerModal({
               <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={19} tintColor={palette.ink} />
             </Pressable>
           </View>
-          <Text style={styles.modalHint}>{picker.group === 'general_positions' ? 'Choose one group or Keeper only.' : 'Tap each position to add or remove it.'}</Text>
+          <Text style={styles.modalHint}>{picker.group === 'general_positions' ? 'Choose one group or None.' : 'Tap each position to add or remove it.'}</Text>
           <ScrollView contentContainerStyle={styles.positionRows}>
             {picker.group === 'general_positions' && (
               <View style={styles.pickerRow}>
@@ -557,7 +556,7 @@ function PositionPickerModal({
                     style={[styles.positionOption, picker.positions.includes(NONE_POSITION) && styles.positionOptionSelected]}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: picker.positions.includes(NONE_POSITION) }}>
-                    <Text style={[styles.positionOptionText, picker.positions.includes(NONE_POSITION) && styles.positionOptionTextSelected]}>Keeper only</Text>
+                    <Text style={[styles.positionOptionText, picker.positions.includes(NONE_POSITION) && styles.positionOptionTextSelected]}>None</Text>
                   </Pressable>
                 </View>
               </View>
