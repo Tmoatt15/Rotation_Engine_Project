@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, normalizeGame, placeStage3, ZONE_POSITIONS } from '..';
+import { assignQuotas, buildDemandModel, GeneralGroupValidationError, normalizeGame, placeStage3, ZONE_POSITIONS } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 import fingerprintCases from '../../engine/__tests__/fixtures/rotation_fingerprint_cases.json';
 
@@ -22,6 +22,30 @@ function game(overrides: Partial<RedesignGameInput> = {}): RedesignGameInput {
 }
 
 describe('redesign stages 0-2', () => {
+  it('requires exactly one general field group and preserves the dedicated keeper exception', () => {
+    const invalidRoster = [
+      { ...player('Missing group', 'rotational', ['NONE']) },
+      { ...player('Multiple groups', 'rotational', ['D', 'M']) },
+      { ...player('Backup only', 'rotational', ['D']), backup_positions: ['M'] },
+      { name: 'Keeper only', group: 'rotational', general_positions: ['NONE'], keeper_eligible: true },
+      player('Keeper A', 'rotational', ['GK']),
+      player('Keeper B', 'rotational', ['GK']),
+    ];
+    let thrown: unknown;
+    try {
+      normalizeGame(game(), invalidRoster);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GeneralGroupValidationError);
+    expect(thrown).toMatchObject({
+      offenders: [
+        { player: 'Missing group', reason: 'needs-group' },
+        { player: 'Multiple groups', reason: 'multiple-groups' },
+      ],
+    });
+  });
+
   it('normalizes core aliases and bypasses keeper gating for 4v4', () => {
     const normalized = normalizeGame(
       game({ format: '4v4', formation: '1-2-1', firstHalfKeeper: null, secondHalfKeeper: null }),
@@ -53,6 +77,34 @@ describe('redesign stages 0-2', () => {
     expect(demand.fieldSlots.filter((slot) => slot.zone === 'CB')).toHaveLength(2);
     expect(ZONE_POSITIONS.CM.has('CAM')).toBe(true);
     expect(demand.goalkeeperBlocks).toEqual([5, 5]);
+  });
+
+  it.each([
+    {
+      format: '7v7' as const,
+      formation: '2-1-2-1',
+      slots: ['LB', 'RB', 'CDM', 'LM', 'RM', 'ST'],
+      counts: { D: 2, M: 3, F: 1 },
+    },
+    {
+      format: '11v11' as const,
+      formation: '4-2-3-1',
+      slots: ['LB', 'LCB', 'RCB', 'RB', 'LDM', 'RDM', 'LM', 'CAM', 'RM', 'ST'],
+      counts: { D: 4, M: 5, F: 1 },
+    },
+  ])('uses the canonical $formation slots and groups', ({ format, formation, slots, counts }) => {
+    const normalized = normalizeGame(game({ format, formation }), [
+      player('Keeper A', 'rotational', ['GK']),
+      player('Keeper B', 'rotational', ['GK']),
+    ]);
+    const demand = buildDemandModel(normalized);
+    expect(demand.fieldSlots.map((slot) => slot.slot)).toEqual(slots);
+    expect({
+      D: demand.fieldSlots.filter((slot) => slot.group === 'D').length,
+      M: demand.fieldSlots.filter((slot) => slot.group === 'M').length,
+      F: demand.fieldSlots.filter((slot) => slot.group === 'F').length,
+    }).toEqual(counts);
+    expect(new Set(demand.fieldSlots.map((slot) => slot.slot)).size).toBe(demand.fieldSlots.length);
   });
 
   it('uses the new bands and endpoint accounting for ten blocks', () => {
@@ -94,8 +146,9 @@ describe('redesign stages 0-2', () => {
     }), [
       player('Eitan', 'rotational', ['M', 'GK']),
       ...Array.from({ length: 10 }, (_, index) => ({
-        ...player(`Field ${index}`, 'core', ['D', 'M', 'F']),
+        ...player(`Field ${index}`, 'core', ['D']),
         primary_positions: ['ANY'],
+        backup_positions: ['M', 'F'],
       })),
     ]);
     const demand = buildDemandModel(normalized);
@@ -150,7 +203,17 @@ describe('redesign stages 0-2', () => {
         firstHalfKeeper: fixture.game.first_half_gk ?? null,
         secondHalfKeeper: fixture.game.second_half_gk ?? null,
       };
-      const roster = fixture.players as RedesignPlayerInput[];
+      const roster = (fixture.players as RedesignPlayerInput[]).map((player) => {
+        const fieldGroups = (player.general_positions ?? []).filter((position) => ['D', 'M', 'F'].includes(position));
+        if (fieldGroups.length <= 1) return player;
+        const primaryGroup = (player.primary_positions ?? []).find((position) => fieldGroups.includes(position));
+        const generalGroup = primaryGroup ?? fieldGroups[0];
+        return {
+          ...player,
+          general_positions: [generalGroup],
+          backup_positions: [...new Set([...(player.backup_positions ?? []), ...fieldGroups.filter((group) => group !== generalGroup)])],
+        };
+      });
       if (input.format === '4v4') {
         expect(() => normalizeGame(input, roster)).not.toThrow();
       } else if (input.firstHalfKeeper && input.secondHalfKeeper) {

@@ -11,7 +11,8 @@ import { getRoster, getSeasonSettings } from '@/services/team-service';
 import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';
 import { GAME_FORMATS } from '@/engine/season';
 import type { GameFormat } from '@/engine/models';
-import { buildDemandModel, checkRosterFeasibility, normalizeGame } from '@/engine-redesign';
+import { buildDemandModel, checkRosterFeasibility, GeneralGroupValidationError, normalizeGame } from '@/engine-redesign';
+import { isDedicatedKeeper } from '@/position-groups';
 
 const palette = {
   ink: '#17221f',
@@ -78,7 +79,7 @@ function playerPositionEntries(player: Player): PositionEntry[] {
 function belongsToRoleGroup(position: string, group: string): boolean {
   if (group === 'GK') return position === 'GK';
   if (group === 'F') return position === 'F' || position.startsWith('F') || ['CF', 'LW', 'RW'].includes(position);
-  if (group === 'M') return position === 'M' || position.startsWith('M') || ['CM', 'CDM', 'CAM', 'LAM', 'RAM', 'LDM', 'RDM'].includes(position);
+  if (group === 'M') return position === 'M' || position.startsWith('M') || ['CM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(position);
   return position === 'D' || ['CB', 'LB', 'RB', 'LCB', 'RCB', 'LWB', 'RWB'].includes(position);
 }
 
@@ -137,22 +138,30 @@ function OptimalRosterBuilder({ players, formation, gameFormat, totalBlocks, onC
       return { kind: 'keeper', message: 'No available keeper-eligible player is configured.' };
     }
     const keeper = keeperEligible[0]?.name ?? null;
-    const normalized = normalizeGame({
-      format: gameFormat,
-      formation,
-      totalBlocks,
-      firstHalfKeeper: keeper,
-      secondHalfKeeper: keeper,
-    }, players.map((player) => ({
-      name: player.name,
-      group: player.group,
-      general_positions: player.general_positions,
-      primary_positions: player.primary_positions,
-      backup_positions: player.backup_positions,
-      excluded_positions: player.excluded_positions,
-      keeper_eligible: player.keeper_eligible,
-      keeper: player.keeper_eligible === true && player.general_positions.length === 0,
-    })));
+    let normalized: ReturnType<typeof normalizeGame>;
+    try {
+      normalized = normalizeGame({
+        format: gameFormat,
+        formation,
+        totalBlocks,
+        firstHalfKeeper: keeper,
+        secondHalfKeeper: keeper,
+      }, players.map((player) => ({
+        name: player.name,
+        group: player.group,
+        general_positions: player.general_positions,
+        primary_positions: player.primary_positions,
+        backup_positions: player.backup_positions,
+        excluded_positions: player.excluded_positions,
+        keeper_eligible: player.keeper_eligible,
+        keeper: isDedicatedKeeper(player.keeper_eligible === true, player.general_positions),
+      })));
+    } catch (error) {
+      if (error instanceof GeneralGroupValidationError) {
+        return { kind: 'position-shortage', message: error.message };
+      }
+      throw error;
+    }
     return checkRosterFeasibility(normalized, buildDemandModel(normalized));
   }, [formation, gameFormat, keeperEligible, players, totalBlocks]);
   const overallFeasible = !feasibilityIssue;

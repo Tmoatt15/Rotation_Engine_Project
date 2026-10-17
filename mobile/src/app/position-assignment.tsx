@@ -9,7 +9,8 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/services/team-service';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
-import { positionHealth, positionHealthMessage, type PositionHealth } from '@/services/roster-health';
+import { positionHealth, positionHealthMessage, validateGeneralGroups, type PositionHealth } from '@/services/roster-health';
+import { NONE_POSITION } from '@/position-groups';
 
 const palette = {
   ink: '#17221f',
@@ -121,7 +122,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     [filter, players],
   );
   const health = useMemo(() => positionHealth(formation, players), [formation, players]);
-  const allPositionsHealthy = health.length > 0 && health.every((item) => item.status === 'green');
+  const generalGroupIssues = useMemo(() => validateGeneralGroups(players), [players]);
+  const allPositionsHealthy = health.length > 0 && health.every((item) => item.status === 'green') && generalGroupIssues.length === 0;
 
   useEffect(() => subscribeToTeamChanges(() => setTeamChangeVersion((version) => version + 1)), []);
 
@@ -200,7 +202,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         return row ? generalGroups.includes(row.label) : false;
       });
     const allowedPositions = group === 'general_positions'
-      ? [ANY_POSITION, 'D', 'M', 'F']
+      ? [NONE_POSITION, 'D', 'M', 'F']
       : group === 'backup_positions'
         ? ['D', 'M', 'F', ...formationPositions]
         : group === 'excluded_positions'
@@ -219,19 +221,21 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
     if (!positionPicker) return;
     const player = players.find((candidate) => candidate.name === positionPicker.playerName);
     if (!player) return;
-    const positions = positionPicker.positions.includes(ANY_POSITION)
-      ? [ANY_POSITION]
-      : positionPicker.positions.length === 0 && positionPicker.group === 'general_positions'
+    const isGeneralGroup = positionPicker.group === 'general_positions';
+    const positions = isGeneralGroup
+      ? [positionPicker.positions[0] ?? NONE_POSITION]
+      : positionPicker.positions.includes(ANY_POSITION)
         ? [ANY_POSITION]
         : positionPicker.positions;
-      const changes: Partial<Player> = { [positionPicker.group]: positions };
-      if (positionPicker.group === 'general_positions') {
-        changes.primary_positions = positionPicker.positions;
-      }
-      const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
-      setPlayers(updatedPlayers);
-      setPositionPicker(null);
-      void saveRoster(updatedPlayers, false);
+    const changes: Partial<Player> = { [positionPicker.group]: positions };
+    if (isGeneralGroup) {
+      changes.primary_positions = positions[0] === NONE_POSITION ? [] : positions;
+      if (positions[0] === NONE_POSITION) changes.keeper_eligible = true;
+    }
+    const updatedPlayers = players.map((candidate) => candidate.name === player.name ? { ...candidate, ...changes } : candidate);
+    setPlayers(updatedPlayers);
+    setPositionPicker(null);
+    void saveRoster(updatedPlayers, false);
   }
 
     async function saveRoster(playersToSave = players, returnHome = true) {
@@ -260,8 +264,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
         name,
         number: parsedNumber,
         group: 'rotational' as const,
-        general_positions: [ANY_POSITION],
-        primary_positions: [ANY_POSITION],
+        general_positions: [NONE_POSITION],
+        primary_positions: [],
         backup_positions: [],
         excluded_positions: [],
       }];
@@ -336,14 +340,16 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                 <Text style={styles.warningText}>Your formation changed. Update player positions to match the current formation.</Text>
               </View>
             )}
-            {formationConfigured && (
-              <PositionHealthPanel
-                health={health}
-                collapsed={allPositionsHealthy && !healthExpanded}
-                onToggle={() => setHealthExpanded((expanded) => !expanded)}
-                onSelect={setSelectedHealth}
-              />
-            )}
+            {formationConfigured && <PositionHealthPanel
+              health={health}
+              collapsed={allPositionsHealthy && !healthExpanded}
+              onToggle={() => setHealthExpanded((expanded) => !expanded)}
+              onSelect={setSelectedHealth}
+            />}
+            {generalGroupIssues.length > 0 && <Text style={styles.errorText}>
+              General groups need attention: {generalGroupIssues.map(({ player, reason }) =>
+                `${player} ${reason === 'needs-group' ? 'needs one group (D, M, or F) or Keeper only' : 'must have only one group (D, M, or F)'}`).join('; ')}.
+            </Text>}
             {!formationConfigured && (
               <View style={styles.formationBanner}>
                 <Text style={styles.formationHint}>Set a formation above to assign exact Primary, Backup, and Excluded positions.</Text>
@@ -476,14 +482,18 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       <PositionPickerModal
         picker={positionPicker}
         positionRows={positionRows}
-        onToggle={(position) => setPositionPicker((current) => current ? {
-          ...current,
-          positions: current.positions.includes(position)
-            ? current.positions.filter((selected) => selected !== position)
-            : position === ANY_POSITION
-              ? [ANY_POSITION]
-              : [...current.positions.filter((selected) => selected !== ANY_POSITION), position],
-        } : current)}
+        onToggle={(position) => setPositionPicker((current) => {
+          if (!current) return current;
+          if (current.group === 'general_positions') return { ...current, positions: [position] };
+          return {
+            ...current,
+            positions: current.positions.includes(position)
+              ? current.positions.filter((selected) => selected !== position)
+              : position === ANY_POSITION
+                ? [ANY_POSITION]
+                : [...current.positions.filter((selected) => selected !== ANY_POSITION), position],
+          };
+        })}
         onFinish={finishPositionPicker}
       />
       <PositionHealthModal health={selectedHealth} onClose={() => setSelectedHealth(null)} />
@@ -536,9 +546,23 @@ function PositionPickerModal({
               <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={19} tintColor={palette.ink} />
             </Pressable>
           </View>
-          <Text style={styles.modalHint}>Tap each position to add or remove it.</Text>
+          <Text style={styles.modalHint}>{picker.group === 'general_positions' ? 'Choose one group or Keeper only.' : 'Tap each position to add or remove it.'}</Text>
           <ScrollView contentContainerStyle={styles.positionRows}>
-            {(picker.group === 'general_positions' || picker.group === 'primary_positions') && (
+            {picker.group === 'general_positions' && (
+              <View style={styles.pickerRow}>
+                <Text style={styles.pickerRowLabel}>No field group</Text>
+                <View style={styles.pickerOptions}>
+                  <Pressable
+                    onPress={() => onToggle(NONE_POSITION)}
+                    style={[styles.positionOption, picker.positions.includes(NONE_POSITION) && styles.positionOptionSelected]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: picker.positions.includes(NONE_POSITION) }}>
+                    <Text style={[styles.positionOptionText, picker.positions.includes(NONE_POSITION) && styles.positionOptionTextSelected]}>Keeper only</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+            {picker.group === 'primary_positions' && (
               <View style={styles.pickerRow}>
                 <Text style={styles.pickerRowLabel}>Flexible</Text>
                 <View style={styles.pickerOptions}>

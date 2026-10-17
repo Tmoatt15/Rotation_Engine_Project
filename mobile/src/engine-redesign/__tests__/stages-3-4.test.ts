@@ -2,15 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { assignQuotas, buildDemandModel, compareCandidates, deriveRestPins, isEligible, normalizeGame, placeStage3, polishStage4, runStages3And4, turnoverVariance } from '..';
 import type { RedesignGameInput, RedesignPlayerInput } from '../model';
 
-const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none', primaryPositions = positions): RedesignPlayerInput => ({
-  name,
-  group,
-  general_positions: positions,
-  primary_positions: primaryPositions,
-  rest_preset,
-});
+const player = (name: string, group: string, positions: string[], rest_preset?: 'A' | 'B' | 'none', primaryPositions = positions): RedesignPlayerInput => {
+  const fieldGroups = positions.filter((position) => ['D', 'M', 'F'].includes(position));
+  const generalPositions = fieldGroups.length ? [fieldGroups[0]] : positions.includes('GK') ? ['GK'] : ['D'];
+  const backupPositions = fieldGroups.filter((position) => position !== generalPositions[0]);
+  const primary = primaryPositions.length > 1 && fieldGroups.length > 1 ? [generalPositions[0]] : primaryPositions;
+  return {
+    name,
+    group,
+    general_positions: generalPositions,
+    primary_positions: primary,
+    backup_positions: backupPositions,
+    rest_preset,
+  };
+};
 
-function setup(overrides: Partial<RedesignGameInput> = {}) {
+function setup(overrides: Partial<RedesignGameInput> = {}, depthCount = 14) {
   const gameInput: RedesignGameInput = {
     format: '4v4',
     formation: '1-2-1',
@@ -24,7 +31,7 @@ function setup(overrides: Partial<RedesignGameInput> = {}) {
     player('Rest B', 'core', ['M'], 'B'),
     player('Keeper A', 'rotational', ['GK']),
     player('Keeper B', 'rotational', ['GK']),
-    ...Array.from({ length: 14 }, (_, index) => player(`Depth ${index + 1}`, 'rotational', ['D', 'M', 'F'], undefined, ['ANY'])),
+    ...Array.from({ length: depthCount }, (_, index) => player(`Depth ${index + 1}`, 'rotational', ['D', 'M', 'F'], undefined, ['ANY'])),
   ];
   const game = normalizeGame(gameInput, roster);
   const demand = buildDemandModel(game);
@@ -74,7 +81,7 @@ describe('redesign stages 3-4', () => {
   });
 
   it('derives the specified A and B rest pins', () => {
-    const { game, quotas } = setup();
+    const { game, quotas } = setup({}, 2);
     expect(deriveRestPins(game, quotas)).toEqual([
       { player: 'Rest A', blocks: [3, 8] },
       { player: 'Rest B', blocks: [5, 6] },
@@ -326,7 +333,7 @@ describe('redesign stages 3-4', () => {
       player('Core B', 'core', ['D'], undefined, ['ANY']),
       player('Core C', 'core', ['M']),
       player('Rot A', 'rotational', ['D']),
-      player('Rot B', 'rotational', ['ANY']),
+      player('Rot B', 'rotational', ['M']),
       player('Rot C', 'rotational', ['M']),
       player('Rot D', 'rotational', ['F']),
     ]);
@@ -342,7 +349,7 @@ describe('redesign stages 3-4', () => {
       complete: true,
       audit: { restPins: [], softRestFallback: false, outOfPositionBlocks: {}, errors: [] },
     };
-    const benchGap = (candidate: { blocks: Array<{ assignments: Map<string, string> }> }): number => {
+    const benchGap = (candidate: { blocks: { assignments: Map<string, string> }[] }): number => {
       const values = candidate.blocks.map((block) => 3 - ['Core A', 'Core B', 'Core C'].filter((name) => [...block.assignments.values()].includes(name)).length);
       return Math.max(...values) - Math.min(...values);
     };
@@ -364,8 +371,8 @@ describe('redesign stages 3-4', () => {
       firstHalfKeeper: null,
       secondHalfKeeper: null,
     }, [
-      player('Core A', 'core', ['ANY']),
-      player('Core B', 'core', ['ANY']),
+      player('Core A', 'core', ['D'], undefined, ['ANY']),
+      player('Core B', 'core', ['D'], undefined, ['ANY']),
       player('Rot A', 'rotational', ['D']),
       player('Rot B', 'rotational', ['M']),
       player('Rot C', 'rotational', ['F']),
@@ -386,7 +393,7 @@ describe('redesign stages 3-4', () => {
     const polished = polishStage4(game, demand, quotas, placement);
     const after = polished.blocks.map((block) => [...block.assignments.values()].includes('Core A'));
     expect(before[1]).toBe(false);
-    expect(after[1]).toBe(false);
-    expect(after[3]).toBe(true);
+    expect(after[1]).toBe(true);
+    expect(after[3]).toBe(false);
   });
 });

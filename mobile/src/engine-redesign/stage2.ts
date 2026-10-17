@@ -8,6 +8,7 @@ import type {
   RedesignGroup,
   WaterfillRotationState,
 } from './model';
+import { isDedicatedKeeper } from '@/position-groups';
 
 const BANDS: Record<RedesignGroup, { min: number; max: number; midpoint: number }> = {
   core: { min: 0.7, max: 0.8, midpoint: 0.75 },
@@ -33,10 +34,6 @@ function keeperFieldFloor(totalBlocks: number): number {
 
 function nonKeeperFieldFloor(totalBlocks: number): number {
   return Math.ceil(totalBlocks * 0.4);
-}
-
-function isDedicatedKeeper(player: NormalizedPlayer): boolean {
-  return player.keeper && player.generalPositions.length === 0;
 }
 
 function keeperBlocks(game: NormalizedGame, player: NormalizedPlayer, demand: DemandModel): number {
@@ -67,179 +64,6 @@ function endpointPins(game: NormalizedGame, player: NormalizedPlayer): number[] 
     || (player.name === game.secondHalfKeeper && block > half)));
 }
 
-function assignLegacyQuotas(game: NormalizedGame, demand: DemandModel, tier = 0, allowRelaxedMinimums = false): QuotaAssignment {
-  const available = game.players.filter((player) => player.available);
-  const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player));
-  const fieldSlots = demand.slotsPerBlock * game.totalBlocks;
-  const base = new Map<string, { min: number; max: number }>();
-  const targets = new Map<string, number>();
-  for (const player of fieldPlayers) {
-    const band = BANDS[player.group];
-    const rawMin = percentageBlocks(game.totalBlocks, band.min, 0);
-    const rawMax = maximumBlocks(game.totalBlocks, band.max);
-    const halfKeeper = isHalfKeeper(game, player, demand);
-    const keeper = keeperBlocks(game, player, demand);
-    base.set(player.name, {
-      min: halfKeeper ? Math.min(Math.ceil(game.totalBlocks * 0.2), maximumFieldBlocks(game, player, demand)) : rawMin,
-      max: halfKeeper ? Math.min(maximumFieldBlocks(game, player, demand), game.totalBlocks - keeper) : rawMax,
-    });
-    targets.set(player.name, base.get(player.name)!.min);
-  }
-  const sum = (key: 'min' | 'max'): number => [...base.values()].reduce((total, value) => total + value[key], 0);
-  const audit: QuotaAssignment['audit'] = { relaxedGroups: [], relaxedPlayers: [], surplusAssignments: [], unfillableWithinMax: 0 };
-  if (sum('min') < fieldSlots) {
-    let remaining = fieldSlots - sum('min');
-    for (const group of ['core', 'rotational', 'developing'] as const) {
-      for (const player of fieldPlayers.filter((candidate) => candidate.group === group).sort((left, right) => left.name.localeCompare(right.name))) {
-        const value = base.get(player.name)!;
-        const amount = Math.min(remaining, value.max - value.min);
-        targets.set(player.name, (targets.get(player.name) ?? value.min) + amount);
-        value.max = Math.max(value.max, value.min);
-        if (amount) audit.surplusAssignments.push({ group, player: player.name, amount });
-        remaining -= amount;
-        if (!remaining) break;
-      }
-      if (!remaining) break;
-    }
-    audit.unfillableWithinMax = remaining;
-  } else if (sum('min') > fieldSlots) {
-    const order: RedesignGroup[] = ['developing', 'rotational', 'core'];
-    const startingPercent: Record<RedesignGroup, number> = allowRelaxedMinimums
-      ? { core: 60, rotational: 50, developing: 40 }
-      : { core: 70, rotational: 60, developing: 50 };
-    const initialMinimums = new Map(fieldPlayers.map((player) => [player.name, base.get(player.name)!.min]));
-    const groupPercent = { ...startingPercent };
-    const reduceStep = (minimumPercent: number): void => {
-      const group = order[steps % order.length];
-      const nextPercent = Math.max(minimumPercent, groupPercent[group] - 10);
-      if (nextPercent === groupPercent[group]) {
-        steps += 1;
-        return;
-      }
-      groupPercent[group] = nextPercent;
-      const target = percentageBlocks(game.totalBlocks, nextPercent / 100, 0);
-      for (const player of fieldPlayers.filter((candidate) => candidate.group === group && !isHalfKeeper(game, candidate, demand))) {
-        const value = base.get(player.name)!;
-        if (value.min > target) {
-          value.min = target;
-        }
-      }
-      steps += 1;
-    };
-    let steps = 0;
-    while (sum('min') > fieldSlots && steps < 6) reduceStep(40);
-    steps = 0;
-    while (sum('min') > fieldSlots && steps < 30) {
-      if (Object.values(groupPercent).every((percent) => percent === 0)) break;
-      reduceStep(0);
-    }
-    for (const group of ['core', 'rotational', 'developing'] as const) {
-      const amount = fieldPlayers
-        .filter((player) => player.group === group)
-        .reduce((total, player) => total + (initialMinimums.get(player.name)! - base.get(player.name)!.min), 0);
-      if (amount > 0) audit.relaxedGroups.push({ group, amount });
-    }
-    audit.relaxedPlayers = fieldPlayers
-      .map((player) => ({ player: player.name, group: player.group, before: initialMinimums.get(player.name)!, after: base.get(player.name)!.min }))
-      .filter((entry) => entry.before > entry.after);
-  }
-  const effectiveMax = (): number => fieldPlayers.reduce((total, player) => {
-    const value = base.get(player.name)!;
-    const pins = endpointPins(game, player).length;
-    return total + Math.max(0, Math.min(value.max - pins, maximumFieldBlocks(game, player, demand) - pins));
-  }, 0);
-  const totalPins = fieldPlayers.reduce((total, player) => total + endpointPins(game, player).length, 0);
-  if (effectiveMax() < fieldSlots - totalPins) {
-    let deficit = fieldSlots - totalPins - effectiveMax();
-    const priority = (group: RedesignGroup): number => group === 'core' ? 0 : group === 'rotational' ? 1 : 2;
-    const candidates = [...fieldPlayers]
-      .sort((left, right) => {
-        const leftKeeper = isHalfKeeper(game, left, demand) ? 1 : 0;
-        const rightKeeper = isHalfKeeper(game, right, demand) ? 1 : 0;
-        return leftKeeper - rightKeeper || priority(left.group) - priority(right.group) || left.name.localeCompare(right.name);
-      });
-    while (deficit > 0) {
-      let changed = false;
-      for (const player of candidates) {
-        const value = base.get(player.name)!;
-        const cap = maximumFieldBlocks(game, player, demand);
-        if (value.max >= cap) continue;
-        value.max += 1;
-        audit.surplusAssignments.push({ group: player.group, player: player.name, amount: 1 });
-        deficit = fieldSlots - totalPins - effectiveMax();
-        changed = true;
-        if (!deficit) break;
-      }
-      if (!changed) break;
-    }
-    audit.unfillableWithinMax += deficit;
-  }
-  const tierShifts = [
-    { core: 0, rotational: 0, developing: 0 },
-    { core: 2, rotational: 1, developing: 1 },
-    { core: 2, rotational: 2, developing: 1 },
-    { core: 2, rotational: 2, developing: 2 },
-  ];
-  const shifts = tierShifts[Math.max(0, Math.min(3, tier))];
-  if (tier > 0) {
-    for (const player of fieldPlayers) {
-      if (isHalfKeeper(game, player, demand)) continue;
-      const value = base.get(player.name)!;
-      value.max = Math.min(game.totalBlocks, value.max + shifts[player.group]);
-    }
-  }
-  const quotas: PlayerQuota[] = available.map((player) => {
-    const pins = endpointPins(game, player);
-    const gk = keeperBlocks(game, player, demand);
-    const dedicated = isDedicatedKeeper(player);
-    const field = base.get(player.name) ?? { min: 0, max: 0 };
-    const availableField = Math.max(0, maximumFieldBlocks(game, player, demand) - pins.length);
-    const fieldMin = dedicated ? 0 : Math.max(0, Math.min(field.min - pins.length, availableField));
-    const fieldMax = dedicated ? 0 : Math.max(fieldMin, Math.min(field.max - pins.length, game.totalBlocks - gk - pins.length));
-    const gkMin = dedicated ? gk : gk;
-    const gkMax = dedicated ? gk : gk;
-    const quota = {
-      player: player.name,
-      group: player.group,
-      totalMin: fieldMin + pins.length + gkMin,
-      totalMax: fieldMax + pins.length + gkMax,
-      pinnedBlocks: pins,
-      remainingMin: fieldMin,
-      remainingMax: fieldMax,
-      fieldMin,
-      fieldMax,
-      fieldTarget: dedicated
-        ? 0
-        : Math.max(0, Math.min((targets.get(player.name) ?? field.min) - pins.length, availableField)),
-      gkMin,
-      gkMax,
-      keeperBlocks: gk,
-      history: player.history,
-    };
-    return quota;
-  });
-  const arrival = game.lateArrival;
-  if (arrival) {
-    const quota = quotas.find((candidate) => candidate.player === arrival.player);
-    if (quota) {
-      const player = game.players.find((candidate) => candidate.name === arrival.player)!;
-      const remainingBlocks = game.totalBlocks - arrival.arrivalBlock + 1;
-      const target = arrival.targetBlocks ?? Math.round(BANDS[player.group].midpoint * remainingBlocks);
-      quota.totalMin = target;
-      quota.totalMax = target;
-      quota.remainingMin = Math.max(0, target - quota.pinnedBlocks.length);
-      quota.remainingMax = quota.remainingMin;
-    }
-  }
-  return {
-    quotas,
-    audit,
-    fieldSlots,
-    goalkeeperSlots: demand.goalkeeperBlocks[0] + demand.goalkeeperBlocks[1],
-    rotationState: game.seasonRotation,
-  };
-}
-
 type FieldAllocation = Map<string, Map<FieldGroup, number>>;
 type RotationAction = 'lastShed' | 'lastGained';
 
@@ -248,6 +72,7 @@ interface WaterfillPlayer {
   primaryGroup: FieldGroup | null;
   keeperBlocks: number;
   selectedKeeper: boolean;
+  hardFloor: number;
   floor: number;
   bandFloor: number;
   maximum: number;
@@ -260,12 +85,12 @@ const SHED_TIERS: RedesignGroup[] = ['developing', 'rotational'];
 const HIT_TIERS: RedesignGroup[] = ['developing', 'rotational', 'core'];
 const SURPLUS_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
 const FLEX_OUT_TIERS: RedesignGroup[] = ['rotational', 'developing', 'core'];
-const FLEX_IN_TIERS: RedesignGroup[] = ['core', 'rotational'];
+const FLEX_IN_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
 
 function groupForPosition(position: string): FieldGroup | null {
   const normalized = position.toUpperCase();
   if (['D', 'LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(normalized)) return 'D';
-  if (['M', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(normalized)) return 'M';
+  if (['M', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(normalized)) return 'M';
   if (['F', 'LF', 'CF', 'RF', 'LW', 'RW', 'ST'].includes(normalized)) return 'F';
   return null;
 }
@@ -337,19 +162,23 @@ function pinnedBlocksByGroup(
   return { blocks: [...pins.keys()].sort((left, right) => left - right), counts };
 }
 
-function buildWaterfillQuotas(
+function buildWaterfillQuotaAttempt(
   game: NormalizedGame,
   demand: DemandModel,
+  floorOverrides: ReadonlyMap<string, number>,
 ): QuotaAssignment {
   const available = game.players.filter((player) => player.available);
-  const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player));
+  const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player.keeper, player.generalPositions));
   const info = new Map<string, WaterfillPlayer>();
   const allocations: FieldAllocation = new Map();
   let rotationState = cloneRotation(game.seasonRotation ?? {});
-  const relaxedPlayers: Array<{ player: string; group: RedesignGroup; before: number; after: number }> = [];
+  const relaxedPlayers: { player: string; group: RedesignGroup; before: number; after: number; belowHardFloor: boolean }[] = [];
   const surplusAssignments: QuotaAssignment['audit']['surplusAssignments'] = [];
+  const underfill: QuotaAssignment['audit']['underfill'] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
+  const overages: QuotaAssignment['audit']['overage'] = [];
+  let rosterTooLarge: QuotaAssignment['audit']['rosterTooLarge'];
 
   for (const player of fieldPlayers) {
     const group = primaryGroup(player);
@@ -365,9 +194,9 @@ function buildWaterfillQuotas(
     const bandFloor = lateTarget ?? (isSelectedKeeper
       ? player.group === 'rotational' ? keeperFloor : keeperFieldMax
       : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0));
-    const floor = Math.max(pinData.blocks.length, lateTarget ?? (isSelectedKeeper
-      ? player.group === 'rotational' ? keeperFloor : keeperFieldMax
-      : nonKeeperFieldFloor(game.totalBlocks)));
+    const hardFloor = Math.max(pinData.blocks.length, lateTarget
+      ?? (isSelectedKeeper ? keeperFloor : nonKeeperFieldFloor(game.totalBlocks)));
+    const floor = Math.max(pinData.blocks.length, Math.min(hardFloor, floorOverrides.get(player.name) ?? hardFloor));
     const start = Math.max(pinData.blocks.length, lateTarget ?? (isSelectedKeeper
       ? keeperFieldMax
       : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0)));
@@ -379,6 +208,7 @@ function buildWaterfillQuotas(
       primaryGroup: group,
       keeperBlocks: keeper,
       selectedKeeper: isSelectedKeeper,
+      hardFloor,
       floor,
       bandFloor: Math.max(pinData.blocks.length, bandFloor),
       maximum,
@@ -402,6 +232,7 @@ function buildWaterfillQuotas(
   const totalFieldSlots = FIELD_GROUPS.reduce((sum, group) => sum + (slots.get(group) ?? 0), 0);
   if (minimumFieldBlocks > totalFieldSlots) {
     const maximumPlayers = Math.floor(totalFieldSlots / nonKeeperFieldFloor(game.totalBlocks));
+    rosterTooLarge = { maxPlayers: maximumPlayers };
     errors.push(`Roster too large for 40% minimum playing time. Maximum ${maximumPlayers} field players for ${game.totalBlocks} blocks.`);
   }
   const groupLoad = (group: FieldGroup): number => [...allocations.values()]
@@ -551,7 +382,13 @@ function buildWaterfillQuotas(
     const before = playerTotal(name);
     allocations.get(name)!.set(group, amountInGroup(name, group) - 1);
     writeRotation(rotationState, group, candidate.player.group, 'lastShed', name);
-    relaxedPlayers.push({ player: name, group: candidate.player.group, before, after: before - 1 });
+    relaxedPlayers.push({
+      player: name,
+      group: candidate.player.group,
+      before,
+      after: before - 1,
+      belowHardFloor: before - 1 < candidate.hardFloor,
+    });
     return true;
   };
   for (const group of FIELD_GROUPS) {
@@ -606,6 +443,7 @@ function buildWaterfillQuotas(
   for (const group of FIELD_GROUPS) {
     const overage = groupLoad(group) - (slots.get(group) ?? 0);
     if (overage <= 0) continue;
+    overages.push({ group, blocks: overage });
     const member = allocationMembers(group).find((candidate) =>
       amountInGroup(candidate.player.name, group) > (candidate.pinnedByGroup[group] ?? 0))
       ?? allocationMembers(group)[0];
@@ -739,20 +577,56 @@ function buildWaterfillQuotas(
     const shortfall = (slots.get(group) ?? 0) - groupLoad(group);
     if (shortfall <= 0) continue;
     const positions = groupPositionNames(demand, group);
-    const label = group === 'D' ? 'Defender' : group === 'M' ? 'Midfield' : 'Forward';
+    underfill.push({ group, blocks: shortfall, slotNames: positions });
+    const label = groupLabel(group);
     const blockLabel = shortfall === 1 ? 'block' : 'blocks';
     const article = group === 'D' ? 'a' : 'an';
     errors.push(`${label} group (${group}) is short ${shortfall} ${blockLabel}. Add ${article} ${group} backup${positions.length ? ` (${positions.join(', ')})` : ''} to a player.`);
   }
 
+  const relaxedPlayerMap = new Map(collapsedRelaxedPlayers.map((entry) => [entry.player, entry]));
+  for (const candidate of info.values()) {
+    const actual = playerTotal(candidate.player.name);
+    if (actual >= candidate.hardFloor) continue;
+    const existing = relaxedPlayerMap.get(candidate.player.name);
+    relaxedPlayerMap.set(candidate.player.name, {
+      player: candidate.player.name,
+      group: candidate.player.group,
+      before: existing?.before ?? candidate.hardFloor,
+      after: actual,
+      belowHardFloor: true,
+    });
+  }
+  const finalRelaxedPlayers = [...relaxedPlayerMap.values()]
+    .map((entry) => {
+      const candidate = info.get(entry.player);
+      const actual = candidate ? playerTotal(entry.player) : entry.after;
+      return {
+        ...entry,
+        after: actual,
+        belowHardFloor: candidate ? actual < candidate.hardFloor : entry.belowHardFloor,
+      };
+    })
+    .filter((entry) => entry.before > entry.after);
+  const relaxedAmounts = new Map<RedesignGroup, number>();
+  for (const candidate of info.values()) {
+    relaxedAmounts.set(candidate.player.group,
+      (relaxedAmounts.get(candidate.player.group) ?? 0) + Math.max(0, candidate.hardFloor - playerTotal(candidate.player.name)));
+  }
+  const relaxedGroups = [...relaxedAmounts]
+    .filter(([, amount]) => amount > 0)
+    .map(([group, amount]) => ({ group, amount }));
+
   return {
     quotas,
     audit: {
-      relaxedGroups: [],
-      relaxedPlayers: collapsedRelaxedPlayers,
+      relaxedGroups,
+      relaxedPlayers: finalRelaxedPlayers,
       surplusAssignments,
-      unfillableWithinMax: errors.length ? FIELD_GROUPS.reduce((sum, group) =>
-        sum + Math.max(0, (slots.get(group) ?? 0) - groupLoad(group)), 0) : 0,
+      unfillableWithinMax: underfill.reduce((sum, entry) => sum + entry.blocks, 0),
+      underfill,
+      overage: overages,
+      rosterTooLarge,
       errors,
       warnings,
     },
@@ -762,24 +636,41 @@ function buildWaterfillQuotas(
   };
 }
 
+function buildWaterfillQuotas(game: NormalizedGame, demand: DemandModel, allowRelaxedMinimums = false): QuotaAssignment {
+  const floorOverrides = new Map<string, number>();
+  let assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides);
+  if (!allowRelaxedMinimums) return assignment;
+
+  const tierOrder: Record<RedesignGroup, number> = { developing: 0, rotational: 1, core: 2 };
+  while (assignment.audit.overage.length) {
+    let changed = false;
+    const reducedThisRound = new Set<string>();
+    for (const { group } of assignment.audit.overage) {
+      const candidates = assignment.quotas
+        .filter((quota) => quota.groupTargets?.[group] !== undefined
+          && quota.groupTargets[group]! > 0
+          && quota.player !== game.lateArrival?.player
+          && quota.totalMin - quota.keeperBlocks > quota.pinnedBlocks.length)
+        .sort((left, right) => tierOrder[left.group] - tierOrder[right.group]
+          || left.player.localeCompare(right.player));
+      const candidate = candidates.find((quota) => !reducedThisRound.has(quota.player));
+      if (!candidate) continue;
+      floorOverrides.set(candidate.player, candidate.totalMin - candidate.keeperBlocks - 1);
+      reducedThisRound.add(candidate.player);
+      changed = true;
+    }
+    if (!changed) break;
+    assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides);
+  }
+  return assignment;
+}
+
 export function assignQuotas(
   game: NormalizedGame,
   demand: DemandModel,
-  tier = 0,
   allowRelaxedMinimums = false,
 ): QuotaAssignment {
-  const usesWaterfill = usesWaterfillQuotas(game);
-  return usesWaterfill
-    ? buildWaterfillQuotas(game, demand)
-    : assignLegacyQuotas(game, demand, tier, allowRelaxedMinimums);
-}
-
-export function usesWaterfillQuotas(game: NormalizedGame): boolean {
-  const fieldPlayers = game.players.filter((player) => player.available && !isDedicatedKeeper(player));
-  return !fieldPlayers.some((player) => {
-    const groups = new Set(player.generalPositions.map(groupForPosition).filter((group) => group !== null));
-    return groups.size > 1 || (groups.size === 0 && player.generalPositions.length > 0);
-  });
+  return buildWaterfillQuotas(game, demand, allowRelaxedMinimums);
 }
 
 export { BANDS, maximumBlocks, percentageBlocks };

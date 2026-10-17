@@ -17,7 +17,6 @@ export function runStages3And4(
   demand: DemandModel,
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
-  _allowRelaxedMinimums = false,
 ): PolishedPlacement {
   const hard = placeStage3(game, demand, quotas, frozen, false);
   if (hard.complete) return polishStage4(game, demand, quotas, hard);

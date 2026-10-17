@@ -1,7 +1,8 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import { migrateExactPositions, migrateGeneralPositions } from './position-migration';
 
 const DATABASE_NAME = 'rotation-engine.db';
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
@@ -96,6 +97,46 @@ const migrations: Migration[] = [
         state_json TEXT NOT NULL,
         PRIMARY KEY (team_id, game_number)
       )`);
+    },
+  },
+  {
+    version: 5,
+    apply: async (database) => {
+      const rows = await database.getAllAsync<{
+        player_id: string;
+        general_positions_json: string;
+        primary_positions_json: string;
+        backup_positions_json: string;
+        excluded_positions_json: string;
+      }>(`SELECT player_id, general_positions_json, primary_positions_json,
+        backup_positions_json, excluded_positions_json FROM season_roster`);
+      const parsePositions = (value: string, playerId: string, field: string): string[] => {
+        const parsed: unknown = JSON.parse(value);
+        if (!Array.isArray(parsed) || !parsed.every((position): position is string => typeof position === 'string')) {
+          throw new Error(`Invalid ${field} for roster player ${playerId}.`);
+        }
+        return parsed;
+      };
+      for (const row of rows) {
+        const generalPositions = migrateGeneralPositions(parsePositions(row.general_positions_json, row.player_id, 'general positions'));
+        const primaryPositions = migrateExactPositions(parsePositions(row.primary_positions_json, row.player_id, 'primary positions'));
+        const backupPositions = migrateExactPositions(parsePositions(row.backup_positions_json, row.player_id, 'backup positions'));
+        const excludedPositions = migrateExactPositions(parsePositions(row.excluded_positions_json, row.player_id, 'excluded positions'));
+        if (JSON.stringify(generalPositions) === row.general_positions_json
+          && JSON.stringify(primaryPositions) === row.primary_positions_json
+          && JSON.stringify(backupPositions) === row.backup_positions_json
+          && JSON.stringify(excludedPositions) === row.excluded_positions_json) continue;
+        await database.runAsync(
+          `UPDATE season_roster
+           SET general_positions_json = ?, primary_positions_json = ?, backup_positions_json = ?, excluded_positions_json = ?
+           WHERE player_id = ?`,
+          JSON.stringify(generalPositions),
+          JSON.stringify(primaryPositions),
+          JSON.stringify(backupPositions),
+          JSON.stringify(excludedPositions),
+          row.player_id,
+        );
+      }
     },
   },
 ];

@@ -330,10 +330,40 @@ describe('Stage 2 per-group water-fill', () => {
     }, roster);
     const quotas = assignQuotas(game, buildDemandModel(game));
 
+    expect(quotas.audit.overage).toContainEqual({ group: 'D', blocks: 3 });
     expect(quotas.audit.errors?.some((error) =>
       error.includes('Defender group (D) is over by 3')
       && error.includes('backup to')
       && error.includes('or move'))).toBe(true);
+  });
+
+  it('relaxes overage-group floors one block at a time with explicit below-floor audit entries', () => {
+    const roster: RedesignPlayerInput[] = [
+      ...Array.from({ length: 7 }, (_, index) => ({
+        name: `Core D${index + 1}`, group: 'core' as const, general_positions: ['D'],
+      })),
+      ...Array.from({ length: 4 }, (_, index) => ({
+        name: `Core M${index + 1}`, group: 'core' as const, general_positions: ['M'],
+      })),
+      ...Array.from({ length: 3 }, (_, index) => ({
+        name: `Core F${index + 1}`, group: 'core' as const, general_positions: ['F'],
+      })),
+      { name: 'Keeper A', group: 'rotational', general_positions: ['M'], keeper: true, keeper_eligible: true },
+      { name: 'Keeper B', group: 'rotational', general_positions: ['M'], keeper: true, keeper_eligible: true },
+    ];
+    const game = normalizeGame({
+      format: '9v9', formation: '3-3-2', totalBlocks: 6,
+      firstHalfKeeper: 'Keeper A', secondHalfKeeper: 'Keeper B',
+    }, roster);
+    const demand = buildDemandModel(game);
+    const strict = assignQuotas(game, demand);
+    const relaxed = assignQuotas(game, demand, true);
+
+    expect(strict.audit.overage).toContainEqual({ group: 'D', blocks: 3 });
+    expect(relaxed.audit.errors).toEqual([]);
+    expect(relaxed.audit.overage).toEqual([]);
+    expect(relaxed.audit.relaxedPlayers?.filter((entry) => entry.belowHardFloor).length).toBeGreaterThan(0);
+    expect(relaxed.audit.relaxedGroups).toContainEqual({ group: 'core', amount: 3 });
   });
 
   it('rejects a roster whose hard 40% floors exceed all field slots', () => {
@@ -348,6 +378,7 @@ describe('Stage 2 per-group water-fill', () => {
     const quotas = assignQuotas(game, buildDemandModel(game));
 
     expect(quotas.audit.errors?.[0]).toBe('Roster too large for 40% minimum playing time. Maximum 8 field players for 6 blocks.');
+    expect(quotas.audit.rosterTooLarge).toEqual({ maxPlayers: 8 });
   });
 
   it('keeps selected keepers in their primary group instead of flexing them', () => {

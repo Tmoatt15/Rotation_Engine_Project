@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
-import { RedesignOfferError, generateRedesignSchedule, regenerateRedesignLateArrival } from '../redesign-schedule-service';
+import { generateRedesignSchedule, regenerateRedesignLateArrival } from '../redesign-schedule-service';
 import type { LateArrivalReplanInput, LateArrivalReplanResult } from '@/engine-redesign/stage5';
 import type { PolishedPlacement } from '@/engine-redesign/stage4';
 
@@ -106,7 +106,7 @@ function redesignPlayers(roster: SeasonRosterPlayer[]): RedesignPlayerInput[] {
     backup_positions: player.backup_positions ?? [],
     excluded_positions: player.excluded_positions ?? [],
     keeper_eligible: player.keeper_eligible === true,
-    keeper: player.keeper_eligible === true && !(player.general_positions ?? []).length,
+    keeper: player.keeper_eligible === true && (player.general_positions ?? []).every((position) => position === 'NONE' || position === 'GK'),
   }));
 }
 
@@ -241,6 +241,64 @@ describe('redesign schedule service', () => {
     expect(mocks.saveWaterfillRotationState).toHaveBeenCalledWith(
       expect.anything(), 'team-1', 3, expectedQuotas.rotationState,
     );
+  });
+
+  it('offers relaxed minimum consent only after a clean quota audit and complete placement', async () => {
+    const roster: SeasonRosterPlayer[] = [
+      ...Array.from({ length: 7 }, (_, index) => rosterPlayer(`Core D${index + 1}`, 'core', ['D'])),
+      ...Array.from({ length: 4 }, (_, index) => rosterPlayer(`Core M${index + 1}`, 'core', ['M'])),
+      ...Array.from({ length: 3 }, (_, index) => rosterPlayer(`Core F${index + 1}`, 'core', ['F'])),
+      rosterPlayer('Keeper A', 'rotational', ['M'], { keeperEligible: true }),
+      rosterPlayer('Keeper B', 'rotational', ['M'], { keeperEligible: true }),
+    ];
+    configureService(roster, 6);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 3,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'relaxed-minimums',
+        message: expect.stringContaining('below their minimum playing-time floor'),
+        buttons: [
+          { label: 'Generate', action: 'allow-relaxed' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: {
+          failureType: 'relaxed-minimums',
+          players: expect.arrayContaining([
+            expect.objectContaining({ player: 'Core D1', belowHardFloor: true }),
+          ]),
+        },
+      },
+    });
+    expect(runStages3And4).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not offer Generate when the relaxed placement trial is incomplete', async () => {
+    const roster = abundanceRoster();
+    configureService(roster, 6);
+    vi.mocked(runStages3And4).mockReturnValue(placement(false, ['Unfilled slot: Block 1, slot D1.']));
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 3,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'impossible',
+        buttons: [{ label: 'Cancel', action: 'cancel' }],
+        context: { failureType: 'waterfill-placement-failed' },
+      },
+    });
+    expect(runStages3And4).toHaveBeenCalledTimes(2);
   });
 
   it('reports water-fill placement failures as engine errors, not relaxed-minimum offers', async () => {

@@ -1,5 +1,6 @@
 import type { DemandModel, NormalizedGame, NormalizedPlayer, PlayerQuota, QuotaAssignment, RedesignZone } from './model';
 import { ZONE_POSITIONS } from './stage1';
+import { isDedicatedKeeper } from '@/position-groups';
 
 export interface FrozenBlock {
   block: number;
@@ -45,16 +46,12 @@ function groupForSlot(slot: string): 'D' | 'M' | 'F' {
   if (slot.startsWith('M')) return 'M';
   if (slot.startsWith('F') || slot === 'ST') return 'F';
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
-  if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
+  if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(slot)) return 'M';
   return 'F';
 }
 
 function zoneForSlot(slot: string): RedesignZone {
   return (Object.entries(ZONE_POSITIONS).find(([, positions]) => positions.has(slot))?.[0] ?? 'WIDE') as RedesignZone;
-}
-
-function isDedicatedKeeper(player: NormalizedPlayer): boolean {
-  return player.keeper && player.generalPositions.length === 0;
 }
 
 function isOppositeHalfKeeper(game: NormalizedGame, player: NormalizedPlayer, block: number): boolean {
@@ -71,7 +68,7 @@ function isKeeperHalf(game: NormalizedGame, player: NormalizedPlayer, block: num
 
 function isFieldEligible(game: NormalizedGame, player: NormalizedPlayer, block: number, slot: string): boolean {
   if (isEligible(player, slot)) return true;
-  return isDedicatedKeeper(player)
+  return isDedicatedKeeper(player.keeper, player.generalPositions)
     && isOppositeHalfKeeper(game, player, block)
     && !excludedFromSlot(player, slot);
 }
@@ -199,7 +196,7 @@ function eligibleBlocks(
   rest: Map<string, Set<number>>,
   softRest: boolean,
 ): number {
-  if (isDedicatedKeeper(player)
+  if (isDedicatedKeeper(player.keeper, player.generalPositions)
     && player.name !== game.firstHalfKeeper
     && player.name !== game.secondHalfKeeper) return 0;
   const slots = demand?.fieldSlots.map((candidate) => candidate.slot) ?? ['D', 'M', 'F'];
@@ -280,7 +277,7 @@ function placeDeterministically(
     const hasRestPin = restPinBlocks.get(player.name)?.has(block) ?? false;
     const hasSelectedRest = selectedRestBlocks.get(player.name)?.has(block) ?? false;
     return player.available
-      && (!isDedicatedKeeper(player)
+      && (!isDedicatedKeeper(player.keeper, player.generalPositions)
         || player.name === game.firstHalfKeeper
         || player.name === game.secondHalfKeeper)
       && !isKeeperHalf(game, player, block)

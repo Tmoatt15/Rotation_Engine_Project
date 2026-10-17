@@ -6,7 +6,7 @@ import type { PlacementBlock } from '../stage3';
 function emptyQuotas(fieldSlots: number) {
   return {
     quotas: [],
-    audit: { relaxedGroups: [], surplusAssignments: [], unfillableWithinMax: 0 },
+    audit: { relaxedGroups: [], surplusAssignments: [], unfillableWithinMax: 0, underfill: [], overage: [] },
     fieldSlots,
     goalkeeperSlots: 0,
   };

@@ -199,6 +199,19 @@ describe('rotation engine happy-path fingerprint contracts', () => {
 });
 
 describe('format and goalkeeper contracts', () => {
+  it('uses striker slots for the special formations and classifies LDM/RDM as midfield', () => {
+    expect(formationSlots(parseFormation('2-1-2-1'))).toEqual({
+      D: ['LB', 'RB'],
+      M: ['CDM', 'LM', 'RM'],
+      F: ['ST'],
+    });
+    expect(formationSlots(parseFormation('4-2-3-1'))).toEqual({
+      D: ['LB', 'LCB', 'RCB', 'RB'],
+      M: ['LDM', 'RDM', 'LM', 'CAM', 'RM'],
+      F: ['ST'],
+    });
+  });
+
   it('generates the approved 4v4 field-player-only shape', () => {
     const testCase = fingerprintCases.find(({ id }) => id === '4v4-basic');
     if (!testCase) throw new Error('4v4-basic fixture missing');

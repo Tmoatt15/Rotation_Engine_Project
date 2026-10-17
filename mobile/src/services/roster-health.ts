@@ -1,5 +1,6 @@
 import type { SeasonRosterPlayer } from '../engine/models';
 import { formationPositionRows } from '../position-validation';
+export { validateGeneralGroups } from '../position-groups';
 
 export type HealthGroup = 'D' | 'M' | 'F';
 export type HealthStatus = 'red' | 'yellow' | 'green';
@@ -18,7 +19,7 @@ export type PositionHealth = {
 
 const primaryGroups: Record<HealthGroup, Set<string>> = {
   D: new Set(['D', 'LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB']),
-  M: new Set(['M', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM', 'LAM', 'RAM', 'LDM', 'RDM']),
+  M: new Set(['M', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM', 'LDM', 'RDM']),
   F: new Set(['F', 'LF', 'CF', 'RF', 'ST', 'LW', 'LS', 'RS', 'RW']),
 };
 

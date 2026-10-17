@@ -64,12 +64,15 @@ export default function RosterTab() {
     try {
       const team = await getActiveTeam();
       const roster = await getRoster(team.id);
-      const nextPositions = new Set(formationPositionRows(draft.formation).flatMap((row) => row.exactPositions));
+      const positionRows = formationPositionRows(draft.formation);
+      const nextPositions = new Set(positionRows.flatMap((row) => row.exactPositions));
+      const generalGroups = new Set(positionRows.map((row) => row.label));
       const changedFormation = settings?.formation !== draft.formation;
       const unmappablePlayers: string[] = [];
       const remapped = roster.players.map((player) => {
-        const primary = player.primary_positions.filter((position) => position === 'ANY' || nextPositions.has(position));
-        const backup = player.backup_positions.filter((position) => nextPositions.has(position));
+        const primary = player.primary_positions.filter((position) =>
+          position === 'ANY' || generalGroups.has(position) || nextPositions.has(position));
+        const backup = player.backup_positions.filter((position) => generalGroups.has(position) || nextPositions.has(position));
         if (changedFormation && (player.primary_positions.length || player.backup_positions.length) && !primary.length && !backup.length) {
           unmappablePlayers.push(player.name);
         }

@@ -106,9 +106,12 @@ export interface DemandModel {
 
 export interface QuotaAudit {
   relaxedGroups: Array<{ group: RedesignGroup; amount: number }>;
-  relaxedPlayers?: Array<{ player: string; group: RedesignGroup; before: number; after: number }>;
+  relaxedPlayers?: Array<{ player: string; group: RedesignGroup; before: number; after: number; belowHardFloor: boolean }>;
   surplusAssignments: Array<{ group: RedesignGroup; player: string; amount: number }>;
   unfillableWithinMax: number;
+  underfill: Array<{ group: FieldGroup; blocks: number; slotNames: string[] }>;
+  overage: Array<{ group: FieldGroup; blocks: number }>;
+  rosterTooLarge?: { maxPlayers: number };
   errors?: string[];
   warnings?: string[];
 }

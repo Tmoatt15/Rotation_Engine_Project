@@ -1,5 +1,6 @@
 import { GAME_FORMATS, FORMATIONS_BY_FORMAT } from '@/engine/season';
 import type { SeasonRosterPlayer, SeasonSettings, Team } from '@/engine/models';
+import { NONE_POSITION } from '@/position-groups';
 import { getDatabase } from '@/storage/database';
 import { createTeam, deleteTeam, getTeam, listTeams, renameTeam, replaceRoster, saveSeasonSettings, setActiveTeam } from '@/storage/teams';
 
@@ -62,7 +63,7 @@ export async function getSeasonSettings(teamId: string): Promise<SeasonSettings 
 }
 
 export async function createLocalTeam(name: string, players: string[], seasonSettings: Partial<SeasonSettings> = {}): Promise<Team> {
-  const roster = players.map((player) => ({ name: player, group: 'rotational' as const, general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] }));
+  const roster = players.map((player) => ({ name: player, group: 'rotational' as const, general_positions: [NONE_POSITION], primary_positions: [], backup_positions: [], excluded_positions: [] }));
   const gameFormat = seasonSettings.game_format ?? DEFAULT_SETTINGS.game_format;
   return createTeam(await getDatabase(), {
     name,
@@ -91,7 +92,7 @@ export async function updateTeam(teamId: string, name: string, players: string[]
   if (!team) throw new Error('Team was not found.');
   await renameTeam(database, teamId, name);
   const existing = team.season_roster ?? [];
-  const roster = players.map((player) => existing.find((item) => item.name === player) ?? ({ name: player, group: 'rotational', general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] } as SeasonRosterPlayer));
+  const roster = players.map((player) => existing.find((item) => item.name === player) ?? ({ name: player, group: 'rotational', general_positions: [NONE_POSITION], primary_positions: [], backup_positions: [], excluded_positions: [] } as SeasonRosterPlayer));
   await replaceRoster(database, teamId, roster);
   return (await getTeam(database, teamId)) as Team;
 }

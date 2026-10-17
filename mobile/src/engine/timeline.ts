@@ -39,8 +39,8 @@ export function parseFormation(formation: string): FormationCounts {
 }
 
 export function formationSlots(formation: FormationCounts): Record<'D' | 'M' | 'F', string[]> {
-  if (formation._shape === '2-1-2-1') return { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['F'] };
-  if (formation._shape === '4-2-3-1') return { D: ['LB', 'LCB', 'RCB', 'RB'], M: ['LAM', 'CAM', 'RAM', 'LDM', 'RDM'], F: ['F'] };
+  if (formation._shape === '2-1-2-1') return { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['ST'] };
+  if (formation._shape === '4-2-3-1') return { D: ['LB', 'LCB', 'RCB', 'RB'], M: ['LDM', 'RDM', 'LM', 'CAM', 'RM'], F: ['ST'] };
   const names: Record<'D' | 'M' | 'F', Record<number, string[]>> = {
     D: { 1: ['CB'], 2: ['LB', 'RB'], 3: ['LB', 'CB', 'RB'], 4: ['LB', 'LCB', 'RCB', 'RB'], 5: ['LWB', 'LCB', 'CB', 'RCB', 'RWB'] },
     M: { 1: ['CM'], 2: ['LCM', 'RCM'], 3: ['LM', 'CM', 'RM'], 4: ['LM', 'LCM', 'RCM', 'RM'], 5: ['LM', 'LCM', 'CM', 'RCM', 'RM'] },

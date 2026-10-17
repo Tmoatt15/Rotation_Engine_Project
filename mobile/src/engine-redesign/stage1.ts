@@ -1,7 +1,7 @@
 import type { DemandModel, DemandSlot, NormalizedGame, RedesignZone } from './model';
 
 export const ZONE_POSITIONS: Record<RedesignZone, ReadonlySet<string>> = {
-  CM: new Set(['LCM', 'CM', 'RCM', 'CDM', 'CAM']),
+  CM: new Set(['LCM', 'CM', 'RCM', 'CDM', 'CAM', 'LDM', 'RDM']),
   CB: new Set(['LCB', 'CB', 'RCB']),
   ST: new Set(['ST', 'CF']),
   WIDE: new Set(['LB', 'RB', 'LWB', 'RWB', 'LM', 'RM', 'LW', 'RW', 'LF', 'RF']),
@@ -13,15 +13,15 @@ function zoneFor(slot: string): RedesignZone {
 
 function groupFor(slot: string): 'D' | 'M' | 'F' {
   if (['LB', 'LCB', 'CB', 'RCB', 'RB', 'LWB', 'RWB'].includes(slot)) return 'D';
-  if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM'].includes(slot)) return 'M';
+  if (['LM', 'LCM', 'CM', 'RCM', 'RM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(slot)) return 'M';
   if (/^D\d+$/.test(slot)) return 'D';
   if (/^M\d+$/.test(slot)) return 'M';
   return 'F';
 }
 
 function slotsForFormation(formation: string): string[] {
-  if (formation === '2-1-2-1') return ['LB', 'RB', 'CM', 'LW', 'RW', 'ST'];
-  if (formation === '4-2-3-1') return ['LB', 'LCB', 'RCB', 'RB', 'CDM', 'CM', 'LW', 'CAM', 'RW', 'ST'];
+  if (formation === '2-1-2-1') return ['LB', 'RB', 'CDM', 'LM', 'RM', 'ST'];
+  if (formation === '4-2-3-1') return ['LB', 'LCB', 'RCB', 'RB', 'LDM', 'RDM', 'LM', 'CAM', 'RM', 'ST'];
   const numbers = formation.split('-').map(Number);
   if (numbers.length === 2) return [...Array.from({ length: numbers[0] }, (_, index) => `D${index + 1}`), ...Array.from({ length: numbers[1] }, (_, index) => `F${index + 1}`)];
   const [defenders, midfielders, forwards] = numbers;
@@ -32,7 +32,9 @@ function slotsForFormation(formation: string): string[] {
 }
 
 export function buildDemandModel(game: NormalizedGame): DemandModel {
-  const fieldSlots: DemandSlot[] = slotsForFormation(game.formation).map((slot) => ({ slot, group: groupFor(slot), zone: zoneFor(slot) }));
+  const slots = slotsForFormation(game.formation);
+  if (new Set(slots).size !== slots.length) throw new Error(`Formation ${game.formation} contains duplicate slot names.`);
+  const fieldSlots: DemandSlot[] = slots.map((slot) => ({ slot, group: groupFor(slot), zone: zoneFor(slot) }));
   return {
     fieldSlots,
     goalkeeperRequired: game.format !== '4v4',

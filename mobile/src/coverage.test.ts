@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateGroupCoverage } from './coverage-utils';
-import { rosterMatchesFormation } from './position-validation';
+import { formationPositionRows, rosterMatchesFormation } from './position-validation';
 import { calculatePlayingTimeNotices } from './playing-time-notices';
 
 function groupCoverage(formation: string, players: Parameters<typeof calculateGroupCoverage>[1], group: string) {
@@ -20,7 +20,7 @@ describe('position analytics coverage', () => {
   });
 
   it('allows a feasible top-heavy roster without a playing-time notice', () => {
-    const players = Array.from({ length: 8 }, (_, index) => ({ name: `Core ${index}`, group: 'core' as const, general_positions: ['ANY'], primary_positions: ['ANY'], backup_positions: [], excluded_positions: [] }));
+    const players = Array.from({ length: 7 }, (_, index) => ({ name: `Core ${index}`, group: 'core' as const, general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['D', 'F'], excluded_positions: [] }));
     expect(calculatePlayingTimeNotices(settings, players).playingTimeNotice).toBe(false);
   });
 
@@ -120,5 +120,14 @@ describe('position analytics coverage', () => {
     expect(rosterMatchesFormation('2-1-2-1', [
       { name: 'Alex', group: 'rotational', general_positions: ['ANY'], primary_positions: ['ANY', 'GK'], backup_positions: ['D'], excluded_positions: [] },
     ])).toBe(true);
+  });
+
+  it('accepts NONE and uses ST for the two special formations', () => {
+    expect(rosterMatchesFormation('2-1-2-1', [
+      { name: 'Keeper only', group: 'rotational', general_positions: ['NONE'], primary_positions: [], backup_positions: [], excluded_positions: [] },
+    ])).toBe(true);
+    expect(formationPositionRows('2-1-2-1').find((row) => row.label === 'F')?.exactPositions).toEqual(['ST']);
+    expect(formationPositionRows('4-2-3-1').find((row) => row.label === 'F')?.exactPositions).toEqual(['ST']);
+    expect(formationPositionRows('4-2-3-1').find((row) => row.label === 'M')?.exactPositions).toEqual(['LDM', 'RDM', 'LM', 'CAM', 'RM']);
   });
 });

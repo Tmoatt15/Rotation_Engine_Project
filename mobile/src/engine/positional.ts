@@ -9,7 +9,7 @@ export const ANY_POSITION = 'ANY';
 
 export const POSITION_GROUP_BY_SLOT: Record<string, PositionGroup> = {
   LF: 'F', CF: 'F', RF: 'F', LW: 'F', LS: 'F', RS: 'F', RW: 'F', ST: 'F',
-  LM: 'M', LCM: 'M', CM: 'M', RCM: 'M', RM: 'M', LAM: 'M', CAM: 'M', RAM: 'M', LDM: 'M', CDM: 'M', RDM: 'M',
+  LM: 'M', LCM: 'M', CM: 'M', RCM: 'M', RM: 'M', CAM: 'M', LDM: 'M', CDM: 'M', RDM: 'M',
   LB: 'D', LCB: 'D', CB: 'D', RCB: 'D', RB: 'D', LWB: 'D', RWB: 'D',
 };
 

@@ -1,4 +1,5 @@
 import type { DemandModel, NormalizedGame, NormalizedPlayer } from './model';
+import { isDedicatedKeeper } from '@/position-groups';
 import { BANDS } from './stage2';
 import { positionTier } from './stage3';
 
@@ -10,22 +11,18 @@ export interface FeasibilityIssue {
   group?: 'D' | 'M' | 'F';
 }
 
-function isDedicatedKeeper(player: NormalizedPlayer): boolean {
-  return player.keeper && player.generalPositions.length === 0;
-}
-
 function minimumBlocks(game: NormalizedGame, player: NormalizedPlayer): number {
   return Math.round(game.totalBlocks * BANDS[player.group].min);
 }
 
 function playersForGroup(game: NormalizedGame, demand: DemandModel, group: 'D' | 'M' | 'F'): NormalizedPlayer[] {
   const slots = demand.fieldSlots.filter((slot) => slot.group === group);
-  return game.players.filter((player) => player.available && !isDedicatedKeeper(player)
+  return game.players.filter((player) => player.available && !isDedicatedKeeper(player.keeper, player.generalPositions)
     && slots.some((slot) => positionTier(player, slot.slot) > 0));
 }
 
 export function checkRosterFeasibility(game: NormalizedGame, demand: DemandModel): FeasibilityIssue | null {
-  const fieldPlayers = game.players.filter((player) => player.available && !isDedicatedKeeper(player));
+  const fieldPlayers = game.players.filter((player) => player.available && !isDedicatedKeeper(player.keeper, player.generalPositions));
   const totalMinimum = fieldPlayers.reduce((total, player) => total + minimumBlocks(game, player), 0);
   const totalFieldSlots = demand.fieldSlots.length * game.totalBlocks;
   if (totalMinimum > totalFieldSlots) {

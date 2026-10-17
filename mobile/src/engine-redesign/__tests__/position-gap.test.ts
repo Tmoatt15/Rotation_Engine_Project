@@ -9,6 +9,22 @@ const player = (name: string, positions: string[], backup_positions: string[] = 
 });
 
 describe('pre-generation position gaps', () => {
+  it('uses the six field slots in the 2-1-2-1 formation', () => {
+    const gaps = findPositionGaps('2-1-2-1', [
+      player('D1', ['D']),
+      player('D2', ['D']),
+      player('M1', ['M']),
+      player('M2', ['M']),
+      player('M3', ['M']),
+      player('F1', ['F']),
+    ]);
+    expect(gaps.map((gap) => [gap.position, gap.required])).toEqual([
+      ['D', 2],
+      ['M', 3],
+      ['F', 1],
+    ]);
+  });
+
   it('reports a hard gap when fewer players cover a group than required slots', () => {
     const gaps = findPositionGaps('4-3-3', [
       player('D1', ['D']),

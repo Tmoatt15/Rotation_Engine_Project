@@ -1,17 +1,30 @@
 import type { QuotaAssignment, RedesignGroup } from './model';
 import type { LateArrivalFailure } from './stage5';
 
-export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'position-capacity' | 'position-shortage' | 'keeper-issue' | 'impossible' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
+export type Stage6OfferKind = 'below-minimum' | 'targeted-relaxation' | 'relaxed-minimums' | 'position-capacity' | 'position-shortage' | 'keeper-issue' | 'impossible' | 'entire-half' | 'never-five-violation' | 'turn-off-limits' | 'failure';
 export type Stage6Action = 'cancel' | 'continue' | 'allow' | 'allow-relaxed' | 'assign-backup-position' | 'choose-player' | 'go-to-roster' | 'go-to-builder' | 'pick-keeper' | 'full-game-keeper' | 'turn-off-limits';
 
 export interface Stage6Offer {
   kind: Stage6OfferKind;
   message: string;
-  buttons: Array<{ label: string; action: Stage6Action }>;
+  buttons: { label: string; action: Stage6Action }[];
   context: Record<string, unknown>;
 }
 
 const groupOrder: Record<RedesignGroup, number> = { core: 0, rotational: 1, developing: 2 };
+
+export function offerForRelaxedMinimums(quotas: QuotaAssignment): Stage6Offer {
+  const players = (quotas.audit.relaxedPlayers ?? []).filter((entry) => entry.belowHardFloor);
+  const details = players.map((entry) => `${entry.player} (${entry.before}→${entry.after} blocks)`);
+  return {
+    kind: 'relaxed-minimums',
+    message: details.length
+      ? `Generating this schedule requires these players to go below their minimum playing-time floor:\n${details.join('\n')}\n\nGenerate anyway?`
+      : 'Generating this schedule requires relaxing minimum playing time. Generate anyway?',
+    buttons: [{ label: 'Generate', action: 'allow-relaxed' }, { label: 'Cancel', action: 'cancel' }],
+    context: { failureType: 'relaxed-minimums', players: players.map((entry) => ({ ...entry })) },
+  };
+}
 
 export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
   if (failure.kind === 'donor-below-minimum') {
@@ -123,7 +136,7 @@ function cloneQuotaAssignment(quotas: QuotaAssignment): QuotaAssignment {
   };
 }
 
-function relaxationResult(entries: Array<{ player: string; group: RedesignGroup; totalMax: number }>, original: QuotaAssignment): TargetedRelaxation {
+function relaxationResult(entries: { player: string; group: RedesignGroup; totalMax: number }[], original: QuotaAssignment): TargetedRelaxation {
   const changes = entries.map((entry) => {
     const before = original.quotas.find((quota) => quota.player === entry.player)!.totalMax;
     return { player: entry.player, group: entry.group, before, after: entry.totalMax };

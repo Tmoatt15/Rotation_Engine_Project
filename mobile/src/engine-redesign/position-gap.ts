@@ -27,6 +27,7 @@ export interface PositionGap {
 const formationCounts = (formation: string): Record<PositionGroup, number> => {
   const parts = formation.split('-').map(Number);
   if (formation === '4-2-3-1') return { D: 4, M: 5, F: 1 };
+  if (formation === '2-1-2-1') return { D: 2, M: 3, F: 1 };
   return { D: parts[0] ?? 0, M: parts[1] ?? 0, F: parts[2] ?? 0 };
 };
 

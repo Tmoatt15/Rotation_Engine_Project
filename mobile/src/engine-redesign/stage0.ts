@@ -1,4 +1,5 @@
 import type { LineupPin, NormalizedGame, NormalizedPlayer, RedesignGameInput, RedesignPlayerInput, RedesignFormat } from './model';
+import { GeneralGroupValidationError, isDedicatedKeeper, validateGeneralGroups } from '@/position-groups';
 
 const FORMATS: Record<RedesignFormat, { fieldPlayers: number; goalkeeper: boolean }> = {
   '4v4': { fieldPlayers: 4, goalkeeper: false },
@@ -31,18 +32,19 @@ function normalizePlayer(input: RedesignPlayerInput, game: RedesignGameInput): N
   const primaryPositions = positions(input.primary_positions ?? input.primary_position);
   const keeperEligible = input.keeper_eligible ?? (generalPositions.includes('GK') || primaryPositions.includes('GK'));
   const fieldGeneralPositions = generalPositions.filter((position) => position !== 'GK');
+  const dedicatedKeeper = isDedicatedKeeper(keeperEligible, fieldGeneralPositions);
   const fieldPrimaryPositions = primaryPositions.filter((position) => position !== 'GK');
   const excludedPositions = positions(input.excluded_positions ?? input.forbidden_positions);
   const history = game.seasonHistory?.[input.name];
   return {
     name: input.name,
     group: normalizeGroup(input.group),
-    generalPositions: fieldGeneralPositions,
+    generalPositions: dedicatedKeeper ? [] : fieldGeneralPositions,
     primaryPositions: fieldPrimaryPositions.length ? fieldPrimaryPositions : fieldGeneralPositions,
     backupPositions: positions(input.backup_positions).filter((position) => position !== 'GK'),
     excludedPositions,
     available: input.available ?? true,
-    keeper: input.keeper ?? (keeperEligible && fieldGeneralPositions.length === 0),
+    keeper: dedicatedKeeper || input.keeper === true,
     keeperEligible,
     emergencyKeeper: false,
     restPreset: input.rest_preset ?? 'none',
@@ -55,8 +57,8 @@ function normalizePlayer(input: RedesignPlayerInput, game: RedesignGameInput): N
 }
 
 function formationSlots(formation: string): Set<string> {
-  if (formation === '2-1-2-1') return new Set(['LB', 'RB', 'CM', 'LW', 'RW', 'ST']);
-  if (formation === '4-2-3-1') return new Set(['LB', 'LCB', 'RCB', 'RB', 'CDM', 'CM', 'LW', 'CAM', 'RW', 'ST']);
+  if (formation === '2-1-2-1') return new Set(['LB', 'RB', 'CDM', 'LM', 'RM', 'ST']);
+  if (formation === '4-2-3-1') return new Set(['LB', 'LCB', 'RCB', 'RB', 'LDM', 'RDM', 'LM', 'CAM', 'RM', 'ST']);
   const numbers = formation.split('-').map(Number);
   if (numbers.length === 2) return new Set([...Array.from({ length: numbers[0] }, (_, index) => `D${index + 1}`), ...Array.from({ length: numbers[1] }, (_, index) => `F${index + 1}`)]);
   const [defenders, midfielders, forwards] = numbers;
@@ -92,6 +94,8 @@ export function normalizeGame(game: RedesignGameInput, roster: RedesignPlayerInp
   if (!FORMATIONS[game.format].includes(game.formation)) {
     throw new Error(`Formation ${game.formation} is not available for ${game.format}.`);
   }
+  const groupOffenders = validateGeneralGroups(roster);
+  if (groupOffenders.length) throw new GeneralGroupValidationError(groupOffenders);
   const players = roster.map((player) => normalizePlayer(player, game));
   const byName = new Map(players.map((player) => [player.name, player]));
   const availableNames = game.availablePlayerNames ? new Set(game.availablePlayerNames) : null;

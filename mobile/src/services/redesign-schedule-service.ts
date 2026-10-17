@@ -1,16 +1,17 @@
 import { blockStartMinutes, SeasonSetup } from '@/engine/season';
 import { formationSlots, parseFormation } from '@/engine/timeline';
 import type { LiveSchedule, ScheduleBlock, SeasonRosterPlayer } from '@/engine/models';
-import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4, usesWaterfillQuotas } from '@/engine-redesign';
+import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
 import type { RedesignPlayerInput } from '@/engine-redesign/model';
 import { replanLateArrival } from '@/engine-redesign/stage5';
-import { offerForFailure } from '@/engine-redesign/stage6';
+import { offerForFailure, offerForRelaxedMinimums } from '@/engine-redesign/stage6';
 import type { Stage6Offer } from '@/engine-redesign/stage6';
 import type { FrozenBlock } from '@/engine-redesign/stage3';
 import { getLocalTeam, getRoster, getSeasonSettings } from './team-service';
 import { getSavedReports } from './report-service';
 import { getDatabase } from '@/storage/database';
 import { getWaterfillRotationState, saveWaterfillRotationState } from '@/storage/waterfill-rotation';
+import { isDedicatedKeeper } from '@/position-groups';
 
 export class RedesignOfferError extends Error {
   constructor(public readonly offer: ReturnType<typeof offerForFailure>) {
@@ -21,14 +22,25 @@ export class RedesignOfferError extends Error {
 
 function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>): void {
   if (!quotas.audit.errors?.length) return;
+  const rosterTooLarge = quotas.audit.rosterTooLarge;
   throw new RedesignOfferError({
     kind: 'position-shortage',
-    message: quotas.audit.errors.join('\n\n'),
-    buttons: [
-      { label: 'Add Backup Positions', action: 'go-to-builder' },
-      { label: 'Cancel', action: 'cancel' },
-    ],
-    context: { failureType: 'waterfill-underfill', errors: quotas.audit.errors },
+    message: rosterTooLarge
+      ? `Too many field players for this roster. The current formation supports a maximum of ${rosterTooLarge.maxPlayers} field players at the minimum playing-time floor.`
+      : quotas.audit.errors.join('\n\n'),
+    buttons: rosterTooLarge
+      ? [{ label: 'Cancel', action: 'cancel' }]
+      : [
+        { label: 'Add Backup Positions', action: 'go-to-builder' },
+        { label: 'Cancel', action: 'cancel' },
+      ],
+    context: {
+      failureType: rosterTooLarge ? 'roster-too-large' : quotas.audit.underfill.length ? 'waterfill-underfill' : 'waterfill-overage',
+      maxPlayers: rosterTooLarge?.maxPlayers,
+      errors: quotas.audit.errors,
+      underfill: quotas.audit.underfill,
+      overage: quotas.audit.overage,
+    },
   });
 }
 
@@ -50,6 +62,18 @@ function waterfillPlacementFailureOffer(placement: ReturnType<typeof runStages3A
     buttons: [{ label: 'Cancel', action: 'cancel' }],
     context: { failureType: 'waterfill-placement-failed', stage, group, diagnostic },
   };
+}
+
+function placementFailureOffer(
+  game: ReturnType<typeof normalizeGame>,
+  demand: ReturnType<typeof buildDemandModel>,
+  placement: ReturnType<typeof runStages3And4>,
+): Stage6Offer {
+  if (!placement.audit.errors.some((error) => error.trim())) {
+    const guidance = generationFailureOffer(game, demand, true);
+    if (guidance.kind !== 'impossible') return guidance;
+  }
+  return waterfillPlacementFailureOffer(placement);
 }
 
 function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums = false): Stage6Offer {
@@ -107,7 +131,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     return {
       kind: 'position-shortage',
       message: `Can't fit everyone's minimum playing time.\n\nTo generate a schedule for ${game.players.length} players, these minimums would need to be reduced:\n- ${reductions.join('\n- ')}\n\nOr add backup positions to increase the roster's flexibility.`,
-      buttons: [{ label: 'Generate', action: 'allow-relaxed' }, { label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
+      buttons: [{ label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
       context: { failureType: 'total-minimums' },
     };
   }
@@ -116,7 +140,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     const hasBlockOnePin = game.pins.some((pin) => pin.block === 1 && pin.player === player.name);
     return game.lateArrival?.player === player.name || (!hasBlockOnePin && game.pins.length > 0) ? 1 : 2;
   };
-  const diagnoses: Array<{ group: typeof groups[number]; names: string[]; target: string }> = [];
+  const diagnoses: { group: typeof groups[number]; names: string[]; target: string }[] = [];
   for (const group of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const singleGroupPlayers = playersForGroup(group).filter((player) => groups.filter((candidate) => playersForGroup(candidate).some((eligible) => eligible.name === player.name)).length === 1);
@@ -146,7 +170,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     return {
       kind: 'position-shortage',
       message,
-      buttons: [{ label: 'Review Players', action: 'go-to-roster' }, { label: 'Cancel', action: 'cancel' }],
+      buttons: [{ label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
       context: { failureType: 'position-shortage', positionGroup: diagnoses[0].group, suggestions: diagnoses.flatMap(({ names }) => names) },
     };
   }
@@ -203,23 +227,9 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     message: feasibilityIssue?.message ?? 'Can\'t generate a schedule with the current roster setup.\n\nThis is unexpected — the roster looks complete. Try adding more backup flexibility, or generate with relaxed minimums.',
     buttons: [
       { label: 'Add Backup Positions', action: 'go-to-builder' },
-      { label: 'Generate Anyway', action: 'allow-relaxed' },
       { label: 'Cancel', action: 'cancel' },
     ],
     context: { failureType: 'impossible', feasibility: feasibilityIssue },
-  };
-}
-
-function relaxedGenerationFailureOffer(placementError?: string): Stage6Offer {
-  const detail = placementError ? ` (${placementError})` : '';
-  return {
-    kind: 'impossible',
-    message: `Even with relaxed minimums, a schedule couldn't be generated${detail}. Try adding more backup positions.`,
-    buttons: [
-      { label: 'Add Backup Positions', action: 'go-to-builder' },
-      { label: 'Cancel', action: 'cancel' },
-    ],
-    context: { failureType: 'relaxed-impossible' },
   };
 }
 
@@ -232,7 +242,7 @@ function rosterInput(player: SeasonRosterPlayer): RedesignPlayerInput {
     backup_positions: player.backup_positions ?? [],
     excluded_positions: player.excluded_positions ?? [],
     keeper_eligible: player.keeper_eligible === true,
-    keeper: player.keeper_eligible === true && !(player.general_positions ?? []).length,
+    keeper: isDedicatedKeeper(player.keeper_eligible === true, player.general_positions ?? []),
   };
 }
 
@@ -251,7 +261,7 @@ function positionRows(formation: string) {
   ].filter((row) => row.positions.length);
 }
 
-function scheduleBlocks(game: ReturnType<typeof normalizeGame>, placement: ReturnType<typeof runStages3And4>): ScheduleBlock[] {
+function scheduleBlocks(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, placement: ReturnType<typeof runStages3And4>): ScheduleBlock[] {
   return placement.blocks.map((block) => {
     const positions: Record<string, string> = {};
     if (game.firstHalfKeeper && block.block <= game.totalBlocks / 2) positions.GK = game.firstHalfKeeper;
@@ -261,44 +271,25 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, placement: Retur
       positions[slot] = player;
     }
     const playing = new Set(Object.values(positions));
+    const grouped: Record<'D' | 'M' | 'F', string[]> = { D: [], M: [], F: [] };
+    for (const slot of demand.fieldSlots) {
+      const player = positions[slot.slot];
+      if (player) grouped[slot.group].push(player);
+    }
     return {
       GK: positions.GK ?? '',
-      D: Object.entries(positions).filter(([slot]) => /^D|^(LB|LCB|CB|RCB|RB)/.test(slot)).map(([, player]) => player),
-      M: Object.entries(positions).filter(([slot]) => /^M|^(LM|LCM|CM|RCM|RM|CDM|CAM)/.test(slot)).map(([, player]) => player),
-      F: Object.entries(positions).filter(([slot]) => /^F|^(LF|CF|RF|ST)/.test(slot)).map(([, player]) => player),
+      D: grouped.D,
+      M: grouped.M,
+      F: grouped.F,
       bench: game.players.filter((player) => player.available && !playing.has(player.name)).map((player) => player.name),
       positions,
     };
   });
 }
 
-function placementWithTierFallback(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums = false) {
-  if (usesWaterfillQuotas(game)) {
-    // tier and allowRelaxedMinimums are ignored on water-fill; abundance is its relaxation mechanism.
-    const quotas = assignQuotas(game, demand);
-    const placement = runStages3And4(game, demand, quotas);
-    placement.audit.relaxationTier = 0;
-    return { placement, quotas, tier: 0 };
-  }
-
-  let last: { placement: ReturnType<typeof runStages3And4>; quotas: ReturnType<typeof assignQuotas>; tier: number } | null = null;
-  for (let tier = 0; tier <= 3; tier += 1) {
-    const quotas = assignQuotas(game, demand, tier, allowRelaxedMinimums);
-    const strictPlacement = runStages3And4(game, demand, quotas, [], false);
-    strictPlacement.audit.relaxationTier = tier;
-    last = { placement: strictPlacement, quotas, tier };
-    if (strictPlacement.complete) return last;
-    if (allowRelaxedMinimums) {
-      const relaxedPlacement = runStages3And4(game, demand, quotas, [], true);
-      relaxedPlacement.audit.relaxationTier = tier;
-      if (relaxedPlacement.complete) {
-        relaxedPlacement.audit.relaxedLookaheadFallback = true;
-        return { placement: relaxedPlacement, quotas, tier };
-      }
-      last = { placement: relaxedPlacement, quotas, tier };
-    }
-  }
-  return last!;
+function placementAttempt(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums: boolean) {
+  const quotas = assignQuotas(game, demand, allowRelaxedMinimums);
+  return { placement: runStages3And4(game, demand, quotas), quotas };
 }
 
 async function context(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null }) {
@@ -329,29 +320,40 @@ type RedesignSchedule = LiveSchedule & { formation: string; warnings: string[]; 
 
 export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean }): Promise<RedesignSchedule> {
   const { settings, team, game, demand } = await context(input);
-  const { placement, quotas } = placementWithTierFallback(game, demand, input.allowRelaxedMinimums);
+  let placement: ReturnType<typeof runStages3And4>;
+  let quotas: ReturnType<typeof assignQuotas>;
+  if (input.allowRelaxedMinimums) {
+    ({ placement, quotas } = placementAttempt(game, demand, true));
+    throwForQuotaAuditErrors(quotas);
+    if (!placement.complete) {
+      throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
+    }
+  } else {
+    const strict = placementAttempt(game, demand, false);
+    const relaxed = placementAttempt(game, demand, true);
+    if (!strict.quotas.audit.errors?.length && strict.placement.complete) {
+      ({ placement, quotas } = strict);
+    } else if (!relaxed.quotas.audit.errors?.length && relaxed.placement.complete) {
+      throw new RedesignOfferError(offerForRelaxedMinimums(relaxed.quotas));
+    } else {
+      throwForQuotaAuditErrors(relaxed.quotas);
+      throw new RedesignOfferError(placementFailureOffer(game, demand, relaxed.placement));
+    }
+  }
   throwForQuotaAuditErrors(quotas);
   if (!placement.complete) {
     const placementErrors = placement.audit.errors ?? [];
-    const placementError = placementErrors.map((error) => error.trim()).find(Boolean);
     console.error('[redesign] placement failed:', placementErrors);
-    if (usesWaterfillQuotas(game)) throw new RedesignOfferError(waterfillPlacementFailureOffer(placement));
-    const offer = generationFailureOffer(game, demand, input.allowRelaxedMinimums);
-    if (input.allowRelaxedMinimums && offer.kind === 'impossible') throw new RedesignOfferError(relaxedGenerationFailureOffer(placementError));
-    throw new RedesignOfferError(placementError && offer.kind === 'impossible'
-      ? { ...offer, message: `${offer.message}\n\nPlacement detail: ${placementError}` }
-      : offer);
+    throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
   }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
-  const relaxedWarnings = (usesWaterfillQuotas(game) || input.allowRelaxedMinimums)
-    ? relaxedMinimumWarnings(quotas)
-    : [];
+  const relaxedWarnings = relaxedMinimumWarnings(quotas);
   if (placement.audit.relaxedLookaheadFallback) relaxedWarnings.push('Used relaxed placement look-ahead.');
   const result: RedesignSchedule = {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name), formation: game.formation,
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
-    blocks: scheduleBlocks(game, placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedWarnings], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
+    blocks: scheduleBlocks(game, demand, placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedWarnings], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
   return result;
@@ -377,6 +379,6 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
     team_id: input.teamId, team_name: base.team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name), formation: game.formation,
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
-    blocks: scheduleBlocks(game, result.placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedMinimumWarnings(quotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
+    blocks: scheduleBlocks(game, demand, result.placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedMinimumWarnings(quotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
 }

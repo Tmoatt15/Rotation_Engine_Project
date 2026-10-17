@@ -28,7 +28,7 @@ export function belongsToCoverageGroup(position: string, group: CoveragePosition
   if (normalized === 'ANY') return group !== 'GK';
   if (group === 'GK') return normalized === 'GK';
   if (group === 'F') return normalized === 'F' || normalized.startsWith('F') || ['CF', 'LW', 'RW'].includes(normalized);
-  if (group === 'M') return normalized === 'M' || normalized.startsWith('M') || ['CM', 'CDM', 'CAM', 'LAM', 'RAM', 'LDM', 'RDM'].includes(normalized);
+  if (group === 'M') return normalized === 'M' || normalized.startsWith('M') || ['CM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(normalized);
   return normalized === 'D' || ['CB', 'LB', 'RB', 'LCB', 'RCB', 'LWB', 'RWB'].includes(normalized);
 }
 

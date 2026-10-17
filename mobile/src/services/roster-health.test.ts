@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { SeasonRosterPlayer } from '../engine/models';
-import { positionHealth, recommendedCoverage } from './roster-health';
+import { positionHealth, recommendedCoverage, validateGeneralGroups } from './roster-health';
 
 function player(name: string, positions: Partial<Pick<SeasonRosterPlayer, 'general_positions' | 'primary_positions' | 'backup_positions'>> = {}): SeasonRosterPlayer {
   return {
@@ -15,6 +15,18 @@ function player(name: string, positions: Partial<Pick<SeasonRosterPlayer, 'gener
 }
 
 describe('roster position health', () => {
+  it('reports missing and multiple general groups but ignores backup groups', () => {
+    expect(validateGeneralGroups([
+      player('Needs group', { general_positions: ['NONE'] }),
+      player('Multiple groups', { general_positions: ['D', 'M'] }),
+      player('Single group with backup', { general_positions: ['D'], backup_positions: ['M'] }),
+      { ...player('Keeper only', { general_positions: ['NONE'] }), keeper_eligible: true },
+    ])).toEqual([
+      { player: 'Needs group', reason: 'needs-group' },
+      { player: 'Multiple groups', reason: 'multiple-groups' },
+    ]);
+  });
+
   it.each([
     [14, ['5-6', '4-5', '4-5']],
     [16, ['5-6', '4-5', '4-5']],

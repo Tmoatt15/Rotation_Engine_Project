@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { offerForFailure, findTargetedRelaxation } from '../stage6';
+import { offerForFailure, offerForRelaxedMinimums, findTargetedRelaxation } from '../stage6';
 import { applyTacticalSubstitution, hasFiveConsecutiveBlocks, redistributeDonors } from '../stage5';
 import type { PlacementBlock } from '../stage3';
 import type { PolishedPlacement } from '../stage4';
@@ -18,7 +18,7 @@ function quotas(): QuotaAssignment {
   return {
     fieldSlots: 4,
     goalkeeperSlots: 0,
-    audit: { relaxedGroups: [], surplusAssignments: [], unfillableWithinMax: 0 },
+    audit: { relaxedGroups: [], surplusAssignments: [], unfillableWithinMax: 0, underfill: [], overage: [] },
     quotas: [
       { player: 'A', group: 'core', totalMin: 2, totalMax: 4, pinnedBlocks: [], remainingMin: 2, remainingMax: 4, fieldMin: 2, fieldMax: 4, fieldTarget: 3, gkMin: 0, gkMax: 0, keeperBlocks: 0, history: { historicalFieldBlocks: 0, historicalGkBlocks: 0, historicalStarts: 0 } },
       { player: 'B', group: 'rotational', totalMin: 2, totalMax: 3, pinnedBlocks: [], remainingMin: 2, remainingMax: 3, fieldMin: 2, fieldMax: 3, fieldTarget: 2, gkMin: 0, gkMax: 0, keeperBlocks: 0, history: { historicalFieldBlocks: 0, historicalGkBlocks: 0, historicalStarts: 0 } },
@@ -28,6 +28,24 @@ function quotas(): QuotaAssignment {
 }
 
 describe('redesign stages 5-6', () => {
+  it('offers relaxed minimum consent with only players below their hard floor', () => {
+    const assignment = quotas();
+    assignment.audit.relaxedPlayers = [
+      { player: 'A', group: 'core', before: 4, after: 3, belowHardFloor: true },
+      { player: 'B', group: 'rotational', before: 5, after: 4, belowHardFloor: false },
+    ];
+
+    const offer = offerForRelaxedMinimums(assignment);
+
+    expect(offer.kind).toBe('relaxed-minimums');
+    expect(offer.message).toContain('A (4→3 blocks)');
+    expect(offer.message).not.toContain('B');
+    expect(offer.buttons).toEqual([
+      { label: 'Generate', action: 'allow-relaxed' },
+      { label: 'Cancel', action: 'cancel' },
+    ]);
+  });
+
   it('redistributes whole donor blocks by headroom without changing the frozen prefix', () => {
     const result = redistributeDonors(quotas(), [], 2);
     expect(result.reductions).toEqual([

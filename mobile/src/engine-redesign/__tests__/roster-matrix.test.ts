@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignQuotas, buildDemandModel, normalizeGame, placeStage3 } from '..';
+import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '..';
 import type { NormalizedGame, RedesignPlayerInput } from '../model';
 import type { PlacementResult } from '../stage3';
 
@@ -68,20 +68,13 @@ function buildGame(count: number): NormalizedGame {
   }));
 }
 
-function generateWithTiers(game: NormalizedGame) {
+function generateWaterfill(game: NormalizedGame) {
   const demand = buildDemandModel(game);
-  for (let tier = 0; tier <= 3; tier += 1) {
-    const quotas = assignQuotas(game, demand, tier);
-    const result = placeStage3(game, demand, quotas);
-    if (result.complete) {
-      result.audit.relaxationTier = tier;
-      return { ...result, quotas };
-    }
-  }
-  throw new Error('No tier produced a complete schedule');
+  const quotas = assignQuotas(game, demand, true);
+  return { ...runStages3And4(game, demand, quotas), quotas };
 }
 
-function fieldCounts(result: ReturnType<typeof generateWithTiers>): Map<string, number> {
+function fieldCounts(result: ReturnType<typeof generateWaterfill>): Map<string, number> {
   const counts = new Map<string, number>();
   for (const block of result.blocks) {
     for (const player of block.assignments.values()) counts.set(player, (counts.get(player) ?? 0) + 1);
@@ -105,18 +98,17 @@ function measureCloseness(result: PlacementResult, playerNames: string[], totalS
 }
 
 describe('realistic roster-size matrix', () => {
-  for (const [count, expectedTier] of [[12, 0], [14, 0], [16, 0], [18, 0], [19, 0]] as const) {
+  for (const count of [12, 14, 16, 18, 19]) {
     it(`${count}-player roster generates a complete schedule`, () => {
-      const result = generateWithTiers(buildGame(count));
+      const result = generateWaterfill(buildGame(count));
       expect(result.blocks).toHaveLength(10);
-      expect(result.audit.relaxationTier).toBeGreaterThanOrEqual(expectedTier);
-      expect(result.audit.relaxationTier).toBeLessThanOrEqual(expectedTier + (count === 14 ? 1 : 0));
+      expect(result.complete).toBe(true);
     });
   }
 
   it('keeps quota minimums, keeper halves, and endpoint pins valid for 12 players', () => {
     const game = buildGame(12);
-    const result = generateWithTiers(game);
+    const result = generateWaterfill(game);
     const counts = fieldCounts(result);
     for (const quota of result.quotas.quotas) {
       expect(counts.get(quota.player) ?? 0).toBeGreaterThanOrEqual(quota.fieldMin);
@@ -179,21 +171,20 @@ describe('realistic roster-size matrix', () => {
 
   it('completes the 12-player schedule within five seconds', () => {
     const start = Date.now();
-    const result = generateWithTiers(buildGame(12));
+    const result = generateWaterfill(buildGame(12));
     expect(result.complete).toBe(true);
     expect(Date.now() - start).toBeLessThan(5000);
   });
 
-  it('produces deterministic tier and assignments', () => {
-    const first = generateWithTiers(buildGame(12));
-    const second = generateWithTiers(buildGame(12));
+  it('produces deterministic water-fill assignments', () => {
+    const first = generateWaterfill(buildGame(12));
+    const second = generateWaterfill(buildGame(12));
     expect(first.blocks).toEqual(second.blocks);
-    expect(first.audit.relaxationTier).toBe(second.audit.relaxationTier);
   });
 
-  it('preserves minimums across all tested tiers', () => {
+  it('preserves minimums across all tested roster sizes', () => {
     for (const count of [12, 14, 16, 18]) {
-      const result = generateWithTiers(buildGame(count));
+      const result = generateWaterfill(buildGame(count));
       const counts = fieldCounts(result);
       for (const quota of result.quotas.quotas) {
         expect(counts.get(quota.player) ?? 0).toBeGreaterThanOrEqual(quota.fieldMin);
@@ -204,16 +195,16 @@ describe('realistic roster-size matrix', () => {
   it('reduces minimums for an oversized 22-player roster before placement', () => {
     const game = buildGame(22);
     const demand = buildDemandModel(game);
-    const quotas = assignQuotas(game, demand);
+    const quotas = assignQuotas(game, demand, true);
     expect(quotas.quotas.reduce((total, quota) => total + quota.fieldMin, 0)).toBeLessThanOrEqual(demand.slotsPerBlock * game.totalBlocks);
-    const result = placeStage3(game, demand, quotas);
+    const result = runStages3And4(game, demand, quotas);
     expect(result.complete).toBe(true);
   });
 
   it('reports closeness metrics for the 17-player crowding scenario', () => {
     const game = buildGame(17);
     const demand = buildDemandModel(game);
-    const result = placeStage3(game, demand, assignQuotas(game, demand));
+    const result = runStages3And4(game, demand, assignQuotas(game, demand, true));
     const closeness = measureCloseness(result, game.players.map((player) => player.name), demand.slotsPerBlock * game.totalBlocks);
     expect(closeness.complete).toBe(true);
     expect(closeness.strandedCount).toBe(0);

@@ -1,11 +1,12 @@
 import type { SeasonRosterPlayer } from '@/engine/models';
+import { NONE_POSITION } from './position-groups';
 
 type FormationPositionRow = { label: string; groupPositions: string[]; exactPositions: string[] };
 
 export function formationPositionRows(formation: string): FormationPositionRow[] {
   const specialFormations: Record<string, Record<string, string[]>> = {
-    '2-1-2-1': { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['F'] },
-    '4-2-3-1': { D: ['LB', 'LCB', 'RCB', 'RB'], M: ['LAM', 'CAM', 'RAM', 'LDM', 'RDM'], F: ['F'] },
+    '2-1-2-1': { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['ST'] },
+    '4-2-3-1': { D: ['LB', 'LCB', 'RCB', 'RB'], M: ['LDM', 'RDM', 'LM', 'CAM', 'RM'], F: ['ST'] },
   };
   const slots = specialFormations[formation] ?? (() => {
     const parts = formation.split('-').map(Number);
@@ -34,7 +35,7 @@ export function rosterMatchesFormation(formation: string, players: SeasonRosterP
   const rows = formationPositionRows(formation);
   const exactPositions = new Set(rows.flatMap((row) => row.exactPositions.map((position) => position.toUpperCase())));
   const groupPositions = new Set(rows.filter((row) => row.exactPositions.length > 0).flatMap((row) => row.groupPositions));
-  const allowed = new Set(['ANY', 'GK', ...groupPositions, ...exactPositions]);
+  const allowed = new Set(['ANY', 'GK', NONE_POSITION, ...groupPositions, ...exactPositions]);
 
   return players.every((player) => {
     const generalPositions = player.general_positions ?? [];
