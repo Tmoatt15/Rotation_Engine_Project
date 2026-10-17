@@ -532,6 +532,7 @@ function PositionPickerModal({
     : positionRows;
   const visiblePickerRows = pickerRows.filter((row) => row.groupPositions.some((position) => picker.allowedPositions.includes(position))
     || row.exactPositions.some((position) => picker.allowedPositions.includes(position)));
+  const canClearGeneralGroup = picker.group === 'general_positions' && picker.positions.includes(NONE_POSITION);
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onFinish}>
       <View style={styles.modalBackdrop}>
@@ -545,9 +546,11 @@ function PositionPickerModal({
               <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={19} tintColor={palette.ink} />
             </Pressable>
           </View>
-          <Text style={styles.modalHint}>{picker.group === 'general_positions' ? 'Choose one group or None.' : 'Tap each position to add or remove it.'}</Text>
+          <Text style={styles.modalHint}>{picker.group === 'general_positions'
+            ? canClearGeneralGroup ? 'Choose one group or None.' : 'Choose one group.'
+            : 'Tap each position to add or remove it.'}</Text>
           <ScrollView contentContainerStyle={styles.positionRows}>
-            {picker.group === 'general_positions' && (
+            {canClearGeneralGroup && (
               <View style={styles.pickerRow}>
                 <Text style={styles.pickerRowLabel}>No field group</Text>
                 <View style={styles.pickerOptions}>
