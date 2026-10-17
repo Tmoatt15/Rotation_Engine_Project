@@ -3,6 +3,24 @@ import { NONE_POSITION } from './position-groups';
 
 type FormationPositionRow = { label: string; groupPositions: string[]; exactPositions: string[] };
 
+const midfieldDisplayLines: Record<string, string[][]> = {
+  '2-1-2-1': [['LM', 'RM'], ['CDM']],
+  '4-2-3-1': [['LM', 'CAM', 'RM'], ['LDM', 'RDM']],
+};
+
+export function formationPositionDisplayLines(formation: string, group: string, positions: readonly string[]): string[][] {
+  const lineOrder = group === 'M' ? midfieldDisplayLines[formation] : undefined;
+  if (!lineOrder) return [[...positions]];
+
+  const lines = lineOrder
+    .map((line) => line.filter((position) => positions.includes(position)))
+    .filter((line) => line.length > 0);
+  const orderedPositions = new Set(lineOrder.flat());
+  const ungroupedPositions = positions.filter((position) => !orderedPositions.has(position));
+  if (ungroupedPositions.length > 0) lines.push(ungroupedPositions);
+  return lines;
+}
+
 export function formationPositionRows(formation: string): FormationPositionRow[] {
   const specialFormations: Record<string, Record<string, string[]>> = {
     '2-1-2-1': { D: ['LB', 'RB'], M: ['CDM', 'LM', 'RM'], F: ['ST'] },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateGroupCoverage } from './coverage-utils';
-import { formationPositionRows, rosterMatchesFormation } from './position-validation';
+import { formationPositionDisplayLines, formationPositionRows, rosterMatchesFormation } from './position-validation';
 import { calculatePlayingTimeNotices } from './playing-time-notices';
 
 function groupCoverage(formation: string, players: Parameters<typeof calculateGroupCoverage>[1], group: string) {
@@ -129,5 +129,12 @@ describe('position analytics coverage', () => {
     expect(formationPositionRows('2-1-2-1').find((row) => row.label === 'F')?.exactPositions).toEqual(['ST']);
     expect(formationPositionRows('4-2-3-1').find((row) => row.label === 'F')?.exactPositions).toEqual(['ST']);
     expect(formationPositionRows('4-2-3-1').find((row) => row.label === 'M')?.exactPositions).toEqual(['LDM', 'RDM', 'LM', 'CAM', 'RM']);
+  });
+
+  it('orders midfield primary positions in formation shape rows', () => {
+    expect(formationPositionDisplayLines('4-2-3-1', 'M', ['LDM', 'RDM', 'LM', 'CAM', 'RM']))
+      .toEqual([['LM', 'CAM', 'RM'], ['LDM', 'RDM']]);
+    expect(formationPositionDisplayLines('2-1-2-1', 'M', ['CDM', 'LM', 'RM']))
+      .toEqual([['LM', 'RM'], ['CDM']]);
   });
 });

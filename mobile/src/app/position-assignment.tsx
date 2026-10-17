@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { getActiveTeam, getActiveTeamId, subscribeToTeamChanges } from '@/services/team-service';
 import { getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
-import { formationPositionRows, rosterMatchesFormation } from '@/position-validation';
+import { formationPositionDisplayLines, formationPositionRows, rosterMatchesFormation } from '@/position-validation';
 import { positionHealth, positionHealthMessage, validateGeneralGroups, type PositionHealth } from '@/services/roster-health';
 import { NONE_POSITION } from '@/position-groups';
 
@@ -480,6 +480,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       </View>
       <PositionPickerModal
         picker={positionPicker}
+        formation={formation}
         positionRows={positionRows}
         onToggle={(position) => setPositionPicker((current) => {
           if (!current) return current;
@@ -514,11 +515,13 @@ function PositionField({ label, value, onPress }: { label: string; value: string
 
 function PositionPickerModal({
   picker,
+  formation,
   positionRows,
   onToggle,
   onFinish,
 }: {
   picker: PositionPickerState;
+  formation: string;
   positionRows: { label: string; groupPositions: string[]; exactPositions: string[] }[];
   onToggle: (position: string) => void;
   onFinish: () => void;
@@ -584,6 +587,9 @@ function PositionPickerModal({
                 : [];
               const specificPositions = (useGroupPositions && allowExactPositions ? row.exactPositions : row.exactPositions)
                 .filter((position) => picker.allowedPositions.includes(position));
+              const specificPositionLines = picker.group === 'primary_positions'
+                ? formationPositionDisplayLines(formation, row.label, specificPositions)
+                : [specificPositions];
               const renderPosition = (position: string) => {
                 const selected = picker.positions.includes(position);
                 return (
@@ -610,7 +616,9 @@ function PositionPickerModal({
                       <Text style={styles.positionSectionLabel}>Exact positions</Text>
                     </>
                   )}
-                  {specificPositions.length > 0 && <View style={styles.pickerOptions}>{specificPositions.map(renderPosition)}</View>}
+                  {specificPositionLines.map((line, lineIndex) => line.length > 0 && (
+                    <View key={`exact-positions-${lineIndex}`} style={styles.pickerOptions}>{line.map(renderPosition)}</View>
+                  ))}
                 </View>
               );
             })}
