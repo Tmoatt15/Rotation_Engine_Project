@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -87,6 +87,7 @@ export default function GamedayBackupSuggestScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submissionStarted = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -141,53 +142,70 @@ export default function GamedayBackupSuggestScreen() {
       router.replace({ pathname: '/schedule', params: { data: JSON.stringify(schedule) } });
     } catch (generationError) {
       if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'position-shortage') {
-        const nextGroup = generationError.offer.context.positionGroup;
-        if (isFieldGroup(nextGroup)) {
-          setGroup(nextGroup);
-          setWarning(generationError.offer.message);
-          setError(null);
-          return;
-        }
+        const offer = generationError.offer;
+        const nextGroup = offer.context.positionGroup;
+        Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
+          text: button.label,
+          style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
+          onPress: () => {
+            if (button.action === 'suggest-backup' || button.action === 'go-to-builder' || button.action === 'choose-player') {
+              if (!isFieldGroup(nextGroup)) {
+                Alert.alert('Backup suggestions unavailable', 'The schedule warning did not include a valid position group.');
+                return;
+              }
+              router.push({
+                pathname: '/gameday-backup-suggest',
+                params: {
+                  group: nextGroup,
+                  teamId: request.teamId,
+                  gameNumber: String(request.gameNumber),
+                  availablePlayerNames: JSON.stringify(request.availablePlayerNames),
+                  firstHalfGk: request.firstHalfGk ?? '',
+                  secondHalfGk: request.secondHalfGk ?? '',
+                  warning: offer.message,
+                },
+              });
+            }
+          },
+        })));
+        return;
       }
       if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'relaxed-minimums') {
         Alert.alert('Can\'t Generate Schedule', generationError.offer.message, generationError.offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
-            if (button.action === 'allow-relaxed') {
-              setSaving(true);
-              void generateAfterBackup(request, true).finally(() => setSaving(false));
-            }
+            if (button.action === 'allow-relaxed') void generateAfterBackup(request, true);
           },
         })));
         return;
       }
       const message = generationError instanceof Error ? generationError.message : 'Unable to regenerate the schedule.';
-      setError(`The backup was saved, but the schedule could not be regenerated: ${message}`);
+      Alert.alert('Schedule not generated', `The backup was saved, but the schedule could not be regenerated: ${message}`);
     }
   }
 
   async function addBackup(playerName: string) {
-    if (!group || !scheduleRequest || saving) return;
+    if (!group || !scheduleRequest || submissionStarted.current) return;
     const player = players.find((candidate) => candidate.name === playerName);
     if (!player) {
       setError(`${playerName} is no longer on this roster. Return to Gameday and try again.`);
       return;
     }
+    submissionStarted.current = true;
     setSaving(true);
     setError(null);
     try {
       const updatedRoster = players.map((candidate) =>
         candidate.name === playerName ? appendBackupPosition(candidate, group) : candidate,
       );
-      const payload = await updateRoster(scheduleRequest.teamId, updatedRoster);
-      setPlayers(payload.players);
-      setWarning(`Added ${group} backup for ${playerName}. Regenerating schedule...`);
-      await generateAfterBackup(scheduleRequest);
+      await updateRoster(scheduleRequest.teamId, updatedRoster);
+      router.back();
+      void generateAfterBackup(scheduleRequest);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save the backup position.');
-    } finally {
+      submissionStarted.current = false;
       setSaving(false);
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save the backup position.');
     }
   }
 
