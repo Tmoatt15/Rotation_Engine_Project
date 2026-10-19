@@ -517,27 +517,45 @@ function buildWaterfillQuotaAttempt(
     }
   };
 
-  for (const tier of SURPLUS_TIERS) {
-    if (tier === 'rotational') {
+  if (allowRelaxedMaximums) {
+    let filledSlot = true;
+    while (filledSlot) {
+      filledSlot = false;
       for (const group of FIELD_GROUPS) {
-        fillCandidates(group,
-          () => allocationMembers(group).filter((candidate) => candidate.selectedKeeper),
-          'keeper surplus gains');
+        const candidates = [...info.values()]
+          .filter((candidate) => (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group))
+            && playerTotal(candidate.player.name) < candidate.maximum)
+          .sort((left, right) =>
+            (playerTotal(left.player.name) + left.keeperBlocks)
+              - (playerTotal(right.player.name) + right.keeperBlocks)
+            || left.player.name.localeCompare(right.player.name));
+        const candidate = candidates[0];
+        if (candidate && gainOne(candidate, group, false)) filledSlot = true;
       }
     }
-    for (const group of FIELD_GROUPS) {
-      fillCandidates(group,
-        () => groupMembers(group).filter((candidate) => candidate.player.group === tier && !candidate.selectedKeeper),
-        `${tier} surplus gains`);
-    }
-    if (FLEX_IN_TIERS.includes(tier)) {
+  } else {
+    for (const tier of SURPLUS_TIERS) {
+      if (tier === 'rotational') {
+        for (const group of FIELD_GROUPS) {
+          fillCandidates(group,
+            () => allocationMembers(group).filter((candidate) => candidate.selectedKeeper),
+            'keeper surplus gains');
+        }
+      }
       for (const group of FIELD_GROUPS) {
         fillCandidates(group,
-          () => [...info.values()].filter((candidate) => candidate.primaryGroup !== group
-            && candidate.player.group === tier
-            && !candidate.selectedKeeper
-            && backupGroups(candidate.player).includes(group)),
-          `${tier} flex-in gains`);
+          () => groupMembers(group).filter((candidate) => candidate.player.group === tier && !candidate.selectedKeeper),
+          `${tier} surplus gains`);
+      }
+      if (FLEX_IN_TIERS.includes(tier)) {
+        for (const group of FIELD_GROUPS) {
+          fillCandidates(group,
+            () => [...info.values()].filter((candidate) => candidate.primaryGroup !== group
+              && candidate.player.group === tier
+              && !candidate.selectedKeeper
+              && backupGroups(candidate.player).includes(group)),
+            `${tier} flex-in gains`);
+        }
       }
     }
   }

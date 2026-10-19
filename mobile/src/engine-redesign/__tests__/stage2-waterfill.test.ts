@@ -195,6 +195,50 @@ describe('Stage 2 per-group water-fill', () => {
     expect(runStages3And4(game, demand, relaxed).complete).toBe(true);
   });
 
+  it('improves the relaxed playing-time spread when a midfield backup enables more balanced placement', () => {
+    const availablePlayerNames = chelseaRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const rosterWithMidfieldBackup = chelseaRoster.map((player) => player.name === 'Dolce'
+      ? { ...player, backup_positions: [...(player.backup_positions ?? []), 'M'] }
+      : player);
+    const createProfile = (roster: RedesignPlayerInput[]) => {
+      const game = normalizeGame({
+        format: '9v9',
+        formation: '3-3-2',
+        totalBlocks: 8,
+        availablePlayerNames,
+        firstHalfKeeper: 'Avery',
+        secondHalfKeeper: 'Maddie',
+      }, roster);
+      const demand = buildDemandModel(game);
+      const quotas = assignQuotas(game, demand, true, true);
+      const placement = runStages3And4(game, demand, quotas);
+      const loads = new Map(game.players.filter((player) => player.available).map((player) => [player.name, 0]));
+      for (const block of placement.blocks) {
+        for (const player of block.assignments.values()) {
+          loads.set(player, (loads.get(player) ?? 0) + 1);
+        }
+      }
+      for (const quota of quotas.quotas) {
+        loads.set(quota.player, (loads.get(quota.player) ?? 0) + quota.keeperBlocks);
+      }
+      const values = [...loads.values()];
+      return {
+        complete: placement.complete,
+        spread: Math.max(...values) - Math.min(...values),
+      };
+    };
+
+    const baseline = createProfile(chelseaRoster);
+    const withBackup = createProfile(rosterWithMidfieldBackup);
+
+    expect(baseline.complete).toBe(true);
+    expect(withBackup.complete).toBe(true);
+    expect(baseline.spread).toBe(3);
+    expect(withBackup.spread).toBe(1);
+  });
+
   it('audits a soft guardrail relaxation while preserving the 40% floor', () => {
     const game = normalizeGame({
       format: '4v4', formation: '1-2-1', totalBlocks: 8,

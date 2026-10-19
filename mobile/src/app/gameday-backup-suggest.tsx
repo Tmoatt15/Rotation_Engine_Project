@@ -50,14 +50,18 @@ function isFieldGroup(value: unknown): value is FieldGroup {
 }
 
 function parseAvailablePlayers(value: string): string[] {
+  return parsePlayerNames(value, 'available-player list');
+}
+
+function parsePlayerNames(value: string, label: string): string[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new Error('The available-player list is invalid. Return to Gameday and try again.');
+    throw new Error(`The ${label} is invalid. Return to Gameday and try again.`);
   }
   if (!Array.isArray(parsed) || !parsed.every((name) => typeof name === 'string')) {
-    throw new Error('The available-player list is invalid. Return to Gameday and try again.');
+    throw new Error(`The ${label} is invalid. Return to Gameday and try again.`);
   }
   return parsed;
 }
@@ -71,6 +75,7 @@ export default function GamedayBackupSuggestScreen() {
     availablePlayerNames?: string | string[];
     firstHalfGk?: string | string[];
     secondHalfGk?: string | string[];
+    suggestedPlayerNames?: string | string[];
     warning?: string | string[];
   }>();
   const rawGroup = Array.isArray(params.group) ? params.group[0] : params.group;
@@ -79,9 +84,11 @@ export default function GamedayBackupSuggestScreen() {
   const rawAvailablePlayerNames = Array.isArray(params.availablePlayerNames) ? params.availablePlayerNames[0] : params.availablePlayerNames;
   const rawFirstHalfGk = Array.isArray(params.firstHalfGk) ? params.firstHalfGk[0] : params.firstHalfGk;
   const rawSecondHalfGk = Array.isArray(params.secondHalfGk) ? params.secondHalfGk[0] : params.secondHalfGk;
+  const rawSuggestedPlayerNames = Array.isArray(params.suggestedPlayerNames) ? params.suggestedPlayerNames[0] : params.suggestedPlayerNames;
   const rawWarning = Array.isArray(params.warning) ? params.warning[0] : params.warning;
   const [players, setPlayers] = useState<SeasonRosterPlayer[]>([]);
   const [scheduleRequest, setScheduleRequest] = useState<ScheduleRequest | null>(null);
+  const [suggestedPlayerNames, setSuggestedPlayerNames] = useState<string[] | null>(null);
   const [group, setGroup] = useState<FieldGroup | null>(null);
   const [warning, setWarning] = useState('');
   const [loading, setLoading] = useState(true);
@@ -99,10 +106,14 @@ export default function GamedayBackupSuggestScreen() {
         const gameNumber = Number(parameter(rawGameNumber, 'game number'));
         if (!Number.isInteger(gameNumber) || gameNumber < 1) throw new Error('The game number is invalid. Return to Gameday and try again.');
         const availablePlayerNames = parseAvailablePlayers(parameter(rawAvailablePlayerNames, 'available-player list'));
+        const suggestedNames = rawSuggestedPlayerNames
+          ? parsePlayerNames(rawSuggestedPlayerNames, 'suggested-player list')
+          : null;
         const roster = await getRoster(teamId);
         if (!Array.isArray(roster.players)) throw new Error('The roster response did not contain a player list.');
         if (!active) return;
         setPlayers(roster.players);
+        setSuggestedPlayerNames(suggestedNames);
         setGroup(groupValue);
         setScheduleRequest({
           teamId,
@@ -122,15 +133,22 @@ export default function GamedayBackupSuggestScreen() {
     return () => {
       active = false;
     };
-  }, [rawAvailablePlayerNames, rawFirstHalfGk, rawGameNumber, rawGroup, rawSecondHalfGk, rawTeamId, rawWarning]);
+  }, [rawAvailablePlayerNames, rawFirstHalfGk, rawGameNumber, rawGroup, rawSecondHalfGk, rawSuggestedPlayerNames, rawTeamId, rawWarning]);
 
   const availableNames = useMemo(
     () => new Set(scheduleRequest?.availablePlayerNames ?? []),
     [scheduleRequest],
   );
+  const suggestedNames = useMemo(
+    () => suggestedPlayerNames ? new Set(suggestedPlayerNames) : null,
+    [suggestedPlayerNames],
+  );
   const candidates = useMemo(
-    () => group ? backupSuggestions(players.filter((player) => availableNames.has(player.name)), group) : [],
-    [availableNames, group, players],
+    () => group
+      ? backupSuggestions(players.filter((player) => availableNames.has(player.name)), group)
+        .filter((player) => !suggestedNames || suggestedNames.has(player.name))
+      : [],
+    [availableNames, group, players, suggestedNames],
   );
 
   async function generateAfterBackup(request: ScheduleRequest, allowRelaxedMinimums = false, allowRelaxedMaximums = false) {
@@ -148,6 +166,9 @@ export default function GamedayBackupSuggestScreen() {
         const nextGroupWarning = typeof offer.context.positionGroupWarning === 'string'
           ? offer.context.positionGroupWarning
           : offer.message;
+        const suggestedNames = Array.isArray(offer.context.suggestedPlayerNames)
+          ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
+          : [];
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
@@ -167,6 +188,7 @@ export default function GamedayBackupSuggestScreen() {
                   firstHalfGk: request.firstHalfGk ?? '',
                   secondHalfGk: request.secondHalfGk ?? '',
                   warning: nextGroupWarning,
+                  ...(suggestedNames.length ? { suggestedPlayerNames: JSON.stringify(suggestedNames) } : {}),
                 },
               });
             }
@@ -190,6 +212,9 @@ export default function GamedayBackupSuggestScreen() {
         const nextGroupWarning = typeof offer.context.positionGroupWarning === 'string'
           ? offer.context.positionGroupWarning
           : offer.message;
+        const suggestedNames = Array.isArray(offer.context.suggestedPlayerNames)
+          ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
+          : [];
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
@@ -210,6 +235,7 @@ export default function GamedayBackupSuggestScreen() {
                   firstHalfGk: request.firstHalfGk ?? '',
                   secondHalfGk: request.secondHalfGk ?? '',
                   warning: nextGroupWarning,
+                  ...(suggestedNames.length ? { suggestedPlayerNames: JSON.stringify(suggestedNames) } : {}),
                 },
               });
             }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
+import { runStages3And4 as runStages3And4Actual } from '@/engine-redesign/stage4';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
 import { generateRedesignSchedule, regenerateRedesignLateArrival } from '../redesign-schedule-service';
@@ -183,7 +184,7 @@ beforeEach(() => {
 });
 
 describe('redesign schedule service', () => {
-  it('does not suggest backups when available field-player capacity cannot cover the formation', async () => {
+  it('does not suggest backups when relaxed workload balance does not improve', async () => {
     configureService(rotationRoster, 8);
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
@@ -208,6 +209,65 @@ describe('redesign schedule service', () => {
           failureType: 'relaxed-maximums',
           maximumCapacityShortfall: 4,
         }),
+      },
+    });
+  });
+
+  it('suggests the backup that most improves relaxed playing-time balance', async () => {
+    configureService(rotationRoster, 8);
+    vi.mocked(runStages3And4).mockImplementation(runStages3And4Actual);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: expect.objectContaining({
+          positionGroup: 'M',
+          suggestedPlayerNames: ['Dolce'],
+          positionGroupWarning: expect.stringContaining('projected to improve playing-time balance'),
+        }),
+      },
+    });
+  });
+
+  it('stops suggesting backups after the workload spread can no longer improve', async () => {
+    const roster = rotationRoster.map((player) => player.name === 'Dolce'
+      ? { ...player, backup_positions: [...(player.backup_positions ?? []), 'M'] }
+      : player);
+    configureService(roster, 8);
+    vi.mocked(runStages3And4).mockImplementation(runStages3And4Actual);
+    const availablePlayerNames = roster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
       },
     });
   });

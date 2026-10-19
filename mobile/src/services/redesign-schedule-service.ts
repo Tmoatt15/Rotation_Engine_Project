@@ -50,40 +50,60 @@ function backupSuggestionOffer(
   };
 }
 
-function assignmentDeficit(quotas: ReturnType<typeof assignQuotas>): number {
-  return quotas.audit.underfill.reduce((sum, entry) => sum + entry.blocks, 0)
-    + quotas.audit.overage.reduce((sum, entry) => sum + entry.blocks, 0);
-}
+type BackupRecommendation = { group: FieldGroup; playerNames: string[] };
 
-function relaxedMaximumProfile(quotas: ReturnType<typeof assignQuotas>): number[] {
-  return (quotas.audit.relaxedMaximums ?? [])
-    .map((entry) => entry.after - entry.before)
-    .sort((left, right) => right - left);
-}
+type WorkloadProfile = { complete: boolean; missingAssignments: number; maximum: number; spread: number; squaredLoads: number };
 
-function profileImproves(candidate: number[], baseline: number[]): boolean {
-  for (let index = 0; index < Math.max(candidate.length, baseline.length); index += 1) {
-    const candidateValue = candidate[index] ?? 0;
-    const baselineValue = baseline[index] ?? 0;
-    if (candidateValue !== baselineValue) return candidateValue < baselineValue;
+function workloadProfile(
+  game: ReturnType<typeof normalizeGame>,
+  quotas: ReturnType<typeof assignQuotas>,
+  placement: ReturnType<typeof runStages3And4>,
+): WorkloadProfile {
+  const loads = new Map(game.players.filter((player) => player.available).map((player) => [player.name, 0]));
+  for (const block of placement.blocks) {
+    for (const player of block.assignments.values()) {
+      if (loads.has(player)) loads.set(player, (loads.get(player) ?? 0) + 1);
+    }
   }
-  return false;
+  const assignedFieldBlocks = [...loads.values()].reduce((sum, load) => sum + load, 0);
+  for (const quota of quotas.quotas) {
+    if (loads.has(quota.player)) loads.set(quota.player, (loads.get(quota.player) ?? 0) + quota.keeperBlocks);
+  }
+  const values = [...loads.values()];
+  const maximum = Math.max(0, ...values);
+  const minimum = Math.min(...values);
+  return {
+    complete: placement.complete,
+    missingAssignments: Math.max(0, quotas.fieldSlots - assignedFieldBlocks),
+    maximum,
+    spread: maximum - minimum,
+    squaredLoads: values.reduce((sum, load) => sum + load * load, 0),
+  };
 }
 
-function backupWouldHelp(
+function compareWorkloads(candidate: WorkloadProfile, baseline: WorkloadProfile): number {
+  if (candidate.complete !== baseline.complete) return candidate.complete ? -1 : 1;
+  return candidate.missingAssignments - baseline.missingAssignments
+    || candidate.maximum - baseline.maximum
+    || candidate.spread - baseline.spread
+    || candidate.squaredLoads - baseline.squaredLoads;
+}
+
+function bestBackupRecommendation(
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
   quotas: ReturnType<typeof assignQuotas>,
   allowRelaxedMinimums: boolean,
-): boolean {
-  const groups = quotas.audit.underfill.map(({ group }) => group);
-  if (!groups.length) return false;
-  const normalDeficit = assignmentDeficit(quotas);
+): BackupRecommendation | null {
+  const groups = quotas.audit.underfill;
+  if (!groups.length) return null;
   const relaxedBaseline = assignQuotas(game, demand, allowRelaxedMinimums, true);
-  const relaxedDeficit = assignmentDeficit(relaxedBaseline);
-  const baselineProfile = relaxedMaximumProfile(relaxedBaseline);
+  const baselinePlacement = runStages3And4(game, demand, relaxedBaseline);
+  const baselineWorkload = workloadProfile(game, relaxedBaseline, baselinePlacement);
+  let best: BackupRecommendation | null = null;
+  let bestWorkload = baselineWorkload;
 
-  for (const group of groups) {
+  for (const { group } of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const candidates = game.players.filter((player) => player.available && !player.keeper
       && slots.some((slot) => positionTier(player, slot.slot) === 0 && !excludedFromSlot(player, slot.slot)));
@@ -94,14 +114,19 @@ function backupWouldHelp(
           ? { ...player, backupPositions: [...player.backupPositions, group] }
           : player),
       };
-      const normal = assignQuotas(simulatedGame, demand, allowRelaxedMinimums);
-      if (assignmentDeficit(normal) < normalDeficit) return true;
-      const relaxed = assignQuotas(simulatedGame, demand, allowRelaxedMinimums, true);
-      if (assignmentDeficit(relaxed) < relaxedDeficit
-        || profileImproves(relaxedMaximumProfile(relaxed), baselineProfile)) return true;
+      const simulatedQuotas = assignQuotas(simulatedGame, demand, allowRelaxedMinimums, true);
+      const simulatedPlacement = runStages3And4(simulatedGame, demand, simulatedQuotas);
+      const simulatedWorkload = workloadProfile(simulatedGame, simulatedQuotas, simulatedPlacement);
+      const comparison = compareWorkloads(simulatedWorkload, bestWorkload);
+      if (comparison < 0) {
+        best = { group, playerNames: [candidate.name] };
+        bestWorkload = simulatedWorkload;
+      } else if (comparison === 0 && best && group === best.group) {
+        best.playerNames.push(candidate.name);
+      }
     }
   }
-  return false;
+  return best;
 }
 
 function offerForRelaxedMaximums(
@@ -115,26 +140,37 @@ function offerForRelaxedMaximums(
     count: blocks,
     unit: 'assignments' as const,
   }));
-  const suggestions = groups.length
+  const groupWarnings = groups.length
     ? backupSuggestionOffer(groups, { underfill: quotas.audit.underfill })
     : null;
-  const canSuggest = Boolean(suggestions && backupWouldHelp(game, demand, quotas, allowRelaxedMinimums));
+  const recommendation = bestBackupRecommendation(game, demand, quotas, allowRelaxedMinimums);
+  const recommendationWarning = recommendation
+    ? backupSuggestionOffer([{
+      group: recommendation.group,
+      count: quotas.audit.underfill.find((entry) => entry.group === recommendation.group)?.blocks ?? 0,
+      unit: 'assignments',
+    }], {}).context.positionGroupWarning
+    : undefined;
+  const positionGroupWarning = typeof recommendationWarning === 'string'
+    ? `${recommendationWarning} This backup is projected to improve playing-time balance.`
+    : undefined;
   const buttons: Stage6Offer['buttons'] = [
-    ...(canSuggest ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
+    ...(recommendation ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
     { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
     { label: 'Cancel', action: 'cancel' },
   ];
   const context = {
     failureType: 'relaxed-maximums',
     maximumCapacityShortfall: quotas.audit.maximumCapacityShortfall,
-    ...(canSuggest && suggestions ? {
-      positionGroup: suggestions.context.positionGroup,
-      positionGroupWarning: suggestions.context.positionGroupWarning,
+    ...(recommendation ? {
+      positionGroup: recommendation.group,
+      positionGroupWarning,
+      suggestedPlayerNames: recommendation.playerNames,
     } : {}),
   };
   return {
     kind: 'relaxed-maximums',
-    message: `Can't fit normal playing time.${suggestions?.message ? `\n\n${suggestions.message}` : ''}`,
+    message: `Can't fit normal playing time.${groupWarnings?.message ? `\n\n${groupWarnings.message}` : ''}${recommendation ? '\n\nThe suggested backup improves playing-time balance; relaxed maximums may still be needed.' : ''}`,
     buttons,
     context,
   };
