@@ -33,7 +33,13 @@ export type RosterCheckGroup = {
   status: 'in-range' | 'over' | 'under';
 };
 
-export type BackupNeed = { group: 'D' | 'M' | 'F'; slots: number; range: string };
+export type BackupNeed = {
+  group: 'D' | 'M' | 'F';
+  slots: number;
+  minimum: number;
+  maximum: number;
+  range: string;
+};
 
 const groupLabels: Record<CoveragePositionGroup, string> = {
   D: 'Defenders',
@@ -112,9 +118,44 @@ export function calculateBackupNeeds(formation: string, rosterSize: number): { t
     total,
     groups: groups.filter(({ slots }) => slots > 0).map(({ group, slots }) => {
       const value = totalSlots ? total * slots / totalSlots : 0;
-      return { group, slots, range: Number.isInteger(value) ? `${value}` : `${Math.floor(value)}-${Math.ceil(value)}` };
+      const minimum = Math.floor(value);
+      const maximum = Math.ceil(value);
+      return {
+        group,
+        slots,
+        minimum,
+        maximum,
+        range: minimum === maximum ? `${minimum}` : `${minimum}-${maximum}`,
+      };
     }),
   };
+}
+
+export function countGroupBackups(players: RosterHelperPlayer[], group: 'D' | 'M' | 'F'): number {
+  return players.filter((player) => {
+    const excluded = new Set((player.excluded_positions ?? []).map((position) => position.toUpperCase()));
+    return !excluded.has(group) && hasGroupPosition(player.backup_positions ?? [], group, excluded);
+  }).length;
+}
+
+export function countAssignedBackups(players: RosterHelperPlayer[]): number {
+  return (['D', 'M', 'F'] as const).reduce((total, group) => total + countGroupBackups(players, group), 0);
+}
+
+export function formatGeneralPositions(positions: readonly string[] | undefined): string {
+  const normalized = [...new Set((positions ?? [])
+    .map((position) => position.trim().toUpperCase())
+    .filter((position) => position && position !== NONE_POSITION))];
+  return normalized.join('/') || '—';
+}
+
+export function backupProgressText(need: Pick<BackupNeed, 'minimum' | 'maximum'>, added: number): string {
+  if (added >= need.maximum) return `✓ ${added} added (maximum met)`;
+  if (added >= need.minimum) return `✓ ${added} added (minimum met)`;
+  const minimum = Math.max(0, need.minimum - added);
+  const maximum = Math.max(0, need.maximum - added);
+  const range = minimum === maximum ? `${minimum}` : `${minimum}-${maximum}`;
+  return `Suggest ${range} backups`;
 }
 
 function generalPositionAllowsGroup(positions: string[], group: CoveragePositionGroup): boolean {

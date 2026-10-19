@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { appendBackupPosition, backupSuggestions, calculateBackupNeeds, calculateGroupCoverage, calculateRosterCheck, isMissingGeneralGroup } from './coverage-utils';
+import { appendBackupPosition, backupProgressText, backupSuggestions, calculateBackupNeeds, calculateGroupCoverage, calculateRosterCheck, countAssignedBackups, countGroupBackups, formatGeneralPositions, isMissingGeneralGroup } from './coverage-utils';
 import { formationPositionDisplayLines, formationPositionRows, rosterMatchesFormation } from './position-validation';
 import { calculatePlayingTimeNotices } from './playing-time-notices';
 
@@ -24,11 +24,32 @@ describe('position analytics coverage', () => {
       expect(calculateBackupNeeds('3-3-2', 13)).toEqual({
         total: 7,
         groups: [
-          { group: 'D', slots: 3, range: '2-3' },
-          { group: 'M', slots: 3, range: '2-3' },
-          { group: 'F', slots: 2, range: '1-2' },
+          { group: 'D', slots: 3, minimum: 2, maximum: 3, range: '2-3' },
+          { group: 'M', slots: 3, minimum: 2, maximum: 3, range: '2-3' },
+          { group: 'F', slots: 2, minimum: 1, maximum: 2, range: '1-2' },
         ],
       });
+    });
+
+    it('updates total and group backup progress from current assignments', () => {
+      const players = [
+        { name: 'Alex', backup_positions: ['D'] },
+        { name: 'Bailey', backup_positions: ['CB', 'F'] },
+        { name: 'Casey', backup_positions: ['M', 'CM'] },
+      ];
+
+      expect(countGroupBackups(players, 'D')).toBe(2);
+      expect(countGroupBackups(players, 'F')).toBe(1);
+      expect(countAssignedBackups(players)).toBe(4);
+      expect(backupProgressText({ minimum: 2, maximum: 3 }, 0)).toBe('Suggest 2-3 backups');
+      expect(backupProgressText({ minimum: 2, maximum: 3 }, 1)).toBe('Suggest 1-2 backups');
+      expect(backupProgressText({ minimum: 2, maximum: 3 }, 2)).toBe('✓ 2 added (minimum met)');
+      expect(backupProgressText({ minimum: 2, maximum: 3 }, 3)).toBe('✓ 3 added (maximum met)');
+    });
+
+    it('formats candidate positions from their general group assignments', () => {
+      expect(formatGeneralPositions(['m', ' D ', 'M'])).toBe('M/D');
+      expect(formatGeneralPositions(['NONE'])).toBe('—');
     });
 
     it('scales Roster Check targets by field roster size and formation slots', () => {

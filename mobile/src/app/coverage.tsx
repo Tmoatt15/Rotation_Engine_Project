@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import type { SeasonRosterPlayer } from '@/engine/models';
-import { appendBackupPosition, backupSuggestions, calculateBackupNeeds, calculateRosterCheck, isMissingGeneralGroup, type RosterCheckGroup } from '@/coverage-utils';
+import { appendBackupPosition, backupProgressText, backupSuggestions, calculateBackupNeeds, calculateRosterCheck, countAssignedBackups, countGroupBackups, formatGeneralPositions, isMissingGeneralGroup, type RosterCheckGroup } from '@/coverage-utils';
 import { getActiveTeam, getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 
 const palette = {
@@ -100,6 +100,7 @@ export default function CoverageScreen() {
     [formation, players.length],
   );
   const totalSuggestedBackups = backupPlan.total;
+  const remainingSuggestedBackups = Math.max(0, totalSuggestedBackups - countAssignedBackups(players));
 
   async function addBackup(playerName: string, group: FieldGroup) {
     if (saving) return;
@@ -226,12 +227,14 @@ export default function CoverageScreen() {
                     </View>
                   </View>
                   <View style={styles.totalBackups}>
-                    <Text style={styles.totalBackupsNumber}>{totalSuggestedBackups}</Text>
+                    <Text style={styles.totalBackupsNumber}>{remainingSuggestedBackups}</Text>
                     <Text style={styles.totalBackupsCopy}>suggested backups across your {players.length}-player roster</Text>
                   </View>
                   <View style={styles.suggestionList}>
-                    {backupPlan.groups.map(({ group, range }) => {
+                    {backupPlan.groups.map(({ group, minimum, maximum }) => {
                       const candidates = backupSuggestions(players, group);
+                      const added = countGroupBackups(players, group);
+                      const progress = backupProgressText({ minimum, maximum }, added);
                       const expanded = expandedGroup === group;
                       const selected = selectedPlayers[group];
                       return (
@@ -240,7 +243,7 @@ export default function CoverageScreen() {
                             <View style={styles.suggestionCopy}>
                               <Text style={styles.suggestionTitle}>{groupCopy[group].label}</Text>
                               <Text style={styles.suggestionDetail}>
-                                Suggest {range} backups (best from {groupCopy[group].source})
+                                {progress}{progress.startsWith('Suggest') ? ` (best from ${groupCopy[group].source})` : ''}
                               </Text>
                             </View>
                             <Pressable
@@ -267,7 +270,7 @@ export default function CoverageScreen() {
                                       style={styles.candidateNameButton}
                                       accessibilityRole="button"
                                       accessibilityState={{ selected: isSelected }}>
-                                      <Text style={[styles.candidateName, isSelected && styles.candidateNameSelected]}>{candidate.name}</Text>
+                                      <Text style={[styles.candidateName, isSelected && styles.candidateNameSelected]}>{candidate.name} ({formatGeneralPositions(candidate.general_positions)})</Text>
                                       {candidate.group && <Text style={styles.candidateTier}>{candidate.group.replace('_', ' ')}</Text>}
                                     </Pressable>
                                     {isSelected && (
