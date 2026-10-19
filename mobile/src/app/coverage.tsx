@@ -1,18 +1,13 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
-import { getActiveTeam, getActiveTeamId } from '@/services/team-service';
-import { getRoster, getSeasonSettings } from '@/services/team-service';
-import { calculatePlayingTimeNotices, PLAYING_TIME_NOTICE, POSITION_COVERAGE_NOTICE } from '@/playing-time-notices';
-import { GAME_FORMATS } from '@/engine/season';
-import type { GameFormat } from '@/engine/models';
-import { buildDemandModel, checkRosterFeasibility, GeneralGroupValidationError, normalizeGame } from '@/engine-redesign';
-import { isDedicatedKeeper } from '@/position-groups';
+import type { SeasonRosterPlayer } from '@/engine/models';
+import { appendBackupPosition, backupSuggestions, calculateBackupNeeds, calculateRosterCheck, isMissingGeneralGroup, type RosterCheckGroup } from '@/coverage-utils';
+import { getActiveTeam, getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
 
 const palette = {
   ink: '#17221f',
@@ -23,293 +18,141 @@ const palette = {
   green: '#19634b',
   greenSoft: '#dcebe2',
   coral: '#d96f4c',
-  yellow: '#f1c76b',
+  red: '#b42318',
+  redSoft: '#fde7e5',
+  yellow: '#9a6900',
+  yellowSoft: '#fff1cb',
 };
 
-type Group = 'core' | 'developing' | 'rotational';
-type Player = {
-  name: string;
-  group: Group;
-  keeper_eligible?: boolean;
-  general_positions: string[];
-  primary_positions: string[];
-  backup_positions: string[];
-  excluded_positions: string[];
+type FieldGroup = 'D' | 'M' | 'F';
+type UndoAction = { playerName: string; group: FieldGroup };
+
+const groupCopy: Record<FieldGroup, { label: string; source: string }> = {
+  D: { label: 'Defenders', source: 'midfield' },
+  M: { label: 'Midfielders', source: 'defense or forward' },
+  F: { label: 'Forwards', source: 'midfield' },
 };
-type RoleGroup = { key: string; label: string };
-type PositionTier = 'primary' | 'general' | 'backup';
-type PositionEntry = { position: string; tier: PositionTier };
-type GroupedPlayer = { player: Player; positions: string[]; isBackup: boolean };
 
-const roleGroups: RoleGroup[] = [
-  { key: 'F', label: 'Forwards' },
-  { key: 'M', label: 'Midfielders' },
-  { key: 'D', label: 'Defenders' },
-  { key: 'GK', label: 'Goalkeepers' },
-];
+const statusCopy: Record<RosterCheckGroup['status'], string> = {
+  'in-range': 'In range',
+  over: 'Over',
+  under: 'Under',
+};
 
-function displayPlayerName(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length < 2) return name;
-  return `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
-}
-
-function playerPositionEntries(player: Player): PositionEntry[] {
-  const excluded = new Set(player.excluded_positions.map((position) => position.toUpperCase()));
-  const entries: PositionEntry[] = [];
-  const seen = new Set<string>();
-  const addPositions = (positions: string[], tier: PositionTier) => {
-    positions.forEach((position) => {
-      const normalized = position.toUpperCase();
-      const excludedByGroup = [...excluded].some((excludedPosition) =>
-        ['F', 'M', 'D', 'GK'].includes(excludedPosition) && belongsToRoleGroup(normalized, excludedPosition),
-      );
-      if (normalized && !excluded.has(normalized) && !excludedByGroup && !seen.has(normalized)) {
-        seen.add(normalized);
-        entries.push({ position: normalized, tier });
-      }
-    });
-  };
-  addPositions(player.primary_positions, 'primary');
-  addPositions(player.general_positions, 'general');
-  addPositions(player.backup_positions, 'backup');
-  return entries;
-}
-
-function belongsToRoleGroup(position: string, group: string): boolean {
-  if (group === 'GK') return position === 'GK';
-  if (group === 'F') return position === 'F' || position.startsWith('F') || ['CF', 'LW', 'RW'].includes(position);
-  if (group === 'M') return position === 'M' || position.startsWith('M') || ['CM', 'CDM', 'CAM', 'LDM', 'RDM'].includes(position);
-  return position === 'D' || ['CB', 'LB', 'RB', 'LCB', 'RCB', 'LWB', 'RWB'].includes(position);
-}
-
-function OptimalRosterBuilder({ players, formation, gameFormat, totalBlocks, onChoosePlayer }: {
-  players: Player[];
-  formation: string;
-  gameFormat: GameFormat;
-  totalBlocks: number;
-  onChoosePlayer: (playerName?: string) => void;
-}) {
-  const rows = (['D', 'M', 'F'] as const).map((group) => ({
-    group,
-    label: group === 'D' ? 'DEFENDERS' : group === 'M' ? 'MIDFIELDERS' : 'FORWARDS',
-    positions: formation.split('-')[group === 'D' ? 0 : group === 'M' ? 1 : 2] ? [group] : [],
-  })).filter((row) => row.positions.length);
-  const groupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
-    const entries = playerPositionEntries(player);
-    return entries.some(({ position, tier }) => tier !== 'backup' && belongsToRoleGroup(position, group));
-  });
-  const backupPlayers = (group: 'D' | 'M' | 'F') => players.filter((player) => {
-    return !groupPlayers(group).some((candidate) => candidate.name === player.name)
-      && player.backup_positions.some((position) => belongsToRoleGroup(position.toUpperCase(), group));
-  });
-  const backupCandidates = (group: 'D' | 'M' | 'F') => players
-    .filter((player) => !player.backup_positions.length
-      && !groupPlayers(group).some((candidate) => candidate.name === player.name))
-    .sort((left, right) => {
-      const tier = (player: Player): number => player.group === 'rotational' ? 0 : player.group === 'core' ? 1 : 2;
-      return tier(left) - tier(right) || left.name.localeCompare(right.name);
-    });
-  const suggestions = (group: 'D' | 'M' | 'F') => players
-    .filter((player) => !groupPlayers(group).some((candidate) => candidate.name === player.name)
-      && !backupPlayers(group).some((candidate) => candidate.name === player.name)
-    )
-    .sort((left, right) => {
-      const leftProximity = left.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
-      const rightProximity = right.general_positions.some((position) => belongsToRoleGroup(position, group)) ? 0 : 1;
-      return leftProximity - rightProximity || left.name.localeCompare(right.name);
-    });
-  const formationParts = formation.split('-').map(Number);
-  const needs = { D: formationParts[0] ?? 0, M: formationParts[1] ?? 0, F: formationParts[2] ?? 0 };
-  const showSuggestions = (group: 'D' | 'M' | 'F', label: string) => {
-    const candidates = suggestions(group).slice(0, 3);
-    Alert.alert(`Improve ${label.toLowerCase()} coverage`, 'Choose a player to review for a backup position.', [
-      ...candidates.map((player) => ({ text: player.name, onPress: () => onChoosePlayer(player.name) })),
-      { text: 'Choose another player', onPress: onChoosePlayer },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-  const keeperEligible = players.filter((player) => player.keeper_eligible === true);
-  const feasibilityIssue = useMemo(() => {
-    if (gameFormat === '5v5') {
-      return { kind: 'position-shortage' as const, message: 'Feasibility checks are not available for 5v5 rosters.' };
-    }
-    if (gameFormat !== '4v4' && keeperEligible.length === 0) {
-      return { kind: 'keeper', message: 'No available keeper-eligible player is configured.' };
-    }
-    const keeper = keeperEligible[0]?.name ?? null;
-    let normalized: ReturnType<typeof normalizeGame>;
-    try {
-      normalized = normalizeGame({
-        format: gameFormat,
-        formation,
-        totalBlocks,
-        firstHalfKeeper: keeper,
-        secondHalfKeeper: keeper,
-      }, players.map((player) => ({
-        name: player.name,
-        group: player.group,
-        general_positions: player.general_positions,
-        primary_positions: player.primary_positions,
-        backup_positions: player.backup_positions,
-        excluded_positions: player.excluded_positions,
-        keeper_eligible: player.keeper_eligible,
-        keeper: isDedicatedKeeper(player.keeper_eligible === true, player.general_positions),
-      })));
-    } catch (error) {
-      if (error instanceof GeneralGroupValidationError) {
-        return { kind: 'position-shortage', message: error.message };
-      }
-      throw error;
-    }
-    return checkRosterFeasibility(normalized, buildDemandModel(normalized));
-  }, [formation, gameFormat, keeperEligible, players, totalBlocks]);
-  const overallFeasible = !feasibilityIssue;
-  return (
-    <View style={styles.builderCard}>
-      <Text style={styles.builderTitle}>Optimal Roster Setup</Text>
-      <Text style={styles.builderSubtitle}>{formation} · {gameFormat} · {players.length} players</Text>
-      <Text style={styles.builderHint}>Tap a row to review ranked backup recommendations.</Text>
-      <View style={styles.builderFeasibility}>
-        <Text style={[styles.builderStatus, overallFeasible ? styles.builderGood : styles.builderCritical]}>
-          {overallFeasible ? '✓ Ready to generate' : '⚠ Won\'t generate yet'}
-        </Text>
-        <Text style={styles.builderRecommendation}>
-          {feasibilityIssue?.message ?? 'Your roster can produce a schedule with the current setup.'}
-        </Text>
-        {feasibilityIssue && <Text style={styles.builderRecommendation}>See details below.</Text>}
-      </View>
-      <View style={styles.builderRecommendations}>
-        <Text style={styles.builderRecommendationTitle}>Backup coverage</Text>
-        <Text style={styles.builderRecommendation}>Enough to handle up to 2 absences per group:</Text>
-        {(['D', 'M', 'F'] as const).map((group) => {
-          const label = group === 'D' ? 'Defenders' : group === 'M' ? 'Midfielders' : 'Forwards';
-          const holders = backupPlayers(group);
-          const candidates = backupCandidates(group);
-          const short = Math.max(0, 2 - holders.length);
-          return (
-            <View key={group} style={styles.builderCoverageGroup}>
-              <Text style={styles.builderRecommendationTitle}>{label} — {holders.length} backup{holders.length === 1 ? '' : 's'} {short ? `· Need ${short} more` : '· ✓ Covered'}</Text>
-              <Text style={styles.builderRecommendation}>
-                {holders.length ? `${holders.map((player) => displayPlayerName(player.name)).join(', ')} have ${group} backup ✓` : 'No assigned backups'}
-              </Text>
-              {short > 0 && (
-                <View style={styles.builderCandidateList}>
-                  <Text style={styles.builderRecommendation}>Add {short} more from:</Text>
-                  {candidates.map((player) => (
-                    <Pressable key={player.name} onPress={() => onChoosePlayer(player.name)} accessibilityRole="button">
-                      <Text style={styles.builderCandidate}>{displayPlayerName(player.name)}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
-          );
-        })}
-        <Pressable onPress={() => onChoosePlayer()} style={styles.builderRosterButton} accessibilityRole="button">
-          <Text style={styles.builderRosterButtonText}>Review Roster</Text>
-        </Pressable>
-      </View>
-      {rows.map(({ group, label }) => {
-        const primary = groupPlayers(group);
-        const backups = backupPlayers(group);
-        const minimum = needs[group] + 1;
-        const optimal = needs[group] + 2;
-        const total = primary.length + backups.length;
-        const status = total < minimum ? 'critical' : total < optimal ? 'warning' : 'good';
-        return (
-          <Pressable key={group} onPress={() => showSuggestions(group, label)} style={styles.builderRow} accessibilityRole="button">
-            <View style={styles.builderRowHeader}>
-              <Text style={styles.builderGroup}>{label}</Text>
-              <Text style={styles.builderCounts}>Current {total} · Minimum {minimum} · Optimal {optimal}</Text>
-            </View>
-            <View style={styles.builderBarTrack}><View style={[styles.builderBarFill, { width: `${Math.min(100, (total / Math.max(1, optimal)) * 100)}%` }]} /></View>
-            <Text style={styles.builderNames}>Primary: {primary.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
-            <Text style={styles.builderNames}>Backups: {backups.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
-            <Text style={[styles.builderStatus, status === 'critical' && styles.builderCritical, status === 'warning' && styles.builderWarning, status === 'good' && styles.builderGood]}>
-              {status === 'critical' ? `⚠ Below minimum by ${minimum - total}. Tap for recommendations.` : status === 'warning' ? `⚠ ${optimal - total} more coverage player(s) recommended.` : overallFeasible ? '✓ Optimal coverage' : '⚠ Review feasibility above.'}
-            </Text>
-          </Pressable>
-        );
-      })}
-      <View style={styles.builderRow}>
-        <Text style={styles.builderGroup}>GOALKEEPERS</Text>
-        <Text style={styles.builderNames}>{keeperEligible.length} eligible: {keeperEligible.map((player) => displayPlayerName(player.name)).join(', ') || 'None'}</Text>
-        <Text style={styles.builderStatus}>{keeperEligible.length >= 2 ? '✓ Keeper eligibility indicator' : '⚠ Add another keeper-eligible player'}</Text>
-      </View>
-    </View>
-  );
-}
+const statusStyles = {
+  'in-range': { text: palette.green, background: palette.greenSoft },
+  over: { text: palette.yellow, background: palette.yellowSoft },
+  under: { text: palette.red, background: palette.redSoft },
+};
 
 export default function CoverageScreen() {
   const router = useRouter();
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<SeasonRosterPlayer[]>([]);
+  const playersRef = useRef<SeasonRosterPlayer[]>([]);
+  const [teamId, setTeamId] = useState<string | null>(null);
   const [formation, setFormation] = useState<string | null>(null);
-  const [totalBlocks, setTotalBlocks] = useState(10);
-  const [gameFormat, setGameFormat] = useState<GameFormat>('11v11');
-  const [hasGoalkeeper, setHasGoalkeeper] = useState(true);
+  const [gameFormat, setGameFormat] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedGroup, setExpandedGroup] = useState<FieldGroup | null>(null);
+  const [selectedPlayers, setSelectedPlayers] = useState<Partial<Record<FieldGroup, string>>>({});
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     let active = true;
     setLoading(true);
     setError(null);
     getActiveTeam()
-      .then((activeTeam) => {
-        if (active) setTeamName(activeTeam.name);
-        return getRoster(activeTeam.id);
-      })
-      .then((payload) => {
-        if (!Array.isArray(payload.players)) throw new Error('The roster response did not contain a player list.');
-        if (active) setPlayers(payload.players as Player[]);
+      .then((team) => Promise.all([getRoster(team.id), getSeasonSettings(team.id)]).then(([roster, settings]) => ({ team, roster, settings })))
+      .then(({ team, roster, settings }) => {
+        if (!Array.isArray(roster.players)) throw new Error('The roster response did not contain a player list.');
+        if (!active) return;
+        playersRef.current = roster.players;
+        setPlayers(roster.players);
+        setTeamId(team.id);
+        setTeamName(team.name);
+        setFormation(settings.formation);
+        setGameFormat(settings.game_format);
       })
       .catch((requestError) => {
-        if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load coverage.');
+        if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load roster helper.');
       })
       .finally(() => {
         if (active) setLoading(false);
-      });
-    getActiveTeamId()
-      .then((activeTeamId) => getSeasonSettings(activeTeamId))
-      .then((payload) => {
-        if (!active) return;
-        if (typeof payload.formation === 'string') setFormation(payload.formation);
-        setTotalBlocks(payload.total_blocks);
-        setGameFormat(payload.game_format);
-        setHasGoalkeeper(payload.has_goalkeeper ?? GAME_FORMATS[payload.game_format].has_goalkeeper);
-      })
-      .catch((requestError) => {
-        if (active && !error) setError(requestError instanceof Error ? requestError.message : 'Unable to load season settings.');
       });
     return () => {
       active = false;
     };
   }, []));
 
-  const notices = useMemo(() => formation ? calculatePlayingTimeNotices({
-    formation,
-    total_blocks: totalBlocks,
-    game_format: gameFormat,
-    has_goalkeeper: hasGoalkeeper,
-  }, players) : { playingTimeNotice: false, positionCoverageNotice: false }, [formation, gameFormat, hasGoalkeeper, players, totalBlocks]);
-  const groupedPlayers = useMemo(() => roleGroups.map((group) => ({
-    ...group,
-    players: players.flatMap((player) => {
-      const entries = playerPositionEntries(player).filter(({ position }) => belongsToRoleGroup(position, group.key));
-      if (!entries.length) return [];
-      const hasNormalCoverage = entries.some(({ tier }) => tier !== 'backup');
-      return [{
-        player,
-        positions: entries.map(({ position }) => position),
-        isBackup: !hasNormalCoverage,
-      }];
-    }).sort((first, second) => {
-      if (first.isBackup !== second.isBackup) return first.isBackup ? 1 : -1;
-      return first.player.name.localeCompare(second.player.name);
-    }),
-  })), [players]);
+  const targets = useMemo(
+    () => formation
+      ? calculateRosterCheck(formation, players, gameFormat !== '4v4')
+      : [],
+    [formation, gameFormat, players],
+  );
+  const missingGroupPlayers = useMemo(() => players.filter(isMissingGeneralGroup), [players]);
+  const backupPlan = useMemo(
+    () => formation ? calculateBackupNeeds(formation, players.length) : { total: 0, groups: [] },
+    [formation, players.length],
+  );
+  const totalSuggestedBackups = backupPlan.total;
+
+  async function addBackup(playerName: string, group: FieldGroup) {
+    if (saving) return;
+    const currentPlayers = playersRef.current;
+    const player = currentPlayers.find((candidate) => candidate.name === playerName);
+    if (!player) {
+      setError(`${playerName} is no longer on this roster. Reload the screen and try again.`);
+      return;
+    }
+    const nextPlayers = currentPlayers.map((candidate) =>
+      candidate.name === playerName ? appendBackupPosition(candidate, group) : candidate,
+    );
+    setSaving(true);
+    setError(null);
+    try {
+      if (!teamId) throw new Error('The active team is not loaded yet.');
+      const payload = await updateRoster(teamId, nextPlayers);
+      playersRef.current = payload.players;
+      setPlayers(payload.players);
+      setExpandedGroup(null);
+      setSelectedPlayers({});
+      setUndoAction({ playerName, group });
+      setToast(`${playerName} added as a ${groupCopy[group].label.toLowerCase()} backup.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save the backup assignment.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function undoBackup() {
+    if (!undoAction || saving) return;
+    const { playerName, group } = undoAction;
+    const currentPlayers = playersRef.current;
+    const nextPlayers = currentPlayers.map((player) => player.name === playerName
+      ? { ...player, backup_positions: (player.backup_positions ?? []).filter((position) => position.toUpperCase() !== group) }
+      : player,
+    );
+    setSaving(true);
+    setError(null);
+    try {
+      if (!teamId) throw new Error('The active team is not loaded yet.');
+      const payload = await updateRoster(teamId, nextPlayers);
+      playersRef.current = payload.players;
+      setPlayers(payload.players);
+      setUndoAction(null);
+      setToast('Backup assignment undone.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to undo the backup assignment.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
@@ -322,67 +165,140 @@ export default function CoverageScreen() {
                 <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
               </Pressable>
               <View style={styles.headerCopy}>
-                <Text style={styles.eyebrow}>ROSTER ANALYSIS</Text>
-                <Text style={styles.title}>{teamName ? `Position Analytics for ${teamName}` : 'Position Analytics'}</Text>
+                <Text style={styles.eyebrow}>WEEKLY PLANNING</Text>
+                <Text style={styles.title}>Roster Helper</Text>
+                {teamName && <Text style={styles.subtitle}>{teamName}</Text>}
               </View>
             </View>
 
-            <View style={styles.summaryCard}>
-              <View>
-                <Text style={styles.summaryEyebrow}>ACTIVE ROSTER</Text>
-                <Text style={styles.summaryTitle}>{players.length} players mapped</Text>
-                <Text style={styles.summaryDetail}>Position depth from primary, general, and backup assignments.</Text>
-              </View>
-              <View style={styles.summaryIcon}>
-                <SymbolView name="chart.bar" size={25} tintColor={palette.green} />
-              </View>
-            </View>
-
-            {(notices.playingTimeNotice || notices.positionCoverageNotice) && <View style={styles.noticeList}>
-              {notices.playingTimeNotice && <Text style={styles.noticeText}>{PLAYING_TIME_NOTICE}</Text>}
-              {notices.positionCoverageNotice && <Text style={styles.noticeText}>{POSITION_COVERAGE_NOTICE}</Text>}
-            </View>}
-
-            {formation && <OptimalRosterBuilder players={players} formation={formation} gameFormat={gameFormat} totalBlocks={totalBlocks} onChoosePlayer={(playerName) => router.push({ pathname: '/position-assignment', params: playerName ? { player: playerName } : {} })} />}
-
-            <Text style={styles.sectionTitle}>Player roles</Text>
-            {loading ? <Text style={styles.helperText}>Loading roster coverage...</Text> : error ? <Text style={styles.errorText}>{error}</Text> : (
-              <View>
-                {groupedPlayers.map((group) => (
-                  <View key={group.key} style={styles.roleGroupCard}>
-                    <Text style={styles.roleGroupHeader}>{group.label}</Text>
-                    {group.players.length === 0 ? <Text style={styles.noPlayersText}>No players assigned</Text> : (
-                      <View style={styles.rolePlayersGrid}>
-                        {group.players.map(({ player, positions, isBackup }) => (
-                          <View key={`${group.key}-${player.name}`} style={styles.playerTile}>
-                            <View style={styles.tileAvatar}><Text style={styles.tileAvatarText}>{player.name.charAt(0)}</Text></View>
-                            <View style={styles.tileNameRow}>
-                              <Text style={styles.tilePlayerName} numberOfLines={2}>{displayPlayerName(player.name)}</Text>
-                              {isBackup && <Text style={styles.backupBadge}>BACKUP</Text>}
-                            </View>
-                            <Text style={styles.tilePlayerDetail} numberOfLines={1}>{positions.join(' · ')}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
+            {error && <View style={styles.errorBanner}><Text style={styles.errorText}>{error}</Text></View>}
+            {loading ? <Text style={styles.loadingText}>Loading roster...</Text> : formation && (
+              <>
+                <View style={styles.card}>
+                  <View style={styles.cardHeading}>
+                    <View style={styles.cardIcon}><SymbolView name="checkmark.seal" size={21} tintColor={palette.green} /></View>
+                    <View style={styles.cardHeadingCopy}>
+                      <Text style={styles.cardTitle}>Roster Check</Text>
+                      <Text style={styles.cardSubtitle}>Based on {players.length} players in a {formation} formation</Text>
+                    </View>
                   </View>
-                ))}
+
+                  <View style={styles.checkRows}>
+                    {targets.map((item) => {
+                      const color = statusStyles[item.status];
+                      return (
+                        <View key={item.group} style={styles.checkRow}>
+                          <View style={styles.checkCopy}>
+                            <Text style={styles.checkLabel}>{item.label}</Text>
+                            <Text style={styles.checkTarget}>{item.count} <Text style={styles.targetDetail}>(target {item.minimum}-{item.maximum})</Text></Text>
+                          </View>
+                          <View style={[styles.statusPill, { backgroundColor: color.background }]}>
+                            <Text style={[styles.statusText, { color: color.text }]}>{statusCopy[item.status]}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  {missingGroupPlayers.length > 0 ? (
+                    <View style={styles.alertRow}>
+                      <View style={styles.alertCopy}>
+                        <Text style={styles.alertTitle}>{missingGroupPlayers.length} {missingGroupPlayers.length === 1 ? 'player needs' : 'players need'} a general group</Text>
+                        <Text style={styles.alertDetail}>{missingGroupPlayers.map((player) => player.name).join(', ')}</Text>
+                      </View>
+                      <Pressable onPress={() => router.push('/position-assignment')} style={styles.rosterButton} accessibilityRole="button">
+                        <Text style={styles.rosterButtonText}>Go to Roster</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <View style={styles.assignedBanner}>
+                      <Text style={styles.assignedText}>✓ All players assigned</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.card}>
+                  <View style={styles.cardHeading}>
+                    <View style={styles.cardIcon}><SymbolView name="person.2" size={21} tintColor={palette.green} /></View>
+                    <View style={styles.cardHeadingCopy}>
+                      <Text style={styles.cardTitle}>Backup Planner</Text>
+                      <Text style={styles.cardSubtitle}>Plan ahead for absences — no rotation simulation</Text>
+                    </View>
+                  </View>
+                  <View style={styles.totalBackups}>
+                    <Text style={styles.totalBackupsNumber}>{totalSuggestedBackups}</Text>
+                    <Text style={styles.totalBackupsCopy}>suggested backups across your {players.length}-player roster</Text>
+                  </View>
+                  <View style={styles.suggestionList}>
+                    {backupPlan.groups.map(({ group, range }) => {
+                      const candidates = backupSuggestions(players, group);
+                      const expanded = expandedGroup === group;
+                      const selected = selectedPlayers[group];
+                      return (
+                        <View key={group} style={styles.suggestionGroup}>
+                          <View style={styles.suggestionHeader}>
+                            <View style={styles.suggestionCopy}>
+                              <Text style={styles.suggestionTitle}>{groupCopy[group].label}</Text>
+                              <Text style={styles.suggestionDetail}>
+                                Suggest {range} backups (best from {groupCopy[group].source})
+                              </Text>
+                            </View>
+                            <Pressable
+                              onPress={() => {
+                                setExpandedGroup(expanded ? null : group);
+                                setSelectedPlayers({});
+                              }}
+                              style={[styles.suggestButton, expanded && styles.suggestButtonSelected]}
+                              accessibilityRole="button"
+                              accessibilityState={{ expanded }}>
+                              <Text style={[styles.suggestButtonText, expanded && styles.suggestButtonTextSelected]}>{expanded ? 'CLOSE' : 'SUGGEST'}</Text>
+                            </Pressable>
+                          </View>
+                          {expanded && (
+                            <View style={styles.candidateList}>
+                              {candidates.length === 0 ? (
+                                <Text style={styles.emptyCandidates}>No eligible players to suggest.</Text>
+                              ) : candidates.map((candidate) => {
+                                const isSelected = selected === candidate.name;
+                                return (
+                                  <View key={candidate.name} style={styles.candidateRow}>
+                                    <Pressable
+                                      onPress={() => setSelectedPlayers((current) => ({ ...current, [group]: candidate.name }))}
+                                      style={styles.candidateNameButton}
+                                      accessibilityRole="button"
+                                      accessibilityState={{ selected: isSelected }}>
+                                      <Text style={[styles.candidateName, isSelected && styles.candidateNameSelected]}>{candidate.name}</Text>
+                                      {candidate.group && <Text style={styles.candidateTier}>{candidate.group.replace('_', ' ')}</Text>}
+                                    </Pressable>
+                                    {isSelected && (
+                                      <Pressable
+                                        onPress={() => void addBackup(candidate.name, group)}
+                                        disabled={saving}
+                                        style={[styles.addButton, saving && styles.disabledButton]}
+                                        accessibilityRole="button">
+                                        <Text style={styles.addButtonText}>{saving ? 'SAVING...' : 'ADD'}</Text>
+                                      </Pressable>
+                                    )}
+                                  </View>
+                                );
+                              })}
+                              <Text style={styles.candidateHint}>Choose a player, then tap Add to append this backup assignment.</Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              </>
+            )}
+            {(toast || undoAction) && (
+              <View style={styles.toast}>
+                <Text style={styles.toastText}>{toast}</Text>
+                {undoAction && <Pressable onPress={() => void undoBackup()} disabled={saving} style={styles.undoButton} accessibilityRole="button"><Text style={styles.undoText}>UNDO</Text></Pressable>}
+                <Pressable onPress={() => { setToast(null); setUndoAction(null); }} style={styles.dismissButton} accessibilityLabel="Dismiss message"><Text style={styles.dismissText}>×</Text></Pressable>
               </View>
             )}
-            <View>
-              <Text style={styles.sectionTitle}>Player groups</Text>
-              <View style={styles.helpCard}>
-                <Text style={styles.helpHeading}>Rotational</Text>
-                <Text style={styles.helpText}>The normal group for most teams. Players in this group usually play roughly 50-60% of each game, and up to 70% when the roster is tight.</Text>
-                <Text style={styles.helpHeading}>Core</Text>
-                <Text style={styles.helpText}>Players who are noticeably stronger or more experienced, usually playing roughly 70-80% of each game.</Text>
-                <Text style={styles.helpHeading}>Developing</Text>
-                <Text style={styles.helpText}>New or still-learning players, usually playing roughly 40-50% of each game.</Text>
-                <Text style={styles.helpImportant}>Important: Groups describe the players on the team; they are not required team percentages. The app does not expect any particular number per group.</Text>
-                <Text style={styles.helpText}>As players improve over the season, you can move them between groups. These assignments are current, honest assessments, not permanent labels.</Text>
-                <Text style={styles.helpText}>Position Analytics may show a playing-time notice when the current assignments may make those normal targets difficult to reach.</Text>
-              </View>
-            </View>
           </ScrollView>
         </SafeAreaView>
       </View>
@@ -393,72 +309,66 @@ export default function CoverageScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
-  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24 },
-  header: { alignItems: 'center', flexDirection: 'row', marginBottom: 22 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: BottomTabInset + 24, gap: 14 },
+  header: { alignItems: 'center', flexDirection: 'row', marginBottom: 3 },
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
   headerCopy: { flex: 1, marginLeft: 13 },
   eyebrow: { color: palette.coral, fontSize: 10, fontWeight: '800', letterSpacing: 1.6 },
-    helpCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, padding: 15 },
-    helpHeading: { color: palette.green, fontSize: 13, fontWeight: '900', marginTop: 8 },
-    helpText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
-    helpImportant: { color: palette.ink, fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 14 },
-  title: { color: palette.ink, fontSize: 28, fontWeight: '800', marginTop: 4 },
-  summaryCard: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 18, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, padding: 17 },
-  summaryEyebrow: { color: palette.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
-  summaryTitle: { color: palette.ink, fontSize: 20, fontWeight: '800', marginTop: 4 },
-  summaryDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 4, maxWidth: 245 },
-  summaryIcon: { alignItems: 'center', backgroundColor: palette.panel, borderRadius: 14, height: 50, justifyContent: 'center', width: 50 },
-  noticeList: { backgroundColor: '#fff4d8', borderColor: palette.yellow, borderRadius: 14, borderWidth: 1, gap: 8, marginBottom: 24, padding: 14 },
-  noticeText: { color: palette.ink, fontSize: 12, lineHeight: 18 },
-  builderCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 24, padding: 15 },
-  builderTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
-  builderSubtitle: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 4 },
-  builderHint: { color: palette.muted, fontSize: 11, marginBottom: 8, marginTop: 4 },
-  builderFeasibility: { backgroundColor: '#fff4d8', borderColor: palette.yellow, borderRadius: 10, borderWidth: 1, marginBottom: 8, padding: 10 },
-  builderRecommendations: { backgroundColor: '#f7f4ed', borderRadius: 10, marginBottom: 8, padding: 10 },
-  builderRecommendationTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
-  builderRecommendation: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
-  builderCoverageGroup: { borderTopColor: palette.line, borderTopWidth: 1, marginTop: 8, paddingTop: 8 },
-  builderCandidateList: { marginTop: 2 },
-  builderCandidate: { color: palette.green, fontSize: 11, fontWeight: '800', lineHeight: 18 },
-  builderRosterButton: { alignSelf: 'flex-start', backgroundColor: palette.green, borderRadius: 8, marginTop: 10, paddingHorizontal: 10, paddingVertical: 7 },
-  builderRosterButtonText: { color: palette.panel, fontSize: 11, fontWeight: '800' },
-  builderRow: { borderTopColor: palette.line, borderTopWidth: 1, paddingVertical: 11 },
-  builderRowHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between' },
-  builderGroup: { color: palette.ink, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
-  builderCounts: { color: palette.muted, fontSize: 11 },
-  builderBarTrack: { backgroundColor: palette.greenSoft, borderRadius: 4, height: 7, marginTop: 8, overflow: 'hidden' },
-  builderBarFill: { backgroundColor: palette.green, borderRadius: 4, height: 7 },
-  builderNames: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  builderStatus: { color: palette.ink, fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 5 },
-  builderCritical: { color: '#8f3928' },
-  builderWarning: { color: '#795b08' },
-  builderGood: { color: palette.green },
-  sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800', marginBottom: 10 },
-  depthList: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 24, padding: 15 },
-  depthRow: { marginBottom: 18 },
-  depthLabel: { alignItems: 'center' },
-  positionName: { color: palette.green, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
-  recommendation: { color: palette.coral, fontSize: 9, fontWeight: '700', lineHeight: 12, marginTop: 3 },
-  recommendationMet: { color: palette.green },
-  coverageStatus: { color: palette.muted, fontSize: 9, fontWeight: '700', lineHeight: 12, marginTop: 3 },
-  depthGraphRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
-  depthBarTrack: { backgroundColor: '#edf0e9', borderRadius: 5, flex: 1, height: 9, overflow: 'hidden' },
-  depthBar: { backgroundColor: palette.coral, borderRadius: 5, height: 9, minWidth: 4 },
-  depthBarMet: { backgroundColor: palette.green },
-  depthCount: { color: palette.ink, fontSize: 16, fontWeight: '800', marginLeft: 12, textAlign: 'right', width: 22 },
-  depthCountMet: { color: palette.green },
-  roleGroupCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 12, overflow: 'hidden' },
-  roleGroupHeader: { backgroundColor: palette.greenSoft, color: palette.green, fontSize: 14, fontWeight: '900', letterSpacing: 1, paddingHorizontal: 13, paddingVertical: 12, textTransform: 'uppercase' },
-  rolePlayersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, padding: 10 },
-  playerTile: { alignItems: 'center', backgroundColor: '#f7f4ed', borderColor: palette.line, borderRadius: 10, borderWidth: 1, minHeight: 76, paddingHorizontal: 6, paddingVertical: 8, width: '31%' },
-  tileAvatar: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 14, height: 28, justifyContent: 'center', width: 28 },
-  tileAvatarText: { color: palette.green, fontSize: 12, fontWeight: '800' },
-  tilePlayerName: { color: palette.ink, fontSize: 11, fontWeight: '800', marginTop: 5, textAlign: 'center' },
-  tileNameRow: { alignItems: 'center', marginTop: 5, width: '100%' },
-  backupBadge: { color: palette.coral, fontSize: 8, fontWeight: '900', letterSpacing: 0.5, marginTop: 2 },
-  tilePlayerDetail: { color: palette.muted, fontSize: 9, marginTop: 3, textAlign: 'center' },
-  noPlayersText: { color: palette.muted, fontSize: 12, paddingHorizontal: 13, paddingVertical: 15 },
-  helperText: { color: palette.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
-  errorText: { color: palette.coral, fontSize: 12, lineHeight: 18, marginBottom: 16 },
+  title: { color: palette.ink, fontSize: 27, fontWeight: '800', marginTop: 3 },
+  subtitle: { color: palette.muted, fontSize: 12, marginTop: 2 },
+  card: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 18, borderWidth: 1, padding: 16 },
+  cardHeading: { alignItems: 'center', flexDirection: 'row', gap: 11, marginBottom: 16 },
+  cardIcon: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 12, height: 42, justifyContent: 'center', width: 42 },
+  cardHeadingCopy: { flex: 1 },
+  cardTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
+  cardSubtitle: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  checkRows: { borderTopColor: palette.line, borderTopWidth: 1 },
+  checkRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 58, paddingVertical: 9 },
+  checkCopy: { flex: 1 },
+  checkLabel: { color: palette.ink, fontSize: 14, fontWeight: '700' },
+  checkTarget: { color: palette.ink, fontSize: 14, fontWeight: '800', marginTop: 3 },
+  targetDetail: { color: palette.muted, fontSize: 12, fontWeight: '500' },
+  statusPill: { borderRadius: 10, marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  statusText: { fontSize: 11, fontWeight: '800' },
+  alertRow: { alignItems: 'center', backgroundColor: palette.redSoft, borderRadius: 12, flexDirection: 'row', gap: 8, marginTop: 12, padding: 11 },
+  alertCopy: { flex: 1 },
+  alertTitle: { color: palette.red, fontSize: 13, fontWeight: '800' },
+  alertDetail: { color: palette.red, fontSize: 11, marginTop: 3 },
+  rosterButton: { backgroundColor: palette.red, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 9 },
+  rosterButtonText: { color: '#fff', fontSize: 10, fontWeight: '900' },
+  assignedBanner: { backgroundColor: palette.greenSoft, borderRadius: 11, marginTop: 12, padding: 11 },
+  assignedText: { color: palette.green, fontSize: 13, fontWeight: '800' },
+  totalBackups: { alignItems: 'center', backgroundColor: '#f3f0e7', borderRadius: 13, flexDirection: 'row', gap: 11, marginBottom: 13, paddingHorizontal: 13, paddingVertical: 11 },
+  totalBackupsNumber: { color: palette.green, fontSize: 25, fontWeight: '900' },
+  totalBackupsCopy: { color: palette.muted, flex: 1, fontSize: 12, lineHeight: 17 },
+  suggestionList: { borderTopColor: palette.line, borderTopWidth: 1 },
+  suggestionGroup: { borderBottomColor: palette.line, borderBottomWidth: 1, paddingVertical: 12 },
+  suggestionHeader: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  suggestionCopy: { flex: 1 },
+  suggestionTitle: { color: palette.ink, fontSize: 14, fontWeight: '800' },
+  suggestionDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  suggestButton: { alignItems: 'center', backgroundColor: palette.green, borderRadius: 9, minWidth: 82, paddingHorizontal: 10, paddingVertical: 9 },
+  suggestButtonSelected: { backgroundColor: palette.greenSoft },
+  suggestButtonText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
+  suggestButtonTextSelected: { color: palette.green },
+  candidateList: { backgroundColor: '#f8f6ef', borderRadius: 11, marginTop: 10, paddingHorizontal: 10 },
+  candidateRow: { alignItems: 'center', borderBottomColor: palette.line, borderBottomWidth: 1, flexDirection: 'row', minHeight: 48 },
+  candidateNameButton: { alignItems: 'center', flex: 1, flexDirection: 'row', justifyContent: 'space-between', minHeight: 46, paddingRight: 8 },
+  candidateName: { color: palette.ink, flex: 1, fontSize: 13, fontWeight: '700' },
+  candidateNameSelected: { color: palette.green },
+  candidateTier: { color: palette.muted, fontSize: 10, marginLeft: 6, textTransform: 'capitalize' },
+  addButton: { backgroundColor: palette.green, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  addButtonText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
+  disabledButton: { opacity: 0.55 },
+  candidateHint: { color: palette.muted, fontSize: 11, lineHeight: 16, paddingBottom: 9, paddingTop: 8 },
+  emptyCandidates: { color: palette.muted, fontSize: 12, paddingVertical: 13 },
+  loadingText: { color: palette.muted, fontSize: 13, paddingVertical: 20 },
+  errorBanner: { backgroundColor: palette.redSoft, borderRadius: 11, padding: 11 },
+  errorText: { color: palette.red, fontSize: 12, lineHeight: 17 },
+  toast: { alignItems: 'center', backgroundColor: palette.ink, borderRadius: 12, flexDirection: 'row', gap: 12, paddingHorizontal: 13, paddingVertical: 11 },
+  toastText: { color: '#fff', flex: 1, fontSize: 12, fontWeight: '700' },
+  undoButton: { paddingHorizontal: 4, paddingVertical: 5 },
+  undoText: { color: '#b9e1c8', fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+  dismissButton: { paddingHorizontal: 3, paddingVertical: 1 },
+  dismissText: { color: '#fff', fontSize: 21, lineHeight: 22 },
 });

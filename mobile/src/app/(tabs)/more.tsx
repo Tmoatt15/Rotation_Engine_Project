@@ -8,7 +8,7 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
 
 const options = [
-  { icon: 'chart.bar', label: 'Position Analytics', detail: 'View position depth information', route: '/coverage' },
+  { icon: 'chart.bar', label: 'Roster Helper', detail: 'Check group targets and plan backups', route: '/coverage' },
   { icon: 'folder', label: 'Saved Teams', detail: 'Edit or delete saved team rosters', route: '/saved-teams' },
   { icon: 'calendar.badge.clock', label: 'Saved Schedules', detail: 'Open saved game schedules', route: '/saved-schedules' },
   { icon: 'doc.text', label: 'After-Game Reports', detail: 'Review completed game reports', route: '/saved-after-game-reports' },

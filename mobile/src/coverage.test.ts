@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateGroupCoverage } from './coverage-utils';
+import { appendBackupPosition, backupSuggestions, calculateBackupNeeds, calculateGroupCoverage, calculateRosterCheck, isMissingGeneralGroup } from './coverage-utils';
 import { formationPositionDisplayLines, formationPositionRows, rosterMatchesFormation } from './position-validation';
 import { calculatePlayingTimeNotices } from './playing-time-notices';
 
@@ -17,6 +17,71 @@ describe('position analytics coverage', () => {
       { name: 'Keeper', group: 'rotational_gk' as const, general_positions: ['GK'], primary_positions: ['GK'], backup_positions: [], excluded_positions: [] },
     ];
     expect(calculatePlayingTimeNotices(settings, players)).toEqual({ playingTimeNotice: false, positionCoverageNotice: false });
+  });
+
+  describe('roster helper', () => {
+    it('distributes backup suggestions by formation slots and rounds decimal needs to ranges', () => {
+      expect(calculateBackupNeeds('3-3-2', 13)).toEqual({
+        total: 7,
+        groups: [
+          { group: 'D', slots: 3, range: '2-3' },
+          { group: 'M', slots: 3, range: '2-3' },
+          { group: 'F', slots: 2, range: '1-2' },
+        ],
+      });
+    });
+
+    it('scales Roster Check targets by field roster size and formation slots', () => {
+      const players = [
+        ...Array.from({ length: 7 }, (_, index) => ({ name: `Defender ${index}`, general_positions: ['D'] })),
+        ...Array.from({ length: 5 }, (_, index) => ({ name: `Midfielder ${index}`, general_positions: ['M'] })),
+        ...Array.from({ length: 6 }, (_, index) => ({ name: `Forward ${index}`, general_positions: ['F'] })),
+        { name: 'Keeper 1', keeper_eligible: true, general_positions: ['GK'] },
+        { name: 'Keeper 2', keeper_eligible: true, general_positions: ['GK'] },
+        { name: 'Unassigned', general_positions: ['NONE'] },
+      ];
+
+      expect(calculateRosterCheck('4-3-3', players, true)).toEqual([
+        { group: 'D', label: 'Defenders', count: 7, minimum: 6, maximum: 8, status: 'in-range' },
+        { group: 'M', label: 'Midfielders', count: 5, minimum: 4, maximum: 6, status: 'in-range' },
+        { group: 'F', label: 'Forwards', count: 6, minimum: 4, maximum: 6, status: 'in-range' },
+        { group: 'GK', label: 'Goalies', count: 2, minimum: 2, maximum: 3, status: 'in-range' },
+      ]);
+    });
+
+    it('hides goalkeeper targets when the format has no keeper', () => {
+      const groups = calculateRosterCheck('1-2-1', [], false);
+      expect(groups.map((group) => group.group)).toEqual(['D', 'M', 'F']);
+    });
+
+    it('reports only field players missing a general group', () => {
+      expect(isMissingGeneralGroup({ name: 'No group', general_positions: ['NONE'] })).toBe(true);
+      expect(isMissingGeneralGroup({ name: 'Keeper', keeper_eligible: true, general_positions: ['NONE'] })).toBe(false);
+      expect(isMissingGeneralGroup({ name: 'Midfielder', general_positions: ['M'] })).toBe(false);
+    });
+
+    it('ranks eligible backup suggestions in the specified order', () => {
+      const players = [
+        { name: 'Zed Midfield', group: 'rotational' as const, general_positions: ['M'] },
+        { name: 'Beth Midfield', group: 'developing' as const, general_positions: ['M'] },
+        { name: 'Amy Midfield', group: 'rotational' as const, general_positions: ['M'], backup_positions: ['D'] },
+        { name: 'Dana Defense', group: 'rotational' as const, general_positions: ['D'] },
+        { name: 'Excluded Midfield', group: 'rotational' as const, general_positions: ['M'], excluded_positions: ['F'] },
+        { name: 'Already Forward', group: 'rotational' as const, general_positions: ['F'] },
+        { name: 'Primary Striker', group: 'rotational' as const, general_positions: ['F'], primary_positions: ['ST'] },
+        { name: 'Excluded Striker', group: 'rotational' as const, general_positions: ['M'], excluded_positions: ['ST'] },
+        { name: 'Unassigned Midfield', group: 'rotational' as const, general_positions: ['NONE'] },
+      ];
+
+      expect(backupSuggestions(players, 'F').map((player) => player.name))
+        .toEqual(['Zed Midfield', 'Amy Midfield', 'Beth Midfield', 'Dana Defense']);
+    });
+
+    it('appends a backup without replacing existing assignments', () => {
+      const player = { name: 'Alex', general_positions: ['M'], backup_positions: ['D'] };
+      expect(appendBackupPosition(player, 'F').backup_positions).toEqual(['D', 'F']);
+      expect(appendBackupPosition(player, 'D')).toBe(player);
+    });
   });
 
   it('allows a feasible top-heavy roster without a playing-time notice', () => {
