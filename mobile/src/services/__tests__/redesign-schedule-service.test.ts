@@ -197,12 +197,16 @@ describe('redesign schedule service', () => {
         name: 'RedesignOfferError',
         offer: {
           kind: 'position-shortage',
-          message: expect.stringMatching(/Warning: Defender group \(D\) is short \d+ players\. Add a D backup to a player\./),
+          message: expect.stringMatching(/^Warning: Defender group \(D\) is short \d+ players\. Add a D backup to a player\.\n\nWarning: Midfield group \(M\) is short \d+ players\. Add an M backup to a player\.\n\nWarning: Forward group \(F\) is short \d+ players\. Add an F backup to a player\.$/),
           buttons: [
             { label: 'SUGGEST', action: 'suggest-backup' },
             { label: 'Cancel', action: 'cancel' },
           ],
-          context: expect.objectContaining({ failureType: 'waterfill-underfill', positionGroup: 'D' }),
+          context: expect.objectContaining({
+            failureType: 'waterfill-underfill',
+            positionGroup: 'D',
+            positionGroupWarning: expect.stringMatching(/^Warning: Defender group \(D\) is short \d+ players\. Add a D backup to a player\.$/),
+          }),
         },
       });
     expect(mocks.replanLateArrival).toHaveBeenCalledOnce();

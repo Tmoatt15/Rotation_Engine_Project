@@ -144,6 +144,9 @@ export default function GamedayBackupSuggestScreen() {
       if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'position-shortage') {
         const offer = generationError.offer;
         const nextGroup = offer.context.positionGroup;
+        const nextGroupWarning = typeof offer.context.positionGroupWarning === 'string'
+          ? offer.context.positionGroupWarning
+          : offer.message;
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
@@ -162,7 +165,7 @@ export default function GamedayBackupSuggestScreen() {
                   availablePlayerNames: JSON.stringify(request.availablePlayerNames),
                   firstHalfGk: request.firstHalfGk ?? '',
                   secondHalfGk: request.secondHalfGk ?? '',
-                  warning: offer.message,
+                  warning: nextGroupWarning,
                 },
               });
             }

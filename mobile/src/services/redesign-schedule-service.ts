@@ -37,7 +37,11 @@ function backupSuggestionOffer(
     kind: 'position-shortage',
     message: suggestions.join('\n\n'),
     buttons: [{ label: 'SUGGEST', action: 'suggest-backup' }, { label: 'Cancel', action: 'cancel' }],
-    context: { ...context, positionGroup: groups[0]?.group },
+    context: {
+      ...context,
+      positionGroup: groups[0]?.group,
+      positionGroupWarning: suggestions[0],
+    },
   };
 }
 

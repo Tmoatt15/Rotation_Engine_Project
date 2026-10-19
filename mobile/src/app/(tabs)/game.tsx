@@ -242,6 +242,9 @@ export default function GameScreen() {
       if (requestError instanceof RedesignOfferError) {
         const offer = requestError.offer;
         const positionGroup = typeof offer.context.positionGroup === 'string' ? offer.context.positionGroup : null;
+        const positionGroupWarning = typeof offer.context.positionGroupWarning === 'string'
+          ? offer.context.positionGroupWarning
+          : offer.message;
         const keeperNames = Array.isArray(offer.context.keeperNames) ? offer.context.keeperNames.filter((value): value is string => typeof value === 'string') : [];
         const availablePlayerNames = playerNames.filter((name) => !unavailable.has(name));
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
@@ -262,7 +265,7 @@ export default function GameScreen() {
                   availablePlayerNames: JSON.stringify(availablePlayerNames),
                   firstHalfGk: selectedFirstHalfGK ?? '',
                   secondHalfGk: selectedSecondHalfGK ?? '',
-                  warning: offer.message,
+                  warning: positionGroupWarning,
                 },
               });
             }
