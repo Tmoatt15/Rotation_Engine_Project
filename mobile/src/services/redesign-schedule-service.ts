@@ -20,23 +20,77 @@ export class RedesignOfferError extends Error {
   }
 }
 
-function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>): void {
+type FieldGroup = 'D' | 'M' | 'F';
+
+function fieldGroupName(group: FieldGroup): string {
+  return group === 'D' ? 'Defender' : group === 'M' ? 'Midfield' : 'Forward';
+}
+
+function backupSuggestionOffer(
+  groups: { group: FieldGroup; count: number }[],
+  context: Record<string, unknown>,
+): Stage6Offer {
+  const suggestions = groups.map(({ group, count }) =>
+    `Warning: ${fieldGroupName(group)} group (${group}) is short ${count} ${count === 1 ? 'player' : 'players'}. Add ${group === 'D' ? 'a' : 'an'} ${group} backup to a player.`,
+  );
+  return {
+    kind: 'position-shortage',
+    message: suggestions.join('\n\n'),
+    buttons: [{ label: 'SUGGEST', action: 'suggest-backup' }, { label: 'Cancel', action: 'cancel' }],
+    context: { ...context, positionGroup: groups[0]?.group },
+  };
+}
+
+function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>, totalBlocks: number): void {
   if (!quotas.audit.errors?.length) return;
   const rosterTooLarge = quotas.audit.rosterTooLarge;
+  const auditErrors = quotas.audit.errors ?? [];
+  if (!rosterTooLarge && quotas.audit.underfill.length) {
+    const underfill = quotas.audit.underfill.map(({ group, blocks }) => ({
+      group,
+      count: Math.max(1, Math.ceil(blocks / totalBlocks)),
+    }));
+    throw new RedesignOfferError(backupSuggestionOffer(underfill, {
+      failureType: 'waterfill-underfill',
+      errors: quotas.audit.errors,
+      underfill: quotas.audit.underfill,
+    }));
+  }
+  if (!rosterTooLarge && quotas.audit.overage.length) {
+    const suggestions = quotas.audit.overage.map(({ group, blocks }) => {
+      const error = auditErrors.find((entry) => entry.includes(`group (${group}) is over by`));
+      const destination = error?.match(/Add ([DMF]) backup/)?.[1] as FieldGroup | undefined;
+      return {
+        group: destination ?? group,
+        count: Math.max(1, Math.ceil(blocks / totalBlocks)),
+      };
+    });
+    throw new RedesignOfferError(backupSuggestionOffer(suggestions, {
+      failureType: 'waterfill-overage',
+      errors: quotas.audit.errors,
+      overage: quotas.audit.overage,
+    }));
+  }
+  if (rosterTooLarge) {
+    throw new RedesignOfferError({
+      kind: 'position-shortage',
+      message: `Too many field players for this roster. The current formation supports a maximum of ${rosterTooLarge.maxPlayers} field players at the minimum playing-time floor.`,
+      buttons: [{ label: 'Cancel', action: 'cancel' }],
+      context: {
+        failureType: 'roster-too-large',
+        maxPlayers: rosterTooLarge.maxPlayers,
+        errors: quotas.audit.errors,
+        underfill: quotas.audit.underfill,
+        overage: quotas.audit.overage,
+      },
+    });
+  }
   throw new RedesignOfferError({
     kind: 'position-shortage',
-    message: rosterTooLarge
-      ? `Too many field players for this roster. The current formation supports a maximum of ${rosterTooLarge.maxPlayers} field players at the minimum playing-time floor.`
-      : quotas.audit.errors.join('\n\n'),
-    buttons: rosterTooLarge
-      ? [{ label: 'Cancel', action: 'cancel' }]
-      : [
-        { label: 'Add Backup Positions', action: 'go-to-builder' },
-        { label: 'Cancel', action: 'cancel' },
-      ],
+    message: 'The roster groups need more flexibility before a schedule can be generated.',
+    buttons: [{ label: 'Cancel', action: 'cancel' }],
     context: {
-      failureType: rosterTooLarge ? 'roster-too-large' : quotas.audit.underfill.length ? 'waterfill-underfill' : 'waterfill-overage',
-      maxPlayers: rosterTooLarge?.maxPlayers,
+      failureType: 'waterfill-audit',
       errors: quotas.audit.errors,
       underfill: quotas.audit.underfill,
       overage: quotas.audit.overage,
@@ -103,7 +157,7 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   const groups = ['D', 'M', 'F'] as const;
   const feasibilityIssue = checkRosterFeasibility(game, demand);
   const quotas = assignQuotas(game, demand).quotas;
-  const groupLabel = (group: typeof groups[number]): string => group === 'D' ? 'defenders' : group === 'M' ? 'midfielders' : 'forwards';
+  const groupSlots = (group: FieldGroup) => demand.fieldSlots.filter((slot) => slot.group === group).length;
   const minimumForPlayer = (player: typeof game.players[number]): number => {
     const percentage = player.group === 'core' ? 0.7 : player.group === 'rotational' ? 0.6 : 0.5;
     return Math.max(0, Math.min(game.totalBlocks, Math.round(game.totalBlocks * percentage)));
@@ -114,33 +168,22 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   const fieldPlayers = game.players.filter((player) => player.available && !player.keeper);
   const totalMinimum = fieldPlayers.reduce((total, player) => total + minimumForPlayer(player), 0);
   if (totalMinimum > demand.fieldSlots.length * game.totalBlocks && !allowRelaxedMinimums) {
-    let remainingReduction = totalMinimum - demand.fieldSlots.length * game.totalBlocks;
-    const reductions: string[] = [];
-    for (const group of ['developing', 'rotational', 'core'] as const) {
-      const groupPlayers = fieldPlayers.filter((player) => player.group === group);
-      const groupMinimum = groupPlayers.reduce((total, player) => total + minimumForPlayer(player), 0);
-      const reduction = Math.min(remainingReduction, groupMinimum);
-      if (reduction > 0 && groupPlayers.length) {
-        const perPlayer = Math.ceil(reduction / groupPlayers.length);
-        const label = group === 'core' ? 'core' : group === 'rotational' ? 'rotational' : 'developing';
-        reductions.push(`${Math.min(groupPlayers.length, reduction)} ${label} players: ${minimumForPlayer(groupPlayers[0])} blocks → ${Math.max(0, minimumForPlayer(groupPlayers[0]) - perPlayer)} blocks`);
-        remainingReduction -= reduction;
-      }
-      if (!remainingReduction) break;
-    }
-    return {
-      kind: 'position-shortage',
-      message: `Can't fit everyone's minimum playing time.\n\nTo generate a schedule for ${game.players.length} players, these minimums would need to be reduced:\n- ${reductions.join('\n- ')}\n\nOr add backup positions to increase the roster's flexibility.`,
-      buttons: [{ label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
-      context: { failureType: 'total-minimums' },
-    };
+    const targetGroup = groups.filter((group) => groupSlots(group) > 0)
+      .sort((left, right) => (eligibleCounts[left] - groupSlots(left)) - (eligibleCounts[right] - groupSlots(right))
+        || groups.indexOf(left) - groups.indexOf(right))[0] ?? 'M';
+    const shortPlayers = Math.max(1, Math.ceil((totalMinimum - demand.fieldSlots.length * game.totalBlocks) / game.totalBlocks));
+    return backupSuggestionOffer([{ group: targetGroup, count: shortPlayers }], {
+      failureType: 'total-minimums',
+      totalMinimum,
+      totalCapacity: demand.fieldSlots.length * game.totalBlocks,
+    });
   }
   const endpointPinned = (player: typeof game.players[number]): number => {
     if (player.group !== 'core' || !player.available) return 0;
     const hasBlockOnePin = game.pins.some((pin) => pin.block === 1 && pin.player === player.name);
     return game.lateArrival?.player === player.name || (!hasBlockOnePin && game.pins.length > 0) ? 1 : 2;
   };
-  const diagnoses: { group: typeof groups[number]; names: string[]; target: string }[] = [];
+  const diagnoses: { group: typeof groups[number]; names: string[]; target: FieldGroup }[] = [];
   for (const group of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
     const singleGroupPlayers = playersForGroup(group).filter((player) => groups.filter((candidate) => playersForGroup(candidate).some((eligible) => eligible.name === player.name)).length === 1);
@@ -161,18 +204,20 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
       .filter((candidate) => candidate !== group)
       .sort((left, right) => (eligibleCounts[right] - demand.fieldSlots.filter((slot) => slot.group === right).length)
         - (eligibleCounts[left] - demand.fieldSlots.filter((slot) => slot.group === left).length))[0];
-    const targetLabel = targetGroup === 'D' ? 'defense' : targetGroup === 'M' ? 'midfield' : 'forward';
-    diagnoses.push({ group, names: crossTraining.map((player) => player.name), target: targetLabel });
+    diagnoses.push({ group, names: crossTraining.map((player) => player.name), target: targetGroup });
   }
   if (diagnoses.length) {
-    const message = diagnoses.map(({ group, names, target }) =>
-      `Your ${groupLabel(group)} are overloaded — too many can only play ${groupLabel(group).replace(/s$/, '')}.\n\nTo fix: give a ${target} backup to ${names.length} of these players:\n${names.join(', ')}.`).join('\n\n');
-    return {
-      kind: 'position-shortage',
-      message,
-      buttons: [{ label: 'Add Backup Positions', action: 'go-to-builder' }, { label: 'Cancel', action: 'cancel' }],
-      context: { failureType: 'position-shortage', positionGroup: diagnoses[0].group, suggestions: diagnoses.flatMap(({ names }) => names) },
-    };
+    const namesByTarget = new Map<FieldGroup, Set<string>>();
+    diagnoses.forEach(({ names, target }) => {
+      const targetNames = namesByTarget.get(target) ?? new Set<string>();
+      names.forEach((name) => targetNames.add(name));
+      namesByTarget.set(target, targetNames);
+    });
+    const suggestions = [...namesByTarget].map(([group, names]) => ({ group, count: names.size }));
+    return backupSuggestionOffer(suggestions, {
+      failureType: 'position-shortage',
+      suggestions: diagnoses.flatMap(({ names }) => names),
+    });
   }
   const shortages = groups.map((group) => {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
@@ -182,22 +227,14 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
   }).filter((entry) => entry.have < entry.need).sort((left, right) => left.have - left.need - (right.have - right.need));
   const shortage = shortages[0];
   if (shortage) {
-    const slots = demand.fieldSlots.filter((slot) => slot.group === shortage.group);
-    const suggestions = game.players
-      .filter((player) => player.available && !player.keeper && !slots.some((slot) => positionTier(player, slot.slot) > 0))
-      .sort((left, right) => (left.backupPositions.length ? 1 : 0) - (right.backupPositions.length ? 1 : 0)
-        || left.name.localeCompare(right.name))
-      .slice(0, 3)
-      .map((player) => player.name);
-    const label = groupLabel(shortage.group);
-    return {
-      kind: 'position-shortage',
-      message: `You need ${Math.max(1, shortage.need - shortage.have)} more ${label}.\n\nYour roster doesn't have enough players who can play ${label.slice(0, -1)} to cover the formation.`,
-      buttons: suggestions.length
-        ? suggestions.map((player) => ({ label: `Add ${label.slice(0, -1)} backup for ${player}`, action: 'choose-player' as const }))
-        : [{ label: 'Go to Roster', action: 'go-to-roster' as const }],
-      context: { failureType: 'position-shortage', positionGroup: shortage.group, have: shortage.have, need: shortage.need, suggestions },
-    };
+    return backupSuggestionOffer([{
+      group: shortage.group,
+      count: Math.max(1, shortage.need - shortage.have),
+    }], {
+      failureType: 'position-shortage',
+      have: shortage.have,
+      need: shortage.need,
+    });
   }
   for (const group of groups) {
     const slots = demand.fieldSlots.filter((slot) => slot.group === group);
@@ -206,29 +243,21 @@ function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: 
     const capacityHave = eligible.reduce((total, player) => total + (quotas.find((quota) => quota.player === player.name)?.fieldMax ?? 0), 0);
     const capacityNeed = slots.length * game.totalBlocks;
     if (capacityHave >= capacityNeed) continue;
-    const suggestions = game.players
-      .filter((player) => player.available && !player.keeper && !slots.some((slot) => positionTier(player, slot.slot) > 0))
-      .sort((left, right) => (left.backupPositions.length ? 1 : 0) - (right.backupPositions.length ? 1 : 0)
-        || left.name.localeCompare(right.name))
-      .slice(0, 3)
-      .map((player) => player.name);
-    const label = groupLabel(group);
-    return {
-      kind: 'position-shortage',
-      message: `You need ${Math.max(1, slots.length - eligible.length)} more ${label}.\n\nYour roster doesn't have enough players who can play ${label.slice(0, -1)} to cover the formation.`,
-      buttons: suggestions.length
-        ? suggestions.map((player) => ({ label: `Add ${label.slice(0, -1)} backup for ${player}`, action: 'choose-player' as const }))
-        : [{ label: 'Go to Roster', action: 'go-to-roster' as const }],
-      context: { failureType: 'position-shortage', positionGroup: group, have: eligible.length, need: slots.length, capacityHave, capacityNeed, suggestions },
-    };
+    return backupSuggestionOffer([{
+      group,
+      count: Math.max(1, Math.ceil((capacityNeed - capacityHave) / game.totalBlocks)),
+    }], {
+      failureType: 'position-shortage',
+      have: eligible.length,
+      need: slots.length,
+      capacityHave,
+      capacityNeed,
+    });
   }
   return {
     kind: 'impossible',
-    message: feasibilityIssue?.message ?? 'Can\'t generate a schedule with the current roster setup.\n\nThis is unexpected — the roster looks complete. Try adding more backup flexibility, or generate with relaxed minimums.',
-    buttons: [
-      { label: 'Add Backup Positions', action: 'go-to-builder' },
-      { label: 'Cancel', action: 'cancel' },
-    ],
+    message: feasibilityIssue?.message ?? 'Can\'t generate a schedule with the current roster setup. Review position assignments and try again.',
+    buttons: [{ label: 'Cancel', action: 'cancel' }],
     context: { failureType: 'impossible', feasibility: feasibilityIssue },
   };
 }
@@ -324,7 +353,7 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   let quotas: ReturnType<typeof assignQuotas>;
   if (input.allowRelaxedMinimums) {
     ({ placement, quotas } = placementAttempt(game, demand, true));
-    throwForQuotaAuditErrors(quotas);
+    throwForQuotaAuditErrors(quotas, game.totalBlocks);
     if (!placement.complete) {
       throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
     }
@@ -336,11 +365,11 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     } else if (!relaxed.quotas.audit.errors?.length && relaxed.placement.complete) {
       throw new RedesignOfferError(offerForRelaxedMinimums(relaxed.quotas));
     } else {
-      throwForQuotaAuditErrors(relaxed.quotas);
+      throwForQuotaAuditErrors(relaxed.quotas, game.totalBlocks);
       throw new RedesignOfferError(placementFailureOffer(game, demand, relaxed.placement));
     }
   }
-  throwForQuotaAuditErrors(quotas);
+  throwForQuotaAuditErrors(quotas, game.totalBlocks);
   if (!placement.complete) {
     const placementErrors = placement.audit.errors ?? [];
     console.error('[redesign] placement failed:', placementErrors);
@@ -372,7 +401,7 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
   const frozen: FrozenBlock[] = input.previousSchedule.blocks.slice(0, input.startBlock - 1).map((block, index) => ({ block: index + 1, assignments: new Map(Object.entries(block.positions).filter(([slot]) => slot !== 'GK')) }));
   const result = replanLateArrival({ game, demand, quotas, frozen, arrivalTarget: input.targetBlocks });
   if (result.kind !== 'success') throw new RedesignOfferError(offerForFailure(result.failure));
-  throwForQuotaAuditErrors(quotas);
+  throwForQuotaAuditErrors(quotas, game.totalBlocks);
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
   const blockLengths = new SeasonSetup({ ...(base.settings), block_length_minutes: undefined }).block_lengths_minutes;
   return {

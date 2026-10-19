@@ -18,6 +18,7 @@ export default function RootLayout() {
         <Stack.Screen name="team-edit" options={{ headerShown: false }} />
         <Stack.Screen name="position-assignment" options={{ headerShown: false }} />
         <Stack.Screen name="coverage" options={{ headerShown: false }} />
+        <Stack.Screen name="gameday-backup-suggest" options={{ headerShown: false }} />
         <Stack.Screen name="schedule" options={{ headerShown: false }} />
         <Stack.Screen name="saved-schedules" options={{ headerShown: false }} />
         <Stack.Screen name="after-game" options={{ headerShown: false }} />

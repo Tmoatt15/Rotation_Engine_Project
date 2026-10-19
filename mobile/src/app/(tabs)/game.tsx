@@ -11,7 +11,7 @@ import { positionCapacityCandidates, positionCapacityDeficits, positionCapacityW
 import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
-import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings, updateRoster } from '@/services/team-service';
+import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
 
@@ -233,34 +233,39 @@ export default function GameScreen() {
     setLoading(true);
     setError(null);
     setShowGameNumberConfirmation(false);
+    let activeTeamId = teamId;
     try {
-      const activeTeamId = teamId ?? await getActiveTeamId();
+      activeTeamId = activeTeamId ?? await getActiveTeamId();
       const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK, allowRelaxedMinimums });
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
       if (requestError instanceof RedesignOfferError) {
         const offer = requestError.offer;
-        const suggestions = Array.isArray(offer.context.suggestions) ? offer.context.suggestions.filter((value): value is string => typeof value === 'string') : [];
         const positionGroup = typeof offer.context.positionGroup === 'string' ? offer.context.positionGroup : null;
-        const backupLabel = positionGroup === 'D' ? 'D' : positionGroup === 'M' ? 'M' : 'F';
         const keeperNames = Array.isArray(offer.context.keeperNames) ? offer.context.keeperNames.filter((value): value is string => typeof value === 'string') : [];
-        const applyBackupAndRegenerate = async (playerName: string) => {
-          if (!positionGroup) return;
-          const activeTeamId = teamId ?? await getActiveTeamId();
-          const roster = await getRoster(activeTeamId);
-          const updated = roster.players.map((player) => player.name === playerName
-            ? { ...player, backup_positions: [...new Set([...(player.backup_positions ?? []), backupLabel])] }
-            : player);
-          await updateRoster(activeTeamId, updated);
-          setRosterPlayers(updated as RosterPlayer[]);
-          await generateSchedule();
-        };
-        Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button, index) => ({
+        const availablePlayerNames = playerNames.filter((name) => !unavailable.has(name));
+        Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
-            if (button.action === 'choose-player' && suggestions[index]) void applyBackupAndRegenerate(suggestions[index]);
-            else if (button.action === 'go-to-builder') router.navigate('/coverage');
+            if (button.action === 'suggest-backup' || button.action === 'go-to-builder' || button.action === 'choose-player') {
+              if (!positionGroup || !['D', 'M', 'F'].includes(positionGroup) || !activeTeamId) {
+                setError('Backup suggestions are not available for this schedule issue.');
+                return;
+              }
+              router.push({
+                pathname: '/gameday-backup-suggest',
+                params: {
+                  group: positionGroup,
+                  teamId: activeTeamId,
+                  gameNumber: String(confirmedGameNumber),
+                  availablePlayerNames: JSON.stringify(availablePlayerNames),
+                  firstHalfGk: selectedFirstHalfGK ?? '',
+                  secondHalfGk: selectedSecondHalfGK ?? '',
+                  warning: offer.message,
+                },
+              });
+            }
             else if (button.action === 'allow-relaxed') void generateSchedule(undefined, true);
             else if (button.action === 'go-to-roster' || button.action === 'assign-backup-position' || button.action === 'pick-keeper') router.navigate('/position-assignment');
             else if (button.action === 'full-game-keeper' && keeperNames[0]) {
