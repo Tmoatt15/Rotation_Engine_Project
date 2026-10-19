@@ -133,11 +133,12 @@ export default function GamedayBackupSuggestScreen() {
     [availableNames, group, players],
   );
 
-  async function generateAfterBackup(request: ScheduleRequest, allowRelaxedMinimums = false) {
+  async function generateAfterBackup(request: ScheduleRequest, allowRelaxedMinimums = false, allowRelaxedMaximums = false) {
     try {
       const schedule = await generateLocalSchedule({
         ...request,
         allowRelaxedMinimums,
+        allowRelaxedMaximums,
       });
       router.replace({ pathname: '/schedule', params: { data: JSON.stringify(schedule) } });
     } catch (generationError) {
@@ -179,6 +180,39 @@ export default function GamedayBackupSuggestScreen() {
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
             if (button.action === 'allow-relaxed') void generateAfterBackup(request, true);
+          },
+        })));
+        return;
+      }
+      if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'relaxed-maximums') {
+        const offer = generationError.offer;
+        const nextGroup = offer.context.positionGroup;
+        const nextGroupWarning = typeof offer.context.positionGroupWarning === 'string'
+          ? offer.context.positionGroupWarning
+          : offer.message;
+        Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
+          text: button.label,
+          style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
+          onPress: () => {
+            if (button.action === 'allow-relaxed-maximums') void generateAfterBackup(request, true, true);
+            else if (button.action === 'suggest-backup') {
+              if (!isFieldGroup(nextGroup)) {
+                Alert.alert('Backup suggestions unavailable', 'The schedule warning did not include a valid position group.');
+                return;
+              }
+              router.push({
+                pathname: '/gameday-backup-suggest',
+                params: {
+                  group: nextGroup,
+                  teamId: request.teamId,
+                  gameNumber: String(request.gameNumber),
+                  availablePlayerNames: JSON.stringify(request.availablePlayerNames),
+                  firstHalfGk: request.firstHalfGk ?? '',
+                  secondHalfGk: request.secondHalfGk ?? '',
+                  warning: nextGroupWarning,
+                },
+              });
+            }
           },
         })));
         return;

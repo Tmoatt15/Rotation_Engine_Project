@@ -75,6 +75,7 @@ interface WaterfillPlayer {
   hardFloor: number;
   floor: number;
   bandFloor: number;
+  bandMaximum: number;
   maximum: number;
   pinnedBlocks: number[];
   pinnedByGroup: Record<FieldGroup, number>;
@@ -166,6 +167,7 @@ function buildWaterfillQuotaAttempt(
   game: NormalizedGame,
   demand: DemandModel,
   floorOverrides: ReadonlyMap<string, number>,
+  allowRelaxedMaximums: boolean,
 ): QuotaAssignment {
   const available = game.players.filter((player) => player.available);
   const fieldPlayers = available.filter((player) => !isDedicatedKeeper(player.keeper, player.generalPositions));
@@ -200,9 +202,12 @@ function buildWaterfillQuotaAttempt(
     const start = Math.max(pinData.blocks.length, lateTarget ?? (isSelectedKeeper
       ? keeperFieldMax
       : percentageBlocks(game.totalBlocks, BANDS[player.group].min, 0)));
-    const maximum = Math.max(start, lateTarget ?? (isSelectedKeeper
+    const bandMaximum = Math.max(start, lateTarget ?? (isSelectedKeeper
       ? keeperFieldMax
       : maximumBlocks(game.totalBlocks, BANDS[player.group].max)));
+    const maximum = allowRelaxedMaximums
+      ? Math.max(start, maximumFieldBlocks(game, player, demand))
+      : bandMaximum;
     info.set(player.name, {
       player,
       primaryGroup: group,
@@ -211,6 +216,7 @@ function buildWaterfillQuotaAttempt(
       hardFloor,
       floor,
       bandFloor: Math.max(pinData.blocks.length, bandFloor),
+      bandMaximum,
       maximum,
       pinnedBlocks: pinData.blocks,
       pinnedByGroup: pinData.counts,
@@ -231,7 +237,7 @@ function buildWaterfillQuotaAttempt(
   const minimumFieldBlocks = [...info.values()].reduce((sum, candidate) => sum + candidate.floor, 0);
   const totalFieldSlots = FIELD_GROUPS.reduce((sum, group) => sum + (slots.get(group) ?? 0), 0);
   const maximumCapacityShortfall = Math.max(0, totalFieldSlots
-    - [...info.values()].reduce((sum, candidate) => sum + candidate.maximum, 0));
+    - [...info.values()].reduce((sum, candidate) => sum + candidate.bandMaximum, 0));
   if (minimumFieldBlocks > totalFieldSlots) {
     const maximumPlayers = Math.floor(totalFieldSlots / nonKeeperFieldFloor(game.totalBlocks));
     rosterTooLarge = { maxPlayers: maximumPlayers };
@@ -619,6 +625,14 @@ function buildWaterfillQuotaAttempt(
     .filter(([, amount]) => amount > 0)
     .map(([group, amount]) => ({ group, amount }));
 
+  const relaxedMaximums = [...info.values()]
+    .flatMap((candidate) => {
+      const after = playerTotal(candidate.player.name);
+      return after > candidate.bandMaximum
+        ? [{ player: candidate.player.name, group: candidate.player.group, before: candidate.bandMaximum, after }]
+        : [];
+    });
+
   return {
     quotas,
     audit: {
@@ -627,6 +641,7 @@ function buildWaterfillQuotaAttempt(
       surplusAssignments,
       unfillableWithinMax: underfill.reduce((sum, entry) => sum + entry.blocks, 0),
       maximumCapacityShortfall,
+      relaxedMaximums,
       underfill,
       overage: overages,
       rosterTooLarge,
@@ -639,9 +654,14 @@ function buildWaterfillQuotaAttempt(
   };
 }
 
-function buildWaterfillQuotas(game: NormalizedGame, demand: DemandModel, allowRelaxedMinimums = false): QuotaAssignment {
+function buildWaterfillQuotas(
+  game: NormalizedGame,
+  demand: DemandModel,
+  allowRelaxedMinimums = false,
+  allowRelaxedMaximums = false,
+): QuotaAssignment {
   const floorOverrides = new Map<string, number>();
-  let assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides);
+  let assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides, allowRelaxedMaximums);
   if (!allowRelaxedMinimums) return assignment;
 
   const tierOrder: Record<RedesignGroup, number> = { developing: 0, rotational: 1, core: 2 };
@@ -663,7 +683,7 @@ function buildWaterfillQuotas(game: NormalizedGame, demand: DemandModel, allowRe
       changed = true;
     }
     if (!changed) break;
-    assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides);
+    assignment = buildWaterfillQuotaAttempt(game, demand, floorOverrides, allowRelaxedMaximums);
   }
   return assignment;
 }
@@ -672,8 +692,9 @@ export function assignQuotas(
   game: NormalizedGame,
   demand: DemandModel,
   allowRelaxedMinimums = false,
+  allowRelaxedMaximums = false,
 ): QuotaAssignment {
-  return buildWaterfillQuotas(game, demand, allowRelaxedMinimums);
+  return buildWaterfillQuotas(game, demand, allowRelaxedMinimums, allowRelaxedMaximums);
 }
 
 export { BANDS, maximumBlocks, percentageBlocks };

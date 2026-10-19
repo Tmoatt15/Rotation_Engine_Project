@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { assignQuotas, buildDemandModel, normalizeGame } from '..';
+import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '..';
 import type { FieldGroup, RedesignGameInput, RedesignPlayerInput } from '../model';
 
 const chelseaRoster: RedesignPlayerInput[] = [
@@ -157,8 +157,7 @@ describe('Stage 2 per-group water-fill', () => {
     const availablePlayerNames = chelseaRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
-    const quotasForRoster = (roster: RedesignPlayerInput[]) => {
-      const game = normalizeGame({
+    const gameForRoster = (roster: RedesignPlayerInput[]) => normalizeGame({
         format: '9v9',
         formation: '3-3-2',
         totalBlocks: 8,
@@ -166,6 +165,8 @@ describe('Stage 2 per-group water-fill', () => {
         secondHalfKeeper: 'Maddie',
         availablePlayerNames,
       }, roster);
+    const quotasForRoster = (roster: RedesignPlayerInput[]) => {
+      const game = gameForRoster(roster);
       return assignQuotas(game, buildDemandModel(game));
     };
 
@@ -180,6 +181,18 @@ describe('Stage 2 per-group water-fill', () => {
     expect(after.audit.maximumCapacityShortfall).toBe(4);
     expect(after.audit.underfill.map(({ group }) => group)).toContain('M');
     expect(after.audit.underfill.map(({ group }) => group)).toContain('F');
+
+    const backedUpRoster = chelseaRoster.map((player) => player.name === 'Dolce'
+      ? { ...player, backup_positions: [...(player.backup_positions ?? []), 'M'] }
+      : player);
+    const game = gameForRoster(backedUpRoster);
+    const demand = buildDemandModel(game);
+    const relaxed = assignQuotas(game, demand, false, true);
+
+    expect(relaxed.audit.errors).toEqual([]);
+    expect(relaxed.audit.maximumCapacityShortfall).toBe(4);
+    expect(relaxed.audit.relaxedMaximums?.length).toBeGreaterThan(0);
+    expect(runStages3And4(game, demand, relaxed).complete).toBe(true);
   });
 
   it('audits a soft guardrail relaxation while preserving the 40% floor', () => {

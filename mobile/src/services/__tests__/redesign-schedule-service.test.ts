@@ -198,15 +198,39 @@ describe('redesign schedule service', () => {
     })).rejects.toMatchObject({
       name: 'RedesignOfferError',
       offer: {
-        kind: 'position-shortage',
-        message: expect.stringContaining('short at least 4 field-player assignments across this game (Midfield: 3, Forward: 1). Adding backups to current players will not increase total playing-time capacity.'),
-        buttons: [{ label: 'Cancel', action: 'cancel' }],
+        kind: 'relaxed-maximums',
+        message: expect.stringContaining('Can\'t fit normal playing time.'),
+        buttons: [
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
         context: expect.objectContaining({
-          failureType: 'maximum-field-capacity',
+          failureType: 'relaxed-maximums',
           maximumCapacityShortfall: 4,
         }),
       },
     });
+  });
+
+  it('generates with relaxed maximums and explains the playing-time change', async () => {
+    configureService(rotationRoster, 8);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    const result = await generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      allowRelaxedMaximums: true,
+    });
+
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^Playing time relaxed to fit \d+ available players \(maximums increased for \d+\)\.$/),
+    ]));
+    expect(result.engine_source).toBe('redesign');
   });
 
   it('reports insufficient total player capacity after a successful late-arrival re-plan', async () => {
@@ -223,10 +247,10 @@ describe('redesign schedule service', () => {
         name: 'RedesignOfferError',
         offer: {
           kind: 'position-shortage',
-          message: expect.stringContaining('Adding backups to current players will not increase total playing-time capacity.'),
+          message: expect.stringContaining('Can\'t fit normal playing time for this late-arrival change.'),
           buttons: [{ label: 'Cancel', action: 'cancel' }],
           context: expect.objectContaining({
-            failureType: 'maximum-field-capacity',
+            failureType: 'late-arrival-maximum-capacity',
             maximumCapacityShortfall: 41,
           }),
         },
