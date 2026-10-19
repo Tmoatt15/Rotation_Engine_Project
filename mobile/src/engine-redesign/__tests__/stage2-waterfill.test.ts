@@ -153,6 +153,35 @@ describe('Stage 2 per-group water-fill', () => {
     expect(defenderQuota.fieldTarget + defenderQuota.pinnedBlocks.length).toBe(5);
   });
 
+  it('identifies a total-capacity shortfall that position backups cannot resolve', () => {
+    const availablePlayerNames = chelseaRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const quotasForRoster = (roster: RedesignPlayerInput[]) => {
+      const game = normalizeGame({
+        format: '9v9',
+        formation: '3-3-2',
+        totalBlocks: 8,
+        firstHalfKeeper: 'Avery',
+        secondHalfKeeper: 'Maddie',
+        availablePlayerNames,
+      }, roster);
+      return assignQuotas(game, buildDemandModel(game));
+    };
+
+    const before = quotasForRoster(chelseaRoster);
+    const after = quotasForRoster(chelseaRoster.map((player) => player.name === 'Dolce'
+      ? { ...player, backup_positions: [...(player.backup_positions ?? []), 'M'] }
+      : player));
+
+    expect(before.audit.underfill.map(({ group }) => group)).toContain('M');
+    expect(before.audit.underfill.map(({ group }) => group)).toContain('F');
+    expect(before.audit.maximumCapacityShortfall).toBe(4);
+    expect(after.audit.maximumCapacityShortfall).toBe(4);
+    expect(after.audit.underfill.map(({ group }) => group)).toContain('M');
+    expect(after.audit.underfill.map(({ group }) => group)).toContain('F');
+  });
+
   it('audits a soft guardrail relaxation while preserving the 40% floor', () => {
     const game = normalizeGame({
       format: '4v4', formation: '1-2-1', totalBlocks: 8,

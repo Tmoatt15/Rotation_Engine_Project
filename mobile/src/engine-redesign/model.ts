@@ -109,6 +109,7 @@ export interface QuotaAudit {
   relaxedPlayers?: Array<{ player: string; group: RedesignGroup; before: number; after: number; belowHardFloor: boolean }>;
   surplusAssignments: Array<{ group: RedesignGroup; player: string; amount: number }>;
   unfillableWithinMax: number;
+  maximumCapacityShortfall?: number;
   underfill: Array<{ group: FieldGroup; blocks: number; slotNames: string[] }>;
   overage: Array<{ group: FieldGroup; blocks: number }>;
   rosterTooLarge?: { maxPlayers: number };

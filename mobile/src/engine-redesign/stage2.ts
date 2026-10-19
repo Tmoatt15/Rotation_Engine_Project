@@ -230,6 +230,8 @@ function buildWaterfillQuotaAttempt(
   ]));
   const minimumFieldBlocks = [...info.values()].reduce((sum, candidate) => sum + candidate.floor, 0);
   const totalFieldSlots = FIELD_GROUPS.reduce((sum, group) => sum + (slots.get(group) ?? 0), 0);
+  const maximumCapacityShortfall = Math.max(0, totalFieldSlots
+    - [...info.values()].reduce((sum, candidate) => sum + candidate.maximum, 0));
   if (minimumFieldBlocks > totalFieldSlots) {
     const maximumPlayers = Math.floor(totalFieldSlots / nonKeeperFieldFloor(game.totalBlocks));
     rosterTooLarge = { maxPlayers: maximumPlayers };
@@ -624,6 +626,7 @@ function buildWaterfillQuotaAttempt(
       relaxedPlayers: finalRelaxedPlayers,
       surplusAssignments,
       unfillableWithinMax: underfill.reduce((sum, entry) => sum + entry.blocks, 0),
+      maximumCapacityShortfall,
       underfill,
       overage: overages,
       rosterTooLarge,

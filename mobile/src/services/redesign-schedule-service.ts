@@ -21,18 +21,22 @@ export class RedesignOfferError extends Error {
 }
 
 type FieldGroup = 'D' | 'M' | 'F';
+type BackupSuggestion = { group: FieldGroup; count: number; unit?: 'assignments' };
 
 function fieldGroupName(group: FieldGroup): string {
   return group === 'D' ? 'Defender' : group === 'M' ? 'Midfield' : 'Forward';
 }
 
 function backupSuggestionOffer(
-  groups: { group: FieldGroup; count: number }[],
+  groups: BackupSuggestion[],
   context: Record<string, unknown>,
 ): Stage6Offer {
-  const suggestions = groups.map(({ group, count }) =>
-    `Warning: ${fieldGroupName(group)} group (${group}) is short ${count} ${count === 1 ? 'player' : 'players'}. Add ${group === 'D' ? 'a' : 'an'} ${group} backup to a player.`,
-  );
+  const suggestions = groups.map(({ group, count, unit }) => {
+    const noun = unit === 'assignments' ? 'assignment' : 'player';
+    const countLabel = count === 1 ? noun : `${noun}s`;
+    const gameSuffix = unit === 'assignments' ? ' across the game' : '';
+    return `Warning: ${fieldGroupName(group)} group (${group}) is short ${count} ${countLabel}${gameSuffix}. Add ${group === 'D' ? 'a' : 'an'} ${group} backup to a player.`;
+  });
   return {
     kind: 'position-shortage',
     message: suggestions.join('\n\n'),
@@ -45,14 +49,31 @@ function backupSuggestionOffer(
   };
 }
 
-function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>, totalBlocks: number): void {
+function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>): void {
   if (!quotas.audit.errors?.length) return;
   const rosterTooLarge = quotas.audit.rosterTooLarge;
   const auditErrors = quotas.audit.errors ?? [];
+  const maximumCapacityShortfall = quotas.audit.maximumCapacityShortfall ?? 0;
+  if (!rosterTooLarge && maximumCapacityShortfall > 0) {
+    const groupShortfalls = quotas.audit.underfill
+      .map(({ group, blocks }) => `${fieldGroupName(group)}: ${blocks}`)
+      .join(', ');
+    throw new RedesignOfferError({
+      kind: 'position-shortage',
+      message: `The available roster is short at least ${maximumCapacityShortfall} field-player assignments across this game (${groupShortfalls}). Adding backups to current players will not increase total playing-time capacity. Make another field player available or adjust the playing-time limits.`,
+      buttons: [{ label: 'Cancel', action: 'cancel' }],
+      context: {
+        failureType: 'maximum-field-capacity',
+        maximumCapacityShortfall,
+        underfill: quotas.audit.underfill,
+      },
+    });
+  }
   if (!rosterTooLarge && quotas.audit.underfill.length) {
     const underfill = quotas.audit.underfill.map(({ group, blocks }) => ({
       group,
-      count: Math.max(1, Math.ceil(blocks / totalBlocks)),
+      count: blocks,
+      unit: 'assignments' as const,
     }));
     throw new RedesignOfferError(backupSuggestionOffer(underfill, {
       failureType: 'waterfill-underfill',
@@ -66,7 +87,8 @@ function throwForQuotaAuditErrors(quotas: ReturnType<typeof assignQuotas>, total
       const destination = error?.match(/Add ([DMF]) backup/)?.[1] as FieldGroup | undefined;
       return {
         group: destination ?? group,
-        count: Math.max(1, Math.ceil(blocks / totalBlocks)),
+        count: blocks,
+        unit: 'assignments' as const,
       };
     });
     throw new RedesignOfferError(backupSuggestionOffer(suggestions, {
@@ -357,7 +379,7 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   let quotas: ReturnType<typeof assignQuotas>;
   if (input.allowRelaxedMinimums) {
     ({ placement, quotas } = placementAttempt(game, demand, true));
-    throwForQuotaAuditErrors(quotas, game.totalBlocks);
+    throwForQuotaAuditErrors(quotas);
     if (!placement.complete) {
       throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
     }
@@ -369,11 +391,11 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     } else if (!relaxed.quotas.audit.errors?.length && relaxed.placement.complete) {
       throw new RedesignOfferError(offerForRelaxedMinimums(relaxed.quotas));
     } else {
-      throwForQuotaAuditErrors(relaxed.quotas, game.totalBlocks);
+      throwForQuotaAuditErrors(relaxed.quotas);
       throw new RedesignOfferError(placementFailureOffer(game, demand, relaxed.placement));
     }
   }
-  throwForQuotaAuditErrors(quotas, game.totalBlocks);
+  throwForQuotaAuditErrors(quotas);
   if (!placement.complete) {
     const placementErrors = placement.audit.errors ?? [];
     console.error('[redesign] placement failed:', placementErrors);
@@ -405,7 +427,7 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
   const frozen: FrozenBlock[] = input.previousSchedule.blocks.slice(0, input.startBlock - 1).map((block, index) => ({ block: index + 1, assignments: new Map(Object.entries(block.positions).filter(([slot]) => slot !== 'GK')) }));
   const result = replanLateArrival({ game, demand, quotas, frozen, arrivalTarget: input.targetBlocks });
   if (result.kind !== 'success') throw new RedesignOfferError(offerForFailure(result.failure));
-  throwForQuotaAuditErrors(quotas, game.totalBlocks);
+  throwForQuotaAuditErrors(quotas);
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
   const blockLengths = new SeasonSetup({ ...(base.settings), block_length_minutes: undefined }).block_lengths_minutes;
   return {

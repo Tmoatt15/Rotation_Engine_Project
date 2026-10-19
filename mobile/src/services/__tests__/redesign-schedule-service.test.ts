@@ -183,7 +183,33 @@ beforeEach(() => {
 });
 
 describe('redesign schedule service', () => {
-  it('surfaces quota audit errors after a successful late-arrival re-plan', async () => {
+  it('does not suggest backups when available field-player capacity cannot cover the formation', async () => {
+    configureService(rotationRoster, 8);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'position-shortage',
+        message: expect.stringContaining('short at least 4 field-player assignments across this game (Midfield: 3, Forward: 1). Adding backups to current players will not increase total playing-time capacity.'),
+        buttons: [{ label: 'Cancel', action: 'cancel' }],
+        context: expect.objectContaining({
+          failureType: 'maximum-field-capacity',
+          maximumCapacityShortfall: 4,
+        }),
+      },
+    });
+  });
+
+  it('reports insufficient total player capacity after a successful late-arrival re-plan', async () => {
     const roster: SeasonRosterPlayer[] = [
       rosterPlayer('Defender', 'core', ['D']),
       rosterPlayer('Forward', 'core', ['F']),
@@ -197,20 +223,49 @@ describe('redesign schedule service', () => {
         name: 'RedesignOfferError',
         offer: {
           kind: 'position-shortage',
-          message: expect.stringMatching(/^Warning: Defender group \(D\) is short \d+ players\. Add a D backup to a player\.\n\nWarning: Midfield group \(M\) is short \d+ players\. Add an M backup to a player\.\n\nWarning: Forward group \(F\) is short \d+ players\. Add an F backup to a player\.$/),
-          buttons: [
-            { label: 'SUGGEST', action: 'suggest-backup' },
-            { label: 'Cancel', action: 'cancel' },
-          ],
+          message: expect.stringContaining('Adding backups to current players will not increase total playing-time capacity.'),
+          buttons: [{ label: 'Cancel', action: 'cancel' }],
           context: expect.objectContaining({
-            failureType: 'waterfill-underfill',
-            positionGroup: 'D',
-            positionGroupWarning: expect.stringMatching(/^Warning: Defender group \(D\) is short \d+ players\. Add a D backup to a player\.$/),
+            failureType: 'maximum-field-capacity',
+            maximumCapacityShortfall: 41,
           }),
         },
       });
     expect(mocks.replanLateArrival).toHaveBeenCalledOnce();
     expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
+  });
+
+  it('keeps group-specific suggestions when total field-player capacity is sufficient', async () => {
+    const roster = [
+      ...Array.from({ length: 12 }, (_, index) =>
+        rosterPlayer(`Defender ${index + 1}`, 'rotational', ['D'], { primaryPositions: ['ANY'] })),
+      rosterPlayer('Keeper A', 'rotational', [], { keeperEligible: true }),
+      rosterPlayer('Keeper B', 'rotational', [], { keeperEligible: true }),
+    ];
+    configureService(roster, 6);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'position-shortage',
+        message: expect.stringMatching(/^Warning: Midfield group \(M\) is short \d+ assignments across the game\..*\n\nWarning: Forward group \(F\) is short \d+ assignments across the game\./),
+        buttons: [
+          { label: 'SUGGEST', action: 'suggest-backup' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: expect.objectContaining({
+          failureType: 'waterfill-underfill',
+          positionGroup: 'M',
+          positionGroupWarning: expect.stringMatching(/^Warning: Midfield group \(M\) is short \d+ assignments across the game\. Add an M backup to a player\.$/),
+        }),
+      },
+    });
   });
 
   it('includes abundance relaxation in the late-arrival warnings', async () => {
