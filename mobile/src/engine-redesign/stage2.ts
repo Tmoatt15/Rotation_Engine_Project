@@ -87,6 +87,7 @@ const HIT_TIERS: RedesignGroup[] = ['developing', 'rotational', 'core'];
 const SURPLUS_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
 const FLEX_OUT_TIERS: RedesignGroup[] = ['rotational', 'developing', 'core'];
 const FLEX_IN_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
+const RELAXED_EQUALIZATION_ITERATION_CAP = 10_000;
 
 function groupForPosition(position: string): FieldGroup | null {
   const normalized = position.toUpperCase();
@@ -180,6 +181,7 @@ function buildWaterfillQuotaAttempt(
   const errors: string[] = [];
   const warnings: string[] = [];
   const overages: QuotaAssignment['audit']['overage'] = [];
+  let relaxedEqualization: QuotaAssignment['audit']['relaxedEqualization'];
   let rosterTooLarge: QuotaAssignment['audit']['rosterTooLarge'];
 
   for (const player of fieldPlayers) {
@@ -517,20 +519,157 @@ function buildWaterfillQuotaAttempt(
     }
   };
 
-  if (allowRelaxedMaximums) {
-    let filledSlot = true;
-    while (filledSlot) {
-      filledSlot = false;
-      for (const group of FIELD_GROUPS) {
-        const candidates = [...info.values()]
-          .filter((candidate) => (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group))
-            && playerTotal(candidate.player.name) < candidate.maximum)
-          .sort((left, right) =>
-            playerTotal(left.player.name) - playerTotal(right.player.name)
-            || left.player.name.localeCompare(right.player.name));
-        const candidate = candidates[0];
-        if (candidate && gainOne(candidate, group, false)) filledSlot = true;
+  const equalizeRelaxedTotals = (): NonNullable<QuotaAssignment['audit']['relaxedEqualization']> => {
+    const pool = [...info.values()]
+      .filter((candidate) => !candidate.selectedKeeper && game.lateArrival?.player !== candidate.player.name)
+      .sort((left, right) => left.player.name.localeCompare(right.player.name));
+    const tierRank: Record<RedesignGroup, number> = { core: 0, rotational: 1, developing: 2 };
+    const donorTierRank: Record<RedesignGroup, number> = { developing: 0, rotational: 1, core: 2 };
+    const inversionCount = (totalAdjustments: ReadonlyMap<string, number> = new Map()): number => {
+      let inversions = 0;
+      for (let leftIndex = 0; leftIndex < pool.length; leftIndex += 1) {
+        const left = pool[leftIndex];
+        for (let rightIndex = leftIndex + 1; rightIndex < pool.length; rightIndex += 1) {
+          const right = pool[rightIndex];
+          if (tierRank[left.player.group] === tierRank[right.player.group]) continue;
+          const higher = tierRank[left.player.group] < tierRank[right.player.group] ? left : right;
+          const lower = higher === left ? right : left;
+          const higherTotal = playerTotal(higher.player.name) + (totalAdjustments.get(higher.player.name) ?? 0);
+          const lowerTotal = playerTotal(lower.player.name) + (totalAdjustments.get(lower.player.name) ?? 0);
+          if (higherTotal < lowerTotal) inversions += 1;
+        }
       }
+      return inversions;
+    };
+    const eligibleForGroup = (candidate: WaterfillPlayer, group: FieldGroup): boolean =>
+      candidate.primaryGroup === group || backupGroups(candidate.player).includes(group);
+    const tierInversionsBefore = inversionCount();
+
+    type EqualizationEdge = { donor: WaterfillPlayer; receiver: WaterfillPlayer; group: FieldGroup };
+    type EqualizationMove = { donor: WaterfillPlayer; recipient: WaterfillPlayer; path: EqualizationEdge[] };
+
+    const findMove = (): EqualizationMove | null => {
+      const recipients = pool
+        .filter((candidate) => playerTotal(candidate.player.name) < candidate.maximum)
+        .sort((left, right) =>
+          playerTotal(left.player.name) - playerTotal(right.player.name)
+          || left.player.name.localeCompare(right.player.name));
+      const inversionsBefore = inversionCount();
+
+      for (const recipient of recipients) {
+        const towardRecipient = new Map<string, EqualizationEdge>();
+        const reached = new Set([recipient.player.name]);
+        const queue = [recipient];
+        for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+          const receiver = queue[queueIndex];
+          for (const donor of pool) {
+            if (reached.has(donor.player.name)) continue;
+            const group = FIELD_GROUPS.find((fieldGroup) =>
+              amountInGroup(donor.player.name, fieldGroup) > (donor.pinnedByGroup[fieldGroup] ?? 0)
+              && eligibleForGroup(receiver, fieldGroup));
+            if (!group) continue;
+            reached.add(donor.player.name);
+            towardRecipient.set(donor.player.name, { donor, receiver, group });
+            queue.push(donor);
+          }
+        }
+
+        const feasible: EqualizationMove[] = [];
+        for (const donor of pool) {
+          if (!reached.has(donor.player.name) || donor === recipient) continue;
+          const donorTotal = playerTotal(donor.player.name);
+          const recipientTotal = playerTotal(recipient.player.name);
+          if (donorTotal < recipientTotal + 2 || donorTotal <= donor.hardFloor) continue;
+          const path: EqualizationEdge[] = [];
+          let current = donor;
+          while (current !== recipient) {
+            const edge = towardRecipient.get(current.player.name);
+            if (!edge) break;
+            path.push(edge);
+            current = edge.receiver;
+          }
+          if (current !== recipient || !path.length) continue;
+          const adjustments = new Map<string, number>([
+            [donor.player.name, -1],
+            [recipient.player.name, 1],
+          ]);
+          if (inversionCount(adjustments) <= inversionsBefore) {
+            feasible.push({ donor, recipient, path });
+          }
+        }
+
+        if (!feasible.length) continue;
+        const preferredDonors = feasible.filter((move) => move.donor.player.group !== 'core');
+        const candidates = preferredDonors.length ? preferredDonors : feasible;
+        candidates.sort((left, right) =>
+          playerTotal(right.donor.player.name) - playerTotal(left.donor.player.name)
+          || donorTierRank[left.donor.player.group] - donorTierRank[right.donor.player.group]
+          || left.donor.player.name.localeCompare(right.donor.player.name));
+        return candidates[0];
+      }
+      return null;
+    };
+
+    let iterations = 0;
+    while (iterations < RELAXED_EQUALIZATION_ITERATION_CAP) {
+      const move = findMove();
+      if (!move) break;
+      for (const edge of move.path) {
+        const donorCounts = allocations.get(edge.donor.player.name)!;
+        const receiverCounts = allocations.get(edge.receiver.player.name)!;
+        donorCounts.set(edge.group, amountInGroup(edge.donor.player.name, edge.group) - 1);
+        receiverCounts.set(edge.group, amountInGroup(edge.receiver.player.name, edge.group) + 1);
+        writeRotation(rotationState, edge.group, edge.donor.player.group, 'lastShed', edge.donor.player.name);
+        writeRotation(rotationState, edge.group, edge.receiver.player.group, 'lastGained', edge.receiver.player.name);
+      }
+      iterations += 1;
+    }
+    if (iterations === RELAXED_EQUALIZATION_ITERATION_CAP) {
+      warnings.push('Relaxed equalization reached its iteration cap; retaining the best plan found.');
+    }
+    return {
+      iterations,
+      tierInversionsBefore,
+      tierInversionsAfter: inversionCount(),
+      capped: iterations === RELAXED_EQUALIZATION_ITERATION_CAP,
+    };
+  };
+
+  if (allowRelaxedMaximums) {
+    let iterations = 0;
+    let changed = true;
+    while (changed && iterations < RELAXED_EQUALIZATION_ITERATION_CAP) {
+      changed = false;
+      let filledSlot = true;
+      while (filledSlot) {
+        filledSlot = false;
+        for (const group of FIELD_GROUPS) {
+          const candidates = [...info.values()]
+            .filter((candidate) => (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group))
+              && playerTotal(candidate.player.name) < candidate.maximum)
+            .sort((left, right) =>
+              playerTotal(left.player.name) - playerTotal(right.player.name)
+              || left.player.name.localeCompare(right.player.name));
+          const candidate = candidates[0];
+          if (candidate && gainOne(candidate, group, false)) {
+            filledSlot = true;
+            changed = true;
+          }
+        }
+      }
+      const equalization = equalizeRelaxedTotals();
+      relaxedEqualization = {
+        iterations: (relaxedEqualization?.iterations ?? 0) + equalization.iterations,
+        tierInversionsBefore: relaxedEqualization?.tierInversionsBefore ?? equalization.tierInversionsBefore,
+        tierInversionsAfter: equalization.tierInversionsAfter,
+        capped: Boolean(relaxedEqualization?.capped) || equalization.capped,
+      };
+      changed ||= equalization.iterations > 0;
+      iterations += 1;
+    }
+    if (iterations === RELAXED_EQUALIZATION_ITERATION_CAP && changed) {
+      warnings.push('Relaxed fill and equalization reached their iteration cap; retaining the best plan found.');
+      if (relaxedEqualization) relaxedEqualization.capped = true;
     }
   } else {
     for (const tier of SURPLUS_TIERS) {
@@ -659,6 +798,7 @@ function buildWaterfillQuotaAttempt(
       unfillableWithinMax: underfill.reduce((sum, entry) => sum + entry.blocks, 0),
       maximumCapacityShortfall,
       relaxedMaximums,
+      ...(relaxedEqualization ? { relaxedEqualization } : {}),
       underfill,
       overage: overages,
       rosterTooLarge,

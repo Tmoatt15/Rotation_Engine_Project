@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
-import { generateRedesignSchedule, regenerateRedesignLateArrival, suggestBackupPlayerNames } from '../redesign-schedule-service';
+import { generateRedesignSchedule, RedesignOfferError, regenerateRedesignLateArrival, suggestBackupPlayerNames } from '../redesign-schedule-service';
 import type { LateArrivalReplanInput, LateArrivalReplanResult } from '@/engine-redesign/stage5';
 import type { PolishedPlacement } from '@/engine-redesign/stage4';
 
@@ -476,6 +476,97 @@ describe('redesign schedule service', () => {
       expect.stringMatching(/^Playing time relaxed to fit \d+ available players \(maximums increased for \d+\)\.$/),
     ]));
     expect(result.engine_source).toBe('redesign');
+  });
+
+  it('delivers the repaired Dolce/Reese schedule through the service', async () => {
+    configureService(rotationRoster, 8);
+    const engine = await vi.importActual<typeof import('@/engine-redesign')>('@/engine-redesign');
+    vi.mocked(runStages3And4).mockImplementation(engine.runStages3And4);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Dolce' && player.name !== 'Reese')
+      .map((player) => player.name);
+
+    const result = await generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      allowRelaxedMaximums: true,
+    });
+
+    expect(result.engine_source).toBe('redesign');
+    expect(result.placement_audit?.repair).toMatchObject({ attempted: true, success: true });
+    expect(result.placement_audit?.errors.some((error) => error.startsWith('Cannot place minimum'))).toBe(false);
+  });
+
+  it('generates for Dolce/Meg absence or reports a truthful D shortfall', async () => {
+    configureService(rotationRoster, 8);
+    const engine = await vi.importActual<typeof import('@/engine-redesign')>('@/engine-redesign');
+    vi.mocked(runStages3And4).mockImplementation(engine.runStages3And4);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Dolce' && player.name !== 'Meg')
+      .map((player) => player.name);
+
+    try {
+      const result = await generateRedesignSchedule({
+        teamId: 'team-1',
+        gameNumber: 1,
+        availablePlayerNames,
+        firstHalfGk: 'Avery',
+        secondHalfGk: 'Maddie',
+        allowRelaxedMaximums: true,
+      });
+      expect(result.engine_source).toBe('redesign');
+      expect(result.placement_audit?.errors.some((error) => error.startsWith('Cannot place minimum'))).toBe(false);
+    } catch (error) {
+      if (!(error instanceof RedesignOfferError)) throw error;
+      const offer = error.offer;
+      expect(offer.context.positionGroup).toBe('D');
+      expect(offer.message).toContain('Relaxed generation failed:');
+      expect(offer.message).not.toContain('Cannot place minimum');
+    }
+  });
+
+  it('names the forward group for an unfilled RF slot', async () => {
+    const roster = abundanceRoster();
+    configureService(roster, 6);
+    const game = normalizeGame({
+      format: '9v9',
+      formation: '3-3-2',
+      totalBlocks: 6,
+      firstHalfKeeper: 'Keeper A',
+      secondHalfKeeper: 'Keeper B',
+    }, redesignPlayers(roster));
+    const demand = buildDemandModel(game);
+    vi.mocked(runStages3And4).mockReturnValue({
+      ...placement(false, ['Unfilled slot: Block 1, slot RF.']),
+      blocks: Array.from({ length: game.totalBlocks }, (_, index) => ({
+        block: index + 1,
+        assignments: new Map(demand.fieldSlots
+          .filter((slot) => slot.slot !== 'RF')
+          .map((slot) => [slot.slot, 'assigned'])),
+      })),
+    });
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+      allowRelaxedMaximums: true,
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'relaxed-maximums',
+        context: expect.objectContaining({
+          failureType: 'relaxed-maximums-failed',
+          positionGroup: 'F',
+        }),
+        message: expect.stringContaining('Unfilled slot: Block 1, slot RF.'),
+      },
+    });
   });
 
   it('reports insufficient total player capacity after a successful late-arrival re-plan', async () => {

@@ -111,6 +111,7 @@ export interface QuotaAudit {
   unfillableWithinMax: number;
   maximumCapacityShortfall?: number;
   relaxedMaximums?: { player: string; group: RedesignGroup; before: number; after: number }[];
+  relaxedEqualization?: { iterations: number; tierInversionsBefore: number; tierInversionsAfter: number; capped: boolean };
   underfill: Array<{ group: FieldGroup; blocks: number; slotNames: string[] }>;
   overage: Array<{ group: FieldGroup; blocks: number }>;
   rosterTooLarge?: { maxPlayers: number };

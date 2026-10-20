@@ -172,14 +172,13 @@ function offerForRelaxedMaximumFailure(
   demand: ReturnType<typeof buildDemandModel>,
   placement: ReturnType<typeof runStages3And4>,
 ): Stage6Offer {
-  const slotError = placement.audit.errors.find((error) => /unfilled slot/i.test(error));
-  const slotName = slotError?.match(/slot\s+([DMF]\w*)/i)?.[1]?.toUpperCase();
-  const failedGroup = demand.fieldSlots.find((slot) => slot.slot.toUpperCase() === slotName)?.group;
+  const failedGroup = unfilledPlacementGroup(placement, demand);
   const group = quotas.audit.underfill[0]?.group ?? failedGroup ?? demand.fieldSlots[0]?.group;
-  if (!group) return waterfillPlacementFailureOffer(placement);
+  if (!group) return waterfillPlacementFailureOffer(placement, demand);
 
-  const diagnostic = placement.audit.errors.find((error) => error.trim())
-    ?? quotas.audit.errors?.join(' ')
+  const diagnostic = placement.audit.errors.find((error) => error.startsWith('Unfilled slot:'))
+    ?? placement.audit.errors.find((error) => error.trim())
+    ?? quotas.audit.errors?.[0]
     ?? 'The relaxed assignment could not cover every field position.';
   const article = group === 'D' ? 'a' : 'an';
   const warning = `Relaxed generation failed: ${diagnostic} Add ${article} ${group} backup and try again.`;
@@ -319,12 +318,23 @@ function relaxedMinimumWarnings(quotas: ReturnType<typeof assignQuotas>): string
   return [`Minimums relaxed for: ${quotas.audit.relaxedPlayers.map((entry) => `${entry.player} (${entry.before} -> ${entry.after} blocks)`).join(', ')}.`];
 }
 
-function waterfillPlacementFailureOffer(placement: ReturnType<typeof runStages3And4>): Stage6Offer {
-  const slotError = placement.audit.errors.find((error) => /unfilled slot/i.test(error));
+function unfilledPlacementGroup(
+  placement: ReturnType<typeof runStages3And4>,
+  demand: ReturnType<typeof buildDemandModel>,
+): 'D' | 'M' | 'F' | undefined {
+  return demand.fieldSlots.find((slot) => placement.blocks.some((block) =>
+    !block.assignments.has(slot.slot)))?.group;
+}
+
+function waterfillPlacementFailureOffer(
+  placement: ReturnType<typeof runStages3And4>,
+  demand: ReturnType<typeof buildDemandModel>,
+): Stage6Offer {
+  const slotError = placement.audit.errors.find((error) => error.startsWith('Unfilled slot:'));
   const diagnostic = slotError ?? placement.audit.errors.find((error) => error.trim())
     ?? placement.audit.failureReason
     ?? 'No placement diagnostic was reported.';
-  const group = slotError?.match(/slot\s+([DMF])/i)?.[1]?.toUpperCase() ?? 'unknown';
+  const group = unfilledPlacementGroup(placement, demand) ?? 'unknown';
   const stage = placement.audit.failureReason ? 'Stage 3' : 'Stage 3/4';
   return {
     kind: 'impossible',
@@ -343,7 +353,7 @@ function placementFailureOffer(
     const guidance = generationFailureOffer(game, demand, true);
     if (guidance.kind !== 'impossible') return guidance;
   }
-  return waterfillPlacementFailureOffer(placement);
+  return waterfillPlacementFailureOffer(placement, demand);
 }
 
 function generationFailureOffer(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, allowRelaxedMinimums = false): Stage6Offer {

@@ -334,7 +334,7 @@ describe('Stage 2 per-group water-fill', () => {
       const quotas = assignQuotas(game, demand, true, true);
       const placement = runStages3And4(game, demand, quotas);
 
-      expect(quotas.audit.relaxedMaximums?.length).toBeGreaterThan(0);
+      expect(quotas.audit.relaxedEqualization).toBeDefined();
       expect(placement.complete).toBe(true);
     },
   );
