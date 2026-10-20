@@ -12,7 +12,6 @@ import { getSavedReports } from './report-service';
 import { getDatabase } from '@/storage/database';
 import { getWaterfillRotationState, saveWaterfillRotationState } from '@/storage/waterfill-rotation';
 import { isDedicatedKeeper } from '@/position-groups';
-import { excludedFromSlot } from '@/engine-redesign/stage3';
 
 export class RedesignOfferError extends Error {
   constructor(public readonly offer: ReturnType<typeof offerForFailure>) {
@@ -50,129 +49,114 @@ function backupSuggestionOffer(
   };
 }
 
-type BackupRecommendation = { group: FieldGroup; playerNames: string[] };
+type RestRisk = { group: FieldGroup; warning: string };
 
-type WorkloadProfile = { complete: boolean; missingAssignments: number; maximum: number; spread: number; squaredLoads: number };
-
-function workloadProfile(
-  game: ReturnType<typeof normalizeGame>,
-  quotas: ReturnType<typeof assignQuotas>,
-  placement: ReturnType<typeof runStages3And4>,
-): WorkloadProfile {
-  const loads = new Map(game.players.filter((player) => player.available).map((player) => [player.name, 0]));
-  for (const block of placement.blocks) {
-    for (const player of block.assignments.values()) {
-      if (loads.has(player)) loads.set(player, (loads.get(player) ?? 0) + 1);
-    }
-  }
-  const assignedFieldBlocks = [...loads.values()].reduce((sum, load) => sum + load, 0);
-  for (const quota of quotas.quotas) {
-    if (loads.has(quota.player)) loads.set(quota.player, (loads.get(quota.player) ?? 0) + quota.keeperBlocks);
-  }
-  const values = [...loads.values()];
-  const maximum = Math.max(0, ...values);
-  const minimum = Math.min(...values);
-  return {
-    complete: placement.complete,
-    missingAssignments: Math.max(0, quotas.fieldSlots - assignedFieldBlocks),
-    maximum,
-    spread: maximum - minimum,
-    squaredLoads: values.reduce((sum, load) => sum + load * load, 0),
-  };
-}
-
-function compareWorkloads(candidate: WorkloadProfile, baseline: WorkloadProfile): number {
-  if (candidate.complete !== baseline.complete) return candidate.complete ? -1 : 1;
-  return candidate.missingAssignments - baseline.missingAssignments
-    || candidate.maximum - baseline.maximum
-    || candidate.spread - baseline.spread
-    || candidate.squaredLoads - baseline.squaredLoads;
-}
-
-function bestBackupRecommendation(
+function fieldRestRisk(
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
   quotas: ReturnType<typeof assignQuotas>,
-  allowRelaxedMinimums: boolean,
-): BackupRecommendation | null {
-  const groups = quotas.audit.underfill;
-  if (!groups.length) return null;
-  const relaxedBaseline = assignQuotas(game, demand, allowRelaxedMinimums, true);
-  const baselinePlacement = runStages3And4(game, demand, relaxedBaseline);
-  const baselineWorkload = workloadProfile(game, relaxedBaseline, baselinePlacement);
-  let best: BackupRecommendation | null = null;
-  let bestWorkload = baselineWorkload;
-
-  for (const { group } of groups) {
-    const slots = demand.fieldSlots.filter((slot) => slot.group === group);
-    const candidates = game.players.filter((player) => player.available && !player.keeper
-      && slots.some((slot) => positionTier(player, slot.slot) === 0 && !excludedFromSlot(player, slot.slot)));
-    for (const candidate of candidates) {
-      const simulatedGame = {
-        ...game,
-        players: game.players.map((player) => player.name === candidate.name
-          ? { ...player, backupPositions: [...player.backupPositions, group] }
-          : player),
-      };
-      const simulatedQuotas = assignQuotas(simulatedGame, demand, allowRelaxedMinimums, true);
-      const simulatedPlacement = runStages3And4(simulatedGame, demand, simulatedQuotas);
-      const simulatedWorkload = workloadProfile(simulatedGame, simulatedQuotas, simulatedPlacement);
-      const comparison = compareWorkloads(simulatedWorkload, bestWorkload);
-      if (comparison < 0) {
-        best = { group, playerNames: [candidate.name] };
-        bestWorkload = simulatedWorkload;
-      } else if (comparison === 0 && best && group === best.group) {
-        best.playerNames.push(candidate.name);
-      }
+  placement: ReturnType<typeof runStages3And4>,
+): RestRisk | null {
+  const fieldGroups = new Map<string, FieldGroup>();
+  for (const slot of demand.fieldSlots) fieldGroups.set(slot.slot, slot.group);
+  const loads = new Map<string, Map<FieldGroup, number>>();
+  for (const block of placement.blocks) {
+    for (const [slot, player] of block.assignments) {
+      const group = fieldGroups.get(slot);
+      if (!group) continue;
+      const playerLoads = loads.get(player) ?? new Map<FieldGroup, number>();
+      playerLoads.set(group, (playerLoads.get(group) ?? 0) + 1);
+      loads.set(player, playerLoads);
     }
   }
-  return best;
+
+  const atRisk: { player: string; fieldBlocks: number; availableFieldBlocks: number; groupLoads: Map<FieldGroup, number> }[] = [];
+  for (const quota of quotas.quotas) {
+    const groupLoads = loads.get(quota.player) ?? new Map<FieldGroup, number>();
+    const fieldBlocks = [...groupLoads.values()].reduce((total, count) => total + count, 0);
+    const isHalfKeeper = quota.keeperBlocks > 0 && quota.keeperBlocks < game.totalBlocks;
+    const availableFieldBlocks = isHalfKeeper ? game.totalBlocks / 2 : game.totalBlocks;
+    const triggered = isHalfKeeper
+      ? fieldBlocks === availableFieldBlocks
+      : quota.keeperBlocks === 0 && fieldBlocks >= game.totalBlocks - 1;
+    if (triggered) atRisk.push({ player: quota.player, fieldBlocks, availableFieldBlocks, groupLoads });
+  }
+  if (!atRisk.length) return null;
+
+  const groupLoads = new Map<FieldGroup, number>();
+  for (const player of atRisk) {
+    for (const [group, count] of player.groupLoads) {
+      groupLoads.set(group, (groupLoads.get(group) ?? 0) + count);
+    }
+  }
+  const groupOrder: FieldGroup[] = ['D', 'M', 'F'];
+  const group = [...groupLoads]
+    .sort(([leftGroup, leftCount], [rightGroup, rightCount]) =>
+      rightCount - leftCount || groupOrder.indexOf(leftGroup) - groupOrder.indexOf(rightGroup))[0]?.[0]
+    ?? demand.fieldSlots[0]?.group;
+  if (!group) return null;
+
+  const details = atRisk.map(({ player, fieldBlocks, availableFieldBlocks }) =>
+    `${player} (${fieldBlocks}/${availableFieldBlocks} field blocks)`);
+  const article = group === 'D' ? 'a' : 'an';
+  const warning = `Field-play rest alert: ${details.join(', ')}. Add ${article} ${group} backup to give them a break.`;
+  return { group, warning };
 }
 
 function offerForRelaxedMaximums(
   quotas: ReturnType<typeof assignQuotas>,
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
-  allowRelaxedMinimums: boolean,
+  relaxedPlacement: ReturnType<typeof runStages3And4>,
 ): Stage6Offer {
-  const groups = quotas.audit.underfill.map(({ group, blocks }) => ({
-    group,
-    count: blocks,
-    unit: 'assignments' as const,
-  }));
-  const groupWarnings = groups.length
-    ? backupSuggestionOffer(groups, { underfill: quotas.audit.underfill })
-    : null;
-  const recommendation = bestBackupRecommendation(game, demand, quotas, allowRelaxedMinimums);
-  const recommendationWarning = recommendation
-    ? backupSuggestionOffer([{
-      group: recommendation.group,
-      count: quotas.audit.underfill.find((entry) => entry.group === recommendation.group)?.blocks ?? 0,
-      unit: 'assignments',
-    }], {}).context.positionGroupWarning
-    : undefined;
-  const positionGroupWarning = typeof recommendationWarning === 'string'
-    ? `${recommendationWarning} This backup is projected to improve playing-time balance.`
-    : undefined;
+  const restRisk = fieldRestRisk(game, demand, quotas, relaxedPlacement);
   const buttons: Stage6Offer['buttons'] = [
-    ...(recommendation ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
+    ...(restRisk ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
     { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
     { label: 'Cancel', action: 'cancel' },
   ];
   const context = {
     failureType: 'relaxed-maximums',
     maximumCapacityShortfall: quotas.audit.maximumCapacityShortfall,
-    ...(recommendation ? {
-      positionGroup: recommendation.group,
-      positionGroupWarning,
-      suggestedPlayerNames: recommendation.playerNames,
+    ...(restRisk ? {
+      positionGroup: restRisk.group,
+      positionGroupWarning: restRisk.warning,
     } : {}),
   };
   return {
     kind: 'relaxed-maximums',
-    message: `Can't fit normal playing time.${groupWarnings?.message ? `\n\n${groupWarnings.message}` : ''}${recommendation ? '\n\nThe suggested backup improves playing-time balance; relaxed maximums may still be needed.' : ''}`,
+    message: `Can't fit normal playing time.${restRisk ? `\n\n${restRisk.warning}` : ''}`,
     buttons,
     context,
+  };
+}
+
+function offerForRelaxedMaximumFailure(
+  quotas: ReturnType<typeof assignQuotas>,
+  demand: ReturnType<typeof buildDemandModel>,
+  placement: ReturnType<typeof runStages3And4>,
+): Stage6Offer {
+  const slotError = placement.audit.errors.find((error) => /unfilled slot/i.test(error));
+  const slotName = slotError?.match(/slot\s+([DMF]\w*)/i)?.[1]?.toUpperCase();
+  const failedGroup = demand.fieldSlots.find((slot) => slot.slot.toUpperCase() === slotName)?.group;
+  const group = quotas.audit.underfill[0]?.group ?? failedGroup ?? demand.fieldSlots[0]?.group;
+  if (!group) return waterfillPlacementFailureOffer(placement);
+
+  const diagnostic = placement.audit.errors.find((error) => error.trim())
+    ?? quotas.audit.errors?.join(' ')
+    ?? 'The relaxed assignment could not cover every field position.';
+  const article = group === 'D' ? 'a' : 'an';
+  const warning = `Relaxed generation failed: ${diagnostic} Add ${article} ${group} backup and try again.`;
+  return {
+    kind: 'relaxed-maximums',
+    message: warning,
+    buttons: [{ label: 'Suggest Backup', action: 'suggest-backup' }, { label: 'Cancel', action: 'cancel' }],
+    context: {
+      failureType: 'relaxed-maximums-failed',
+      maximumCapacityShortfall: quotas.audit.maximumCapacityShortfall,
+      positionGroup: group,
+      positionGroupWarning: warning,
+    },
   };
 }
 
@@ -190,7 +174,20 @@ function throwForQuotaAuditErrors(
   const maximumCapacityShortfall = quotas.audit.maximumCapacityShortfall ?? 0;
   if (!rosterTooLarge && maximumCapacityShortfall > 0 && !allowRelaxedMaximums) {
     if (offerMaximumRelaxation) {
-      throw new RedesignOfferError(offerForRelaxedMaximums(quotas, game, demand, allowRelaxedMinimums));
+      const relaxedMaximum = placementAttempt(game, demand, allowRelaxedMinimums, true);
+      if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
+        throw new RedesignOfferError(offerForRelaxedMaximumFailure(
+          relaxedMaximum.quotas,
+          demand,
+          relaxedMaximum.placement,
+        ));
+      }
+      throw new RedesignOfferError(offerForRelaxedMaximums(
+        quotas,
+        game,
+        demand,
+        relaxedMaximum.placement,
+      ));
     }
     throw new RedesignOfferError({
       kind: 'position-shortage',
@@ -517,15 +514,26 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   let quotas: ReturnType<typeof assignQuotas>;
   if (input.allowRelaxedMaximums) {
     ({ placement, quotas } = placementAttempt(game, demand, true, true));
-    throwForQuotaAuditErrors(quotas, game, demand, true, true);
-    if (!placement.complete) {
-      throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
+    if (quotas.audit.errors?.length || !placement.complete) {
+      throw new RedesignOfferError(offerForRelaxedMaximumFailure(quotas, demand, placement));
     }
   } else if (input.allowRelaxedMinimums) {
     ({ placement, quotas } = placementAttempt(game, demand, true));
-    throwForQuotaAuditErrors(quotas, game, demand, true);
-    if (!placement.complete) {
-      throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
+    if (quotas.audit.errors?.length || !placement.complete) {
+      const relaxedMaximum = placementAttempt(game, demand, true, true);
+      if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
+        throw new RedesignOfferError(offerForRelaxedMaximumFailure(
+          relaxedMaximum.quotas,
+          demand,
+          relaxedMaximum.placement,
+        ));
+      }
+      throw new RedesignOfferError(offerForRelaxedMaximums(
+        quotas,
+        game,
+        demand,
+        relaxedMaximum.placement,
+      ));
     }
   } else {
     const strict = placementAttempt(game, demand, false);
@@ -535,8 +543,20 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     } else if (!relaxed.quotas.audit.errors?.length && relaxed.placement.complete) {
       throw new RedesignOfferError(offerForRelaxedMinimums(relaxed.quotas));
     } else {
-      throwForQuotaAuditErrors(relaxed.quotas, game, demand, true);
-      throw new RedesignOfferError(placementFailureOffer(game, demand, relaxed.placement));
+      const relaxedMaximum = placementAttempt(game, demand, true, true);
+      if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
+        throw new RedesignOfferError(offerForRelaxedMaximumFailure(
+          relaxedMaximum.quotas,
+          demand,
+          relaxedMaximum.placement,
+        ));
+      }
+      throw new RedesignOfferError(offerForRelaxedMaximums(
+        relaxed.quotas,
+        game,
+        demand,
+        relaxedMaximum.placement,
+      ));
     }
   }
   throwForQuotaAuditErrors(

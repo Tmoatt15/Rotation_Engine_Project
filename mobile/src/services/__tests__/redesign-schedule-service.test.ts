@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
-import { runStages3And4 as runStages3And4Actual } from '@/engine-redesign/stage4';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
 import { generateRedesignSchedule, regenerateRedesignLateArrival } from '../redesign-schedule-service';
@@ -126,6 +125,17 @@ function placement(complete: boolean, errors: string[] = []): PolishedPlacement 
   };
 }
 
+function placementWithFieldLoad(totalBlocks: number, player: string, group: 'D' | 'M' | 'F', fieldBlocks: number): PolishedPlacement {
+  const slotByGroup = { D: 'CB', M: 'CM', F: 'LF' } as const;
+  return {
+    ...placement(true),
+    blocks: Array.from({ length: totalBlocks }, (_, index) => ({
+      block: index + 1,
+      assignments: new Map(index < fieldBlocks ? [[slotByGroup[group], player]] : []),
+    })),
+  };
+}
+
 function configureService(roster: SeasonRosterPlayer[], totalBlocks: number, rotation: WaterfillRotationState = {}): void {
   mocks.getLocalTeam.mockResolvedValue({ id: 'team-1', name: 'Test Team' });
   mocks.getRoster.mockResolvedValue({ players: roster });
@@ -184,7 +194,7 @@ beforeEach(() => {
 });
 
 describe('redesign schedule service', () => {
-  it('does not suggest backups when relaxed workload balance does not improve', async () => {
+  it('does not suggest backups when no player reaches the field-rest threshold', async () => {
     configureService(rotationRoster, 8);
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
@@ -213,9 +223,12 @@ describe('redesign schedule service', () => {
     });
   });
 
-  it('suggests the backup that most improves relaxed playing-time balance', async () => {
-    configureService(rotationRoster, 8);
-    vi.mocked(runStages3And4).mockImplementation(runStages3And4Actual);
+  it.each([6, 8, 10, 12])('suggests a backup for a non-keeper with at least totalBlocks - 1 field blocks (%d blocks)', async (totalBlocks) => {
+    configureService(rotationRoster, totalBlocks);
+    vi.mocked(runStages3And4)
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placementWithFieldLoad(totalBlocks, 'Brooklyn', 'M', totalBlocks - 1));
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
@@ -237,20 +250,52 @@ describe('redesign schedule service', () => {
         ],
         context: expect.objectContaining({
           positionGroup: 'M',
-          suggestedPlayerNames: ['Dolce'],
-          positionGroupWarning: expect.stringContaining('projected to improve playing-time balance'),
+          positionGroupWarning: expect.stringContaining(`Brooklyn (${totalBlocks - 1}/${totalBlocks} field blocks)`),
         }),
       },
     });
   });
 
-  it('stops suggesting backups after the workload spread can no longer improve', async () => {
-    const roster = rotationRoster.map((player) => player.name === 'Dolce'
-      ? { ...player, backup_positions: [...(player.backup_positions ?? []), 'M'] }
-      : player);
-    configureService(roster, 8);
-    vi.mocked(runStages3And4).mockImplementation(runStages3And4Actual);
-    const availablePlayerNames = roster
+  it.each([6, 8, 10, 12])('uses totalBlocks / 2 for the keeper field-rest threshold (%d blocks)', async (totalBlocks) => {
+    configureService(rotationRoster, totalBlocks);
+    vi.mocked(runStages3And4)
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placementWithFieldLoad(totalBlocks, 'Avery', 'M', totalBlocks / 2));
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      name: 'RedesignOfferError',
+      offer: {
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: expect.objectContaining({
+          positionGroup: 'M',
+          positionGroupWarning: expect.stringContaining(`Avery (${totalBlocks / 2}/${totalBlocks / 2} field blocks)`),
+        }),
+      },
+    });
+  });
+
+  it('does not suggest a half-keeper backup when one field block is available for rest', async () => {
+    configureService(rotationRoster, 8);
+    vi.mocked(runStages3And4)
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placement(false))
+      .mockReturnValueOnce(placementWithFieldLoad(8, 'Avery', 'M', 3));
+    const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
 
@@ -337,16 +382,16 @@ describe('redesign schedule service', () => {
     })).rejects.toMatchObject({
       name: 'RedesignOfferError',
       offer: {
-        kind: 'position-shortage',
-        message: expect.stringMatching(/^Warning: Midfield group \(M\) is short \d+ assignments across the game\..*\n\nWarning: Forward group \(F\) is short \d+ assignments across the game\./),
+        kind: 'relaxed-maximums',
+        message: expect.stringContaining('Relaxed generation failed: Midfield group (M)'),
         buttons: [
-          { label: 'SUGGEST', action: 'suggest-backup' },
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
-          failureType: 'waterfill-underfill',
+          failureType: 'relaxed-maximums-failed',
           positionGroup: 'M',
-          positionGroupWarning: expect.stringMatching(/^Warning: Midfield group \(M\) is short \d+ assignments across the game\. Add an M backup to a player\.$/),
+          positionGroupWarning: expect.stringContaining('Add an M backup and try again.'),
         }),
       },
     });
@@ -422,7 +467,7 @@ describe('redesign schedule service', () => {
     expect(runStages3And4).toHaveBeenCalledTimes(2);
   });
 
-  it('does not offer Generate when the relaxed placement trial is incomplete', async () => {
+  it('requires a backup when relaxed generation cannot fill a position', async () => {
     const roster = abundanceRoster();
     configureService(roster, 6);
     vi.mocked(runStages3And4).mockReturnValue(placement(false, ['Unfilled slot: Block 1, slot D1.']));
@@ -436,15 +481,21 @@ describe('redesign schedule service', () => {
     })).rejects.toMatchObject({
       name: 'RedesignOfferError',
       offer: {
-        kind: 'impossible',
-        buttons: [{ label: 'Cancel', action: 'cancel' }],
-        context: { failureType: 'waterfill-placement-failed' },
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: {
+          failureType: 'relaxed-maximums-failed',
+          positionGroup: 'D',
+        },
       },
     });
-    expect(runStages3And4).toHaveBeenCalledTimes(2);
+    expect(runStages3And4).toHaveBeenCalledTimes(3);
   });
 
-  it('reports water-fill placement failures as engine errors, not relaxed-minimum offers', async () => {
+  it('offers a backup when an explicitly requested relaxed generation fails', async () => {
     const roster = abundanceRoster();
     configureService(roster, 6);
     vi.mocked(runStages3And4).mockReturnValue(placement(false, ['Unfilled slot: Block 1, slot D1.']));
@@ -455,18 +506,16 @@ describe('redesign schedule service', () => {
       availablePlayerNames: roster.map((player) => player.name),
       firstHalfGk: 'Keeper A',
       secondHalfGk: 'Keeper B',
-      allowRelaxedMinimums: true,
+      allowRelaxedMaximums: true,
     })).rejects.toMatchObject({
       name: 'RedesignOfferError',
       offer: {
-        kind: 'impossible',
-        message: expect.stringContaining('Water-fill placement failed in Stage 3 for group D'),
-        buttons: [{ label: 'Cancel', action: 'cancel' }],
-        context: expect.objectContaining({
-          failureType: 'waterfill-placement-failed',
-          stage: 'Stage 3',
-          group: 'D',
-        }),
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: { failureType: 'relaxed-maximums-failed', positionGroup: 'D' },
       },
     });
   });
