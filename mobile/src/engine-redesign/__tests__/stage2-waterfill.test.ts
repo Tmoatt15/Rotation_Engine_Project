@@ -277,6 +277,45 @@ describe('Stage 2 per-group water-fill', () => {
     expect(Math.max(...placedNonKeeperFieldBlocks) - Math.min(...placedNonKeeperFieldBlocks)).toBe(1);
   });
 
+  it.each([
+    ['baseline', chelseaRoster],
+    ['Dolce M backup', chelseaRoster.map((player) => player.name === 'Dolce'
+      ? { ...player, backup_positions: ['M'] }
+      : player)],
+    ['Natalie M backup', chelseaRoster.map((player) => player.name === 'Natalie'
+      ? { ...player, backup_positions: ['M'] }
+      : player)],
+  ])('places only Stage 2 group targets for the %s scenario', (scenario, roster) => {
+    const availablePlayerNames = roster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const game = normalizeGame({
+      format: '9v9',
+      formation: '3-3-2',
+      totalBlocks: 8,
+      availablePlayerNames,
+      firstHalfKeeper: 'Maddie',
+      secondHalfKeeper: 'Avery',
+    }, roster);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand, true, true);
+    const placement = runStages3And4(game, demand, quotas);
+    const misplaced = placement.audit.plannedVsPlaced?.filter((entry) => entry.difference !== 0);
+
+    expect(quotas.audit.errors).toEqual([]);
+    expect(placement.complete).toBe(true);
+    expect(misplaced).toEqual([]);
+    if (scenario === 'Dolce M backup') {
+      const dolce = placement.audit.plannedVsPlaced?.filter((entry) => entry.player === 'Dolce');
+      expect(dolce?.find((entry) => entry.group === 'D')?.placed).toBe(6);
+      expect(dolce?.find((entry) => entry.group === 'M')?.placed).toBe(1);
+    }
+    if (scenario === 'Natalie M backup') {
+      expect(placement.audit.plannedVsPlaced?.find((entry) =>
+        entry.player === 'Natalie' && entry.group === 'M')?.placed).toBeGreaterThan(0);
+    }
+  });
+
   it.each(['Dolce', 'Meg', 'Natalie', 'Sophia'])(
     'completes relaxed Chelsea generation when %s is absent',
     (absentPlayer) => {

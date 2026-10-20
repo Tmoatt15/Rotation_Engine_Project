@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
-import { generateRedesignSchedule, regenerateRedesignLateArrival } from '../redesign-schedule-service';
+import { generateRedesignSchedule, regenerateRedesignLateArrival, suggestBackupPlayerNames } from '../redesign-schedule-service';
 import type { LateArrivalReplanInput, LateArrivalReplanResult } from '@/engine-redesign/stage5';
 import type { PolishedPlacement } from '@/engine-redesign/stage4';
 
@@ -194,6 +194,31 @@ beforeEach(() => {
 });
 
 describe('redesign schedule service', () => {
+  it('suggests only backups whose relaxed quota and dry-run placement use the target group', async () => {
+    configureService(rotationRoster, 8);
+    vi.mocked(runStages3And4).mockImplementation((game) => ({
+      ...placement(true),
+      blocks: game.players.some((player) => player.name === 'Dolce' && player.backupPositions.includes('M'))
+        ? [{ block: 1, assignments: new Map([['CM', 'Dolce']]) }]
+        : [],
+    }));
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+
+    const suggestions = await suggestBackupPlayerNames({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      group: 'M',
+    });
+
+    expect(suggestions).toContain('Dolce');
+    expect(suggestions).not.toContain('Natalie');
+  });
+
   it('does not suggest backups when no player reaches the field-rest threshold', async () => {
     configureService(rotationRoster, 8);
     const availablePlayerNames = rotationRoster

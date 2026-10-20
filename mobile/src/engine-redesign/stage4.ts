@@ -1,5 +1,5 @@
 import type { DemandModel, NormalizedGame, QuotaAssignment } from './model';
-import { deriveRestPins, excludedFromSlot, placeStage3, positionTier } from './stage3';
+import { deriveRestPins, excludedFromSlot, groupForSlot, placeStage3, positionTier } from './stage3';
 import type { PlacementBlock, PlacementResult, FrozenBlock } from './stage3';
 
 export interface PolishMetrics {
@@ -88,7 +88,7 @@ function exchangePlayers(game: NormalizedGame, blocks: PlacementBlock[], highInd
   const low = blocks[lowIndex];
   const highSlot = [...high.assignments].find(([, player]) => player === second)?.[0];
   const lowSlot = [...low.assignments].find(([, player]) => player === first)?.[0];
-  if (!highSlot || !lowSlot) return null;
+  if (!highSlot || !lowSlot || groupForSlot(highSlot) !== groupForSlot(lowSlot)) return null;
   const highAllowed = exchangeAllowed(game, blocks, highIndex, highSlot, first, rest);
   const lowAllowed = exchangeAllowed(game, blocks, lowIndex, lowSlot, second, rest);
   if (!highAllowed || !lowAllowed) return null;

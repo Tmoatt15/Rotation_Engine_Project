@@ -9,7 +9,7 @@ import type { SeasonRosterPlayer } from '@/engine/models';
 import { appendBackupPosition, backupSuggestions, formatGeneralPositions } from '@/coverage-utils';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getRoster, updateRoster } from '@/services/team-service';
-import { RedesignOfferError } from '@/services/redesign-schedule-service';
+import { RedesignOfferError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
 
 const palette = {
   ink: '#17221f',
@@ -108,7 +108,14 @@ export default function GamedayBackupSuggestScreen() {
         const availablePlayerNames = parseAvailablePlayers(parameter(rawAvailablePlayerNames, 'available-player list'));
         const suggestedNames = rawSuggestedPlayerNames
           ? parsePlayerNames(rawSuggestedPlayerNames, 'suggested-player list')
-          : null;
+          : await suggestBackupPlayerNames({
+            teamId,
+            gameNumber,
+            availablePlayerNames,
+            firstHalfGk: rawFirstHalfGk || null,
+            secondHalfGk: rawSecondHalfGk || null,
+            group: groupValue,
+          });
         const roster = await getRoster(teamId);
         if (!Array.isArray(roster.players)) throw new Error('The roster response did not contain a player list.');
         if (!active) return;
@@ -151,13 +158,29 @@ export default function GamedayBackupSuggestScreen() {
     [availableNames, group, players, suggestedNames],
   );
 
-  async function generateAfterBackup(request: ScheduleRequest, allowRelaxedMinimums = false, allowRelaxedMaximums = false) {
+  async function generateAfterBackup(
+    request: ScheduleRequest,
+    backupPlayerName: string,
+    backupGroup: FieldGroup,
+    allowRelaxedMinimums = false,
+    allowRelaxedMaximums = false,
+  ) {
     try {
       const schedule = await generateLocalSchedule({
         ...request,
         allowRelaxedMinimums,
         allowRelaxedMaximums,
       });
+      const missedBackup = schedule.placement_audit?.plannedVsPlaced?.find((entry) =>
+        entry.player === backupPlayerName && entry.group === backupGroup && entry.placed === 0);
+      if (missedBackup) {
+        Alert.alert(
+          'Backup not needed',
+          `${backupPlayerName} wasn't needed at ${backupGroup} this game`,
+          [{ text: 'OK', onPress: () => router.replace({ pathname: '/schedule', params: { data: JSON.stringify(schedule) } }) }],
+        );
+        return;
+      }
       router.replace({ pathname: '/schedule', params: { data: JSON.stringify(schedule) } });
     } catch (generationError) {
       if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'position-shortage') {
@@ -188,7 +211,7 @@ export default function GamedayBackupSuggestScreen() {
                   firstHalfGk: request.firstHalfGk ?? '',
                   secondHalfGk: request.secondHalfGk ?? '',
                   warning: nextGroupWarning,
-                  ...(suggestedNames.length ? { suggestedPlayerNames: JSON.stringify(suggestedNames) } : {}),
+                  suggestedPlayerNames: JSON.stringify(suggestedNames),
                 },
               });
             }
@@ -201,7 +224,7 @@ export default function GamedayBackupSuggestScreen() {
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
-            if (button.action === 'allow-relaxed') void generateAfterBackup(request, true);
+            if (button.action === 'allow-relaxed') void generateAfterBackup(request, backupPlayerName, backupGroup, true);
           },
         })));
         return;
@@ -219,7 +242,7 @@ export default function GamedayBackupSuggestScreen() {
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
-            if (button.action === 'allow-relaxed-maximums') void generateAfterBackup(request, true, true);
+            if (button.action === 'allow-relaxed-maximums') void generateAfterBackup(request, backupPlayerName, backupGroup, true, true);
             else if (button.action === 'suggest-backup') {
               if (!isFieldGroup(nextGroup)) {
                 Alert.alert('Backup suggestions unavailable', 'The schedule warning did not include a valid position group.');
@@ -235,7 +258,7 @@ export default function GamedayBackupSuggestScreen() {
                   firstHalfGk: request.firstHalfGk ?? '',
                   secondHalfGk: request.secondHalfGk ?? '',
                   warning: nextGroupWarning,
-                  ...(suggestedNames.length ? { suggestedPlayerNames: JSON.stringify(suggestedNames) } : {}),
+                  suggestedPlayerNames: JSON.stringify(suggestedNames),
                 },
               });
             }
@@ -264,7 +287,7 @@ export default function GamedayBackupSuggestScreen() {
       );
       await updateRoster(scheduleRequest.teamId, updatedRoster);
       router.back();
-      void generateAfterBackup(scheduleRequest);
+      void generateAfterBackup(scheduleRequest, playerName, group);
     } catch (saveError) {
       submissionStarted.current = false;
       setSaving(false);
@@ -295,7 +318,7 @@ export default function GamedayBackupSuggestScreen() {
                 <Text style={styles.warningText}>{warning}</Text>
                 <Text style={styles.helperText}>Choose an available player to add a {group} backup. The schedule will regenerate after you add one.</Text>
                 {candidates.length === 0 ? (
-                  <Text style={styles.emptyText}>No available players can take this backup. Return to Gameday to review the roster.</Text>
+                  <Text style={styles.emptyText}>No backup helps this game</Text>
                 ) : (
                   <View style={styles.playerList}>
                     {candidates.map((player) => (

@@ -4,9 +4,10 @@ import type { LiveSchedule, ScheduleBlock, SeasonRosterPlayer } from '@/engine/m
 import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
 import type { RedesignPlayerInput } from '@/engine-redesign/model';
 import { replanLateArrival } from '@/engine-redesign/stage5';
+import type { FrozenBlock, PlacementAudit } from '@/engine-redesign/stage3';
 import { offerForFailure, offerForRelaxedMinimums } from '@/engine-redesign/stage6';
 import type { Stage6Offer } from '@/engine-redesign/stage6';
-import type { FrozenBlock } from '@/engine-redesign/stage3';
+import { backupSuggestions } from '@/coverage-utils';
 import { getLocalTeam, getRoster, getSeasonSettings } from './team-service';
 import { getSavedReports } from './report-service';
 import { getDatabase } from '@/storage/database';
@@ -503,10 +504,52 @@ async function context(input: { teamId: string; gameNumber: number; availablePla
     seasonRotation,
   }, roster);
   const demand = buildDemandModel(game);
-  return { settings, team, game, demand };
+  return { settings, team, game, demand, roster };
 }
 
-type RedesignSchedule = LiveSchedule & { formation: string; warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'redesign' };
+type RedesignSchedule = LiveSchedule & {
+  formation: string;
+  warnings: string[];
+  errors: string[];
+  available_player_names: string[];
+  engine_source: 'redesign';
+  placement_audit?: PlacementAudit;
+};
+
+export async function suggestBackupPlayerNames(input: {
+  teamId: string;
+  gameNumber: number;
+  availablePlayerNames: string[];
+  firstHalfGk?: string | null;
+  secondHalfGk?: string | null;
+  group: FieldGroup;
+}): Promise<string[]> {
+  const { game, demand, roster } = await context(input);
+  const availableRoster = roster.filter((player) => input.availablePlayerNames.includes(player.name));
+  const candidates = backupSuggestions(availableRoster, input.group);
+  const candidateNames = new Set(candidates.map((candidate) => candidate.name));
+  const qualifyingNames: string[] = [];
+
+  for (const player of game.players) {
+    if (!candidateNames.has(player.name)) continue;
+    const simulatedGame = {
+      ...game,
+      players: game.players.map((candidate) => candidate.name === player.name
+        ? { ...candidate, backupPositions: [...new Set([...candidate.backupPositions, input.group])] }
+        : candidate),
+    };
+    const quotas = assignQuotas(simulatedGame, demand, true, true);
+    if (quotas.audit.errors?.length
+      || (quotas.quotas.find((quota) => quota.player === player.name)?.groupTargets?.[input.group] ?? 0) <= 0) continue;
+    const placement = runStages3And4(simulatedGame, demand, quotas);
+    if (!placement.complete) continue;
+    const placedInGroup = placement.blocks.reduce((total, block) => total
+      + [...block.assignments.keys()].filter((slot) =>
+        demand.fieldSlots.some((fieldSlot) => fieldSlot.slot === slot && fieldSlot.group === input.group)).length, 0);
+    if (placedInGroup > 0) qualifyingNames.push(player.name);
+  }
+  return qualifyingNames;
+}
 
 export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean; allowRelaxedMaximums?: boolean }): Promise<RedesignSchedule> {
   const { settings, team, game, demand } = await context(input);
@@ -579,10 +622,14 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     relaxedWarnings.push(`Playing time relaxed to fit ${availablePlayerCount} available players (maximums increased for ${relaxedMaximumCount}).`);
   }
   if (placement.audit.relaxedLookaheadFallback) relaxedWarnings.push('Used relaxed placement look-ahead.');
+  for (const use of placement.audit.unplannedBackupUses ?? []) {
+    const blockLabel = use.blocks === 1 ? 'block' : 'blocks';
+    relaxedWarnings.push(`We had to use ${use.player} at ${use.group} for ${use.blocks} ${blockLabel} because no other player could take that slot.`);
+  }
   const result: RedesignSchedule = {
     team_id: input.teamId, team_name: team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name), formation: game.formation,
-    block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
+    block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation), placement_audit: placement.audit,
     blocks: scheduleBlocks(game, demand, placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedWarnings], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});

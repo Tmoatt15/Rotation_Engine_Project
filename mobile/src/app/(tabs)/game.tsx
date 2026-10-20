@@ -12,7 +12,7 @@ import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
-import { RedesignOfferError } from '@/services/redesign-schedule-service';
+import { RedesignOfferError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
 
 const palette = {
@@ -245,9 +245,6 @@ export default function GameScreen() {
         const positionGroupWarning = typeof offer.context.positionGroupWarning === 'string'
           ? offer.context.positionGroupWarning
           : offer.message;
-        const suggestedPlayerNames = Array.isArray(offer.context.suggestedPlayerNames)
-          ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
-          : [];
         const keeperNames = Array.isArray(offer.context.keeperNames) ? offer.context.keeperNames.filter((value): value is string => typeof value === 'string') : [];
         const availablePlayerNames = playerNames.filter((name) => !unavailable.has(name));
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
@@ -255,23 +252,41 @@ export default function GameScreen() {
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
           onPress: () => {
             if (button.action === 'suggest-backup' || button.action === 'go-to-builder' || button.action === 'choose-player') {
-              if (!positionGroup || !['D', 'M', 'F'].includes(positionGroup) || !activeTeamId) {
+              const backupGroup = positionGroup === 'D' || positionGroup === 'M' || positionGroup === 'F'
+                ? positionGroup
+                : null;
+              if (!backupGroup || !activeTeamId) {
                 setError('Backup suggestions are not available for this schedule issue.');
                 return;
               }
-              router.push({
-                pathname: '/gameday-backup-suggest',
-                params: {
-                  group: positionGroup,
-                  teamId: activeTeamId,
-                  gameNumber: String(confirmedGameNumber),
-                  availablePlayerNames: JSON.stringify(availablePlayerNames),
-                  firstHalfGk: selectedFirstHalfGK ?? '',
-                  secondHalfGk: selectedSecondHalfGK ?? '',
-                  warning: positionGroupWarning,
-                  ...(suggestedPlayerNames.length ? { suggestedPlayerNames: JSON.stringify(suggestedPlayerNames) } : {}),
-                },
-              });
+              void (async () => {
+                try {
+                  const qualifyingNames = await suggestBackupPlayerNames({
+                    teamId: activeTeamId!,
+                    gameNumber: confirmedGameNumber,
+                    availablePlayerNames,
+                    firstHalfGk: selectedFirstHalfGK,
+                    secondHalfGk: selectedSecondHalfGK,
+                    group: backupGroup,
+                  });
+                  router.push({
+                    pathname: '/gameday-backup-suggest',
+                    params: {
+                      group: backupGroup,
+                      teamId: activeTeamId,
+                      gameNumber: String(confirmedGameNumber),
+                      availablePlayerNames: JSON.stringify(availablePlayerNames),
+                      firstHalfGk: selectedFirstHalfGK ?? '',
+                      secondHalfGk: selectedSecondHalfGK ?? '',
+                      warning: positionGroupWarning,
+                      suggestedPlayerNames: JSON.stringify(qualifyingNames),
+                    },
+                  });
+                } catch (suggestionError) {
+                  const message = suggestionError instanceof Error ? suggestionError.message : 'Unable to test backup suggestions.';
+                  Alert.alert('Backup suggestions unavailable', message);
+                }
+              })();
             }
             else if (button.action === 'allow-relaxed') void generateSchedule(undefined, true);
             else if (button.action === 'allow-relaxed-maximums') void generateSchedule(undefined, true, true);
