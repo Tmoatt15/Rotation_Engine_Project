@@ -22,14 +22,14 @@ export interface PlacementAudit {
   softRestFallback: boolean;
   outOfPositionBlocks: Record<string, number>;
   errors: string[];
-  plannedVsPlaced?: Array<{
+  plannedVsPlaced?: {
     player: string;
     group: 'D' | 'M' | 'F';
     planned: number;
     placed: number;
     difference: number;
-  }>;
-  unplannedBackupUses?: Array<{ player: string; group: 'D' | 'M' | 'F'; blocks: number }>;
+  }[];
+  unplannedBackupUses?: { player: string; group: 'D' | 'M' | 'F'; blocks: number }[];
   relaxationTier?: number;
   relaxedLookaheadFallback?: boolean;
   failureReason?: 'no-eligible-player' | 'minimum-window-exhausted' | 'maximum-capacity-exhausted' | 'search-budget-exhausted';
