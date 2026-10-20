@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { copyDiagnosticSnapshot, getDefaultDiagnosticFilename, shareDiagnosticSnapshot } from '@/services/diagnostic-service';
+import { copyRosterSnapshot, shareRosterSnapshot } from '@/services/roster-export-service';
 import { buildHash } from '@/buildInfo';
 
 const palette = { ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1', green: '#19634b', greenSoft: '#dcebe2', coral: '#d96f4c' };
@@ -87,6 +88,38 @@ export default function AboutScreen() {
     }
   }
 
+  async function exportRoster() {
+    setSharing(true);
+    setMessage(null);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        InteractionManager.runAfterInteractions(() => {
+          void shareRosterSnapshot().then(resolve, reject);
+        });
+      });
+      setMessage('Roster-only export is ready to share.');
+    } catch (exportError) {
+      const detail = exportError instanceof Error ? exportError.message : 'Unknown export error.';
+      console.error('[roster-export] Export failed:', exportError);
+      setMessage('Unable to create roster-only export.');
+      Alert.alert('Roster export failed', detail);
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyRoster() {
+    setMessage(null);
+    try {
+      await copyRosterSnapshot();
+      setMessage('Roster JSON copied. Paste it into Notes or a message.');
+    } catch (copyError) {
+      const detail = copyError instanceof Error ? copyError.message : 'Unknown clipboard error.';
+      console.error('[roster-export] Clipboard copy failed:', copyError);
+      Alert.alert('Copy failed', detail);
+    }
+  }
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -127,6 +160,14 @@ export default function AboutScreen() {
               </Pressable>
               <Pressable onPress={() => void copyDiagnostics()} disabled={sharing} style={styles.copyButton}>
                 <Text style={styles.copyText}>Copy diagnostic JSON</Text>
+              </Pressable>
+              <Text style={styles.detail}>Share just team rosters and the settings needed to reproduce them.</Text>
+              <Pressable onPress={() => void exportRoster()} disabled={sharing} style={[styles.shareButton, sharing && styles.disabledButton]}>
+                <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share roster-only export'}</Text>
+                <SymbolView name={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }} size={18} tintColor={palette.panel} />
+              </Pressable>
+              <Pressable onPress={() => void copyRoster()} disabled={sharing} style={styles.copyButton}>
+                <Text style={styles.copyText}>Copy roster JSON</Text>
               </Pressable>
               {message && <Text style={styles.message}>{message}</Text>}
             </Section>
