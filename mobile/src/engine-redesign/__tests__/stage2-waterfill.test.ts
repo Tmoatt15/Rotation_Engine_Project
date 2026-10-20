@@ -195,7 +195,7 @@ describe('Stage 2 per-group water-fill', () => {
     expect(runStages3And4(game, demand, relaxed).complete).toBe(true);
   });
 
-  it('improves the relaxed playing-time spread when a midfield backup enables more balanced placement', () => {
+  it('keeps relaxed playing time balanced with or without an extra midfield backup', () => {
     const availablePlayerNames = chelseaRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
@@ -235,8 +235,40 @@ describe('Stage 2 per-group water-fill', () => {
 
     expect(baseline.complete).toBe(true);
     expect(withBackup.complete).toBe(true);
-    expect(baseline.spread).toBe(3);
-    expect(withBackup.spread).toBe(1);
+    expect(baseline.spread).toBeLessThanOrEqual(2);
+    expect(withBackup.spread).toBeLessThanOrEqual(2);
+    expect(withBackup.spread).toBeLessThanOrEqual(baseline.spread);
+  });
+
+  it('balances the Chelsea roster when maximums are relaxed', () => {
+    const availablePlayerNames = chelseaRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const game = normalizeGame({
+      format: '9v9',
+      formation: '3-3-2',
+      totalBlocks: 8,
+      availablePlayerNames,
+      firstHalfKeeper: 'Maddie',
+      secondHalfKeeper: 'Avery',
+    }, chelseaRoster);
+    const demand = buildDemandModel(game);
+    const quotas = assignQuotas(game, demand, true, true);
+    const nonKeeperFieldBlocks = quotas.quotas
+      .filter((quota) => quota.keeperBlocks === 0)
+      .map((quota) => quota.fieldTarget + quota.pinnedBlocks.length);
+    const placement = runStages3And4(game, demand, quotas);
+    const quotasByPlayer = new Map(quotas.quotas.map((quota) => [quota.player, quota]));
+    const placedNonKeeperFieldBlocks = game.players
+      .filter((player) => player.available && (quotasByPlayer.get(player.name)?.keeperBlocks ?? 0) === 0)
+      .map((player) => placement.blocks.filter((block) => [...block.assignments.values()].includes(player.name)).length);
+
+    expect(quotas.audit.errors).toEqual([]);
+    expect(placement.complete).toBe(true);
+    expect(Math.max(...nonKeeperFieldBlocks)).toBeLessThanOrEqual(7);
+    expect(Math.max(...nonKeeperFieldBlocks) - Math.min(...nonKeeperFieldBlocks)).toBeLessThanOrEqual(2);
+    expect(Math.max(...placedNonKeeperFieldBlocks)).toBeLessThanOrEqual(7);
+    expect(Math.max(...placedNonKeeperFieldBlocks) - Math.min(...placedNonKeeperFieldBlocks)).toBeLessThanOrEqual(2);
   });
 
   it('audits a soft guardrail relaxation while preserving the 40% floor', () => {

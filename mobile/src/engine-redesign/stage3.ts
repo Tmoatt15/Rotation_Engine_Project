@@ -503,6 +503,49 @@ function placeDeterministically(
       }
     }
   }
+  if (quotas.audit.relaxedMaximums?.length) {
+    const quotaByPlayer = new Map(quotas.quotas.map((quota) => [quota.player, quota]));
+    const frozenBlocks = new Set(frozen.map((block) => block.block));
+    const nonKeeperLimit = game.totalBlocks - 1;
+    let moved = true;
+    while (moved) {
+      moved = false;
+      const nonKeepers = game.players
+        .filter((player) => player.available && (quotaByPlayer.get(player.name)?.keeperBlocks ?? 0) === 0)
+        .map((player) => ({ player, count: state.placed!.get(player.name) ?? 0 }))
+        .sort((left, right) => right.count - left.count || left.player.name.localeCompare(right.player.name));
+      const lowestCount = nonKeepers[nonKeepers.length - 1]?.count ?? 0;
+      for (const source of nonKeepers) {
+        const sourceQuota = quotaByPlayer.get(source.player.name);
+        const needsBalancing = source.count > nonKeeperLimit || source.count - lowestCount > 2;
+        if (!sourceQuota || !needsBalancing
+          || source.count <= sourceQuota.fieldMin + sourceQuota.pinnedBlocks.length) continue;
+        const recipients = [...nonKeepers]
+          .filter((candidate) => candidate.player.name !== source.player.name
+            && candidate.count < nonKeeperLimit)
+          .sort((left, right) => left.count - right.count || left.player.name.localeCompare(right.player.name));
+        for (const recipient of recipients) {
+          for (const block of blocks) {
+            if (frozenBlocks.has(block.block)
+              || pinned.get(block.block)?.has(source.player.name)
+              || pinned.get(block.block)?.has(recipient.player.name)
+              || (!softRest && rest.get(recipient.player.name)?.has(block.block))
+              || assignmentsHasPlayer(block.assignments, recipient.player.name)
+              || isKeeperHalf(game, recipient.player, block.block)) continue;
+            const slot = [...block.assignments].find(([, player]) => player === source.player.name)?.[0];
+            if (!slot || !isFieldEligible(game, recipient.player, block.block, slot)) continue;
+            block.assignments.set(slot, recipient.player.name);
+            state.placed!.set(source.player.name, source.count - 1);
+            state.placed!.set(recipient.player.name, recipient.count + 1);
+            moved = true;
+            break;
+          }
+          if (moved) break;
+        }
+        if (moved) break;
+      }
+    }
+  }
   const unfilledSlots = blocks.flatMap((block) => demand.fieldSlots
     .filter((slot) => !block.assignments.has(slot.slot))
     .map((slot) => ({ block: block.block, slot: slot.slot })));

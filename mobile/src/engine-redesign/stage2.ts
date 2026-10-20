@@ -526,8 +526,7 @@ function buildWaterfillQuotaAttempt(
           .filter((candidate) => (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group))
             && playerTotal(candidate.player.name) < candidate.maximum)
           .sort((left, right) =>
-            (playerTotal(left.player.name) + left.keeperBlocks)
-              - (playerTotal(right.player.name) + right.keeperBlocks)
+            playerTotal(left.player.name) - playerTotal(right.player.name)
             || left.player.name.localeCompare(right.player.name));
         const candidate = candidates[0];
         if (candidate && gainOne(candidate, group, false)) filledSlot = true;
