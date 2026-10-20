@@ -261,14 +261,23 @@ export default function GameScreen() {
               }
               void (async () => {
                 try {
-                  const qualifyingNames = await suggestBackupPlayerNames({
-                    teamId: activeTeamId!,
-                    gameNumber: confirmedGameNumber,
-                    availablePlayerNames,
-                    firstHalfGk: selectedFirstHalfGK,
-                    secondHalfGk: selectedSecondHalfGK,
-                    group: backupGroup,
-                  });
+                  const offeredSuggestions = Array.isArray(offer.context.suggestedPlayerNames)
+                    ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
+                    : null;
+                  const qualifyingNames = offer.kind === 'relaxed-maximums'
+                    ? offeredSuggestions ?? []
+                    : offeredSuggestions ?? await suggestBackupPlayerNames({
+                      teamId: activeTeamId!,
+                      gameNumber: confirmedGameNumber,
+                      availablePlayerNames,
+                      firstHalfGk: selectedFirstHalfGK,
+                      secondHalfGk: selectedSecondHalfGK,
+                      group: backupGroup,
+                    });
+                  if (!qualifyingNames.length) {
+                    Alert.alert('Backup suggestions unavailable', 'No backup currently qualifies for this position group.');
+                    return;
+                  }
                   router.push({
                     pathname: '/gameday-backup-suggest',
                     params: {

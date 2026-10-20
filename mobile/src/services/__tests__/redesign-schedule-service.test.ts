@@ -136,6 +136,26 @@ function placementWithFieldLoad(totalBlocks: number, player: string, group: 'D' 
   };
 }
 
+function mockRestRiskOffer(
+  totalBlocks: number,
+  atRiskPlayer: string,
+  group: 'D' | 'M' | 'F',
+  atRiskFieldBlocks: number,
+  qualifyingNames: string[],
+): void {
+  vi.mocked(runStages3And4)
+    .mockReturnValueOnce(placement(false))
+    .mockReturnValueOnce(placement(false))
+    .mockReturnValueOnce(placementWithFieldLoad(totalBlocks, atRiskPlayer, group, atRiskFieldBlocks))
+    .mockImplementation((game) => {
+      const candidate = game.players.find((player) =>
+        qualifyingNames.includes(player.name) && player.backupPositions.includes(group));
+      return candidate
+        ? placementWithFieldLoad(totalBlocks, candidate.name, group, 1)
+        : placement(true);
+    });
+}
+
 function configureService(roster: SeasonRosterPlayer[], totalBlocks: number, rotation: WaterfillRotationState = {}): void {
   mocks.getLocalTeam.mockResolvedValue({ id: 'team-1', name: 'Test Team' });
   mocks.getRoster.mockResolvedValue({ players: roster });
@@ -248,15 +268,110 @@ describe('redesign schedule service', () => {
     });
   });
 
-  it.each([6, 8, 10, 12])('suggests a backup for a non-keeper with at least totalBlocks - 1 field blocks (%d blocks)', async (totalBlocks) => {
-    configureService(rotationRoster, totalBlocks);
-    vi.mocked(runStages3And4)
-      .mockReturnValueOnce(placement(false))
-      .mockReturnValueOnce(placement(false))
-      .mockReturnValueOnce(placementWithFieldLoad(totalBlocks, 'Brooklyn', 'M', totalBlocks - 1));
+  it('does not offer a backup when a rest alert has no qualifying candidates', async () => {
+    configureService(rotationRoster, 8);
+    mockRestRiskOffer(8, 'Brooklyn', 'D', 7, []);
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      offer: {
+        kind: 'relaxed-maximums',
+        buttons: [
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: expect.objectContaining({
+          positionGroup: 'D',
+          suggestedPlayerNames: [],
+        }),
+      },
+    });
+  });
+
+  it('recomputes qualified backups after a saved backup changes the roster', async () => {
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const updatedRoster = rotationRoster.map((player) => player.name === 'Selma'
+      ? { ...player, backup_positions: [...player.backup_positions, 'D'] }
+      : player);
+    configureService(rotationRoster, 8);
+    mockRestRiskOffer(8, 'Brooklyn', 'D', 7, ['Selma']);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      offer: {
+        buttons: expect.arrayContaining([{ label: 'Suggest Backup', action: 'suggest-backup' }]),
+        context: expect.objectContaining({ suggestedPlayerNames: ['Selma'] }),
+      },
+    });
+
+    vi.mocked(runStages3And4).mockReset();
+    configureService(updatedRoster, 8);
+    mockRestRiskOffer(8, 'Brooklyn', 'D', 7, ['Selma']);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      offer: {
+        buttons: [
+          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
+        context: expect.objectContaining({ suggestedPlayerNames: [] }),
+      },
+    });
+    expect(mocks.getRoster).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers a different qualifying backup after the saved player is excluded', async () => {
+    const roster = rotationRoster.map((player) => player.name === 'Reese'
+      ? { ...player, backup_positions: [...player.backup_positions, 'D'] }
+      : player);
+    const availablePlayerNames = roster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    configureService(roster, 8);
+    mockRestRiskOffer(8, 'Brooklyn', 'D', 7, ['Reese', 'Selma']);
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+    })).rejects.toMatchObject({
+      offer: {
+        buttons: expect.arrayContaining([{ label: 'Suggest Backup', action: 'suggest-backup' }]),
+        context: expect.objectContaining({ suggestedPlayerNames: ['Selma'] }),
+      },
+    });
+  });
+
+  it.each([6, 8, 10, 12])('suggests a backup for a non-keeper with at least totalBlocks - 1 field blocks (%d blocks)', async (totalBlocks) => {
+    configureService(rotationRoster, totalBlocks);
+    mockRestRiskOffer(totalBlocks, 'Brooklyn', 'M', totalBlocks - 1, ['Dolce']);
+    const availablePlayerNames = rotationRoster
+      .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
+      .map((player) => player.name);
+    const hasQualifyingBackup = totalBlocks <= 8;
 
     await expect(generateRedesignSchedule({
       teamId: 'team-1',
@@ -269,13 +384,14 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          { label: 'Suggest Backup', action: 'suggest-backup' },
+          ...(hasQualifyingBackup ? [{ label: 'Suggest Backup', action: 'suggest-backup' }] : []),
           { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining(`Brooklyn (${totalBlocks - 1}/${totalBlocks} field blocks)`),
+          suggestedPlayerNames: hasQualifyingBackup ? ['Dolce'] : [],
         }),
       },
     });
@@ -283,13 +399,11 @@ describe('redesign schedule service', () => {
 
   it.each([6, 8, 10, 12])('uses totalBlocks / 2 for the keeper field-rest threshold (%d blocks)', async (totalBlocks) => {
     configureService(rotationRoster, totalBlocks);
-    vi.mocked(runStages3And4)
-      .mockReturnValueOnce(placement(false))
-      .mockReturnValueOnce(placement(false))
-      .mockReturnValueOnce(placementWithFieldLoad(totalBlocks, 'Avery', 'M', totalBlocks / 2));
+    mockRestRiskOffer(totalBlocks, 'Avery', 'M', totalBlocks / 2, ['Dolce']);
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
+    const hasQualifyingBackup = totalBlocks <= 8;
 
     await expect(generateRedesignSchedule({
       teamId: 'team-1',
@@ -302,13 +416,14 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          { label: 'Suggest Backup', action: 'suggest-backup' },
+          ...(hasQualifyingBackup ? [{ label: 'Suggest Backup', action: 'suggest-backup' }] : []),
           { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining(`Avery (${totalBlocks / 2}/${totalBlocks / 2} field blocks)`),
+          suggestedPlayerNames: hasQualifyingBackup ? ['Dolce'] : [],
         }),
       },
     });
@@ -389,7 +504,7 @@ describe('redesign schedule service', () => {
     expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
   });
 
-  it('keeps group-specific suggestions when total field-player capacity is sufficient', async () => {
+  it('keeps group-specific diagnostics when no backup passes the dry run', async () => {
     const roster = [
       ...Array.from({ length: 12 }, (_, index) =>
         rosterPlayer(`Defender ${index + 1}`, 'rotational', ['D'], { primaryPositions: ['ANY'] })),
@@ -410,13 +525,13 @@ describe('redesign schedule service', () => {
         kind: 'relaxed-maximums',
         message: expect.stringContaining('Relaxed generation failed: Midfield group (M)'),
         buttons: [
-          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           failureType: 'relaxed-maximums-failed',
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining('Add an M backup and try again.'),
+          suggestedPlayerNames: [],
         }),
       },
     });
@@ -508,7 +623,6 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: {
@@ -537,7 +651,6 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: { failureType: 'relaxed-maximums-failed', positionGroup: 'D' },
