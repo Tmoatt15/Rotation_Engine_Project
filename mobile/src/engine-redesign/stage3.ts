@@ -507,8 +507,15 @@ function placeDeterministically(
     const quotaByPlayer = new Map(quotas.quotas.map((quota) => [quota.player, quota]));
     const frozenBlocks = new Set(frozen.map((block) => block.block));
     const nonKeeperLimit = game.totalBlocks - 1;
+    const seenAssignmentStates = new Set<string>();
     let moved = true;
     while (moved) {
+      const assignmentState = JSON.stringify(blocks.map((block) => [
+        block.block,
+        [...block.assignments].sort(([left], [right]) => left.localeCompare(right)),
+      ]));
+      if (seenAssignmentStates.has(assignmentState)) break;
+      seenAssignmentStates.add(assignmentState);
       moved = false;
       const nonKeepers = game.players
         .filter((player) => player.available && (quotaByPlayer.get(player.name)?.keeperBlocks ?? 0) === 0)

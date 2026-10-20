@@ -262,13 +262,45 @@ describe('Stage 2 per-group water-fill', () => {
     const placedNonKeeperFieldBlocks = game.players
       .filter((player) => player.available && (quotasByPlayer.get(player.name)?.keeperBlocks ?? 0) === 0)
       .map((player) => placement.blocks.filter((block) => [...block.assignments.values()].includes(player.name)).length);
+    const placedKeeperFieldBlocks = game.players
+      .filter((player) => (quotasByPlayer.get(player.name)?.keeperBlocks ?? 0) > 0)
+      .map((player) => placement.blocks.filter((block) => [...block.assignments.values()].includes(player.name)).length);
 
     expect(quotas.audit.errors).toEqual([]);
     expect(placement.complete).toBe(true);
+    expect(placedKeeperFieldBlocks).toEqual([3, 3]);
     expect(Math.max(...nonKeeperFieldBlocks)).toBeLessThanOrEqual(7);
     expect(Math.max(...nonKeeperFieldBlocks) - Math.min(...nonKeeperFieldBlocks)).toBeLessThanOrEqual(2);
     expect(Math.max(...placedNonKeeperFieldBlocks)).toBeLessThanOrEqual(7);
-    expect(Math.max(...placedNonKeeperFieldBlocks) - Math.min(...placedNonKeeperFieldBlocks)).toBeLessThanOrEqual(2);
+    expect(Math.max(...placedNonKeeperFieldBlocks)).toBe(7);
+    expect(Math.min(...placedNonKeeperFieldBlocks)).toBe(6);
+    expect(Math.max(...placedNonKeeperFieldBlocks) - Math.min(...placedNonKeeperFieldBlocks)).toBe(1);
+  });
+
+  it.each(['Dolce', 'Meg', 'Natalie', 'Sophia'])(
+    'completes relaxed Chelsea generation when %s is absent',
+    (absentPlayer) => {
+      const availablePlayerNames = chelseaRoster
+        .filter((player) => player.name !== absentPlayer)
+        .map((player) => player.name);
+      const game = normalizeGame({
+        format: '9v9',
+        formation: '3-3-2',
+        totalBlocks: 8,
+        availablePlayerNames,
+        firstHalfKeeper: 'Maddie',
+        secondHalfKeeper: 'Avery',
+      }, chelseaRoster);
+      const demand = buildDemandModel(game);
+      const quotas = assignQuotas(game, demand, true, true);
+      const placement = runStages3And4(game, demand, quotas);
+
+      expect(quotas.audit.relaxedMaximums?.length).toBeGreaterThan(0);
+      expect(placement.complete).toBe(true);
+    },
+  );
+
+  it('audits a soft guardrail relaxation while preserving the 40% floor', () => {
   });
 
   it('audits a soft guardrail relaxation while preserving the 40% floor', () => {
