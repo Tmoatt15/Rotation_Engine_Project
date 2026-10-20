@@ -1791,6 +1791,40 @@ describe('quota fairness and controlled coverage', () => {
   });
 });
 
+describe('graduated maximum balancing', () => {
+  it('balances the Chelsea roster across tiers when maximums are relaxed', () => {
+    const players = [
+      createPlayer({ name: 'Avery', group: 'rotational', general_positions: ['M'], primary_positions: ['M', 'GK'] }),
+      createPlayer({ name: 'Brooklyn', group: 'core', general_positions: ['M'], primary_positions: ['CM'], backup_positions: ['D'] }),
+      createPlayer({ name: 'Dolce', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'] }),
+      createPlayer({ name: 'Kelsey', group: 'core', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['D'] }),
+      createPlayer({ name: 'Maddie', group: 'core', general_positions: ['F'], primary_positions: ['RF', 'GK'] }),
+      createPlayer({ name: 'Meg', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['M'] }),
+      createPlayer({ name: 'Natalie', group: 'rotational', general_positions: ['D'], primary_positions: ['LB'] }),
+      createPlayer({ name: 'Rachel', group: 'rotational', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['M'] }),
+      createPlayer({ name: 'Reese', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['F'] }),
+      createPlayer({ name: 'Selma', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'] }),
+      createPlayer({ name: 'Sophia', group: 'core', general_positions: ['D'], primary_positions: ['CB'] }),
+    ];
+    const result = generateSchedule({
+      game_format: '9v9',
+      total_blocks: 8,
+      formation: '3-3-2',
+      first_half_gk: 'Maddie',
+      second_half_gk: 'Avery',
+      maximum_relaxation_level: 1,
+    }, players);
+    const fieldCounts = players
+      .filter((player) => !['Avery', 'Maddie'].includes(player.name))
+      .map((player) => player.field_blocks);
+
+    expect(result.timeline).toHaveLength(8);
+    expect(result.errors.filter((error) => /unassigned|requires .* players|slot .* is unassigned/i.test(error))).toEqual([]);
+    expect(Math.max(...fieldCounts)).toBeLessThanOrEqual(7);
+    expect(Math.max(...fieldCounts) - Math.min(...fieldCounts)).toBeLessThanOrEqual(2);
+  });
+});
+
 describe('ten-game season availability simulation', () => {
   it('balances identical rotational midfield profiles within one block', () => {
     const identicalNames = new Set(['Artur', 'Mahaswin', 'Prerith', 'Thanish']);

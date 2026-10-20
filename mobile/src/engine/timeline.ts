@@ -1079,6 +1079,9 @@ function planPositionGroups(game: Game, roster: Player[], formation: FormationCo
             : player.group === 'rotational' && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 3
               : ['developing', 'developmental'].includes(player.group) && manualOverrideCount < Math.floor(game.total_blocks * 0.9) ? 4
                 : manualOverrideCount < game.total_blocks ? 5 : 6);
+    if (game.maximum_relaxation_level !== undefined) {
+      return [lateArrivalPriority, -deficit, fieldCounts.get(player.name) ?? 0, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)];
+    }
     return game.disable_maximum_limits
       ? [lateArrivalPriority, overridePhase, manualOverrideCount, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fieldMinimumPriority, intendedBandPriority, fairnessRank(player, blockIndex)]
       : [fieldMinimumPriority, manualOverrideCount, -(deficit || targetDeficit * urgency), deficit > 0 ? 0 : extraBlocks, intendedBandPriority, totalStarts, positionStarts, positionalPriority(player, position), rawCounts.get(player.name) ?? 0, fairnessRank(player, blockIndex)];
