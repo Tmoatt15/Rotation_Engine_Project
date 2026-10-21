@@ -193,7 +193,7 @@ export default function CoverageScreen() {
                 {remainingSuggestedBackups > 0 && (
                   <View style={styles.backupPlannerBanner}>
                     <Text style={styles.backupPlannerBannerTitle}>Backup coverage is thin</Text>
-                    <Text style={styles.backupPlannerBannerDetail}>Backup Planner suggests {remainingSuggestedBackups} backups</Text>
+                    <Text style={styles.backupPlannerBannerDetail}>Backup Planner suggests adding {remainingSuggestedBackups}{countAssignedBackups(players) > 0 ? ' more' : ''} backups</Text>
                   </View>
                 )}
                 <View style={styles.card}>
