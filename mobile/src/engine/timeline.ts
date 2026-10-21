@@ -3024,32 +3024,32 @@ export function buildTimeline(game: Game, roster: Player[], startBlock = 1, froz
     }
   }
   for (const goalkeeper of roster.filter((player) => goalkeepers.some((candidate) => candidate?.name === player.name))) {
-      const goalkeeperBlock = goalkeepers.findIndex((candidate) => candidate?.name === goalkeeper.name);
-      const fieldCount = (): number => result.timeline.reduce((total, block) => total + Number(FIELD_GROUPS.some((group) => block[group].includes(goalkeeper.name))), 0);
-      while (fieldCount() < goalkeeper.gk_field_minimum_blocks) {
-        let repaired = false;
-        for (let blockIndex = 1; blockIndex < result.timeline.length - 1 && !repaired; blockIndex += 1) {
-          if (blockIndex === goalkeeperBlock) continue;
-          const block = result.timeline[blockIndex];
-          if ([block.GK, ...flatMapCompat(FIELD_GROUPS, (group) => block[group])].includes(goalkeeper.name)) continue;
-          for (const group of FIELD_GROUPS) {
-            for (const donorName of block[group]) {
-              const donor = roster.find((player) => player.name === donorName);
-              if (!donor || goalkeepers.some((candidate) => candidate?.name === donor.name) || !canCoverGroup(game, roster, goalkeeper.name, group)) continue;
-              const replacement = block[group].map((name) => name === donor.name ? goalkeeper.name : name);
-              if (!completeExactAssignmentExists(roster, replacement, slots[group], group)) continue;
-              block[group] = replacement;
-              const slot = Object.keys(block.positions).find((slotName) => block.positions[slotName] === donor.name);
-              if (slot) block.positions[slot] = goalkeeper.name;
-              block.bench = block.bench.filter((name) => name !== goalkeeper.name);
-              if (!block.bench.includes(donor.name)) block.bench.push(donor.name);
-              repaired = true;
-              break;
-            }
-            if (repaired) break;
+    const goalkeeperBlock = goalkeepers.findIndex((candidate) => candidate?.name === goalkeeper.name);
+    const fieldCount = (): number => result.timeline.reduce((total, block) => total + Number(FIELD_GROUPS.some((group) => block[group].includes(goalkeeper.name))), 0);
+    while (fieldCount() < goalkeeper.gk_field_minimum_blocks) {
+      let repaired = false;
+      for (let blockIndex = 1; blockIndex < result.timeline.length - 1 && !repaired; blockIndex += 1) {
+        if (blockIndex === goalkeeperBlock) continue;
+        const block = result.timeline[blockIndex];
+        if ([block.GK, ...flatMapCompat(FIELD_GROUPS, (group) => block[group])].includes(goalkeeper.name)) continue;
+        for (const group of FIELD_GROUPS) {
+          for (const donorName of block[group]) {
+            const donor = roster.find((player) => player.name === donorName);
+            if (!donor || goalkeepers.some((candidate) => candidate?.name === donor.name) || !canCoverGroup(game, roster, goalkeeper.name, group)) continue;
+            const replacement = block[group].map((name) => name === donor.name ? goalkeeper.name : name);
+            if (!completeExactAssignmentExists(roster, replacement, slots[group], group)) continue;
+            block[group] = replacement;
+            const slot = Object.keys(block.positions).find((slotName) => block.positions[slotName] === donor.name);
+            if (slot) block.positions[slot] = goalkeeper.name;
+            block.bench = block.bench.filter((name) => name !== goalkeeper.name);
+            if (!block.bench.includes(donor.name)) block.bench.push(donor.name);
+            repaired = true;
+            break;
+          }
+          if (repaired) break;
         }
-        if (!repaired) break;
       }
+      if (!repaired) break;
     }
   }
   const liveFieldCount = (name: string): number => result.timeline.reduce((total, candidateBlock) => total + Number(FIELD_GROUPS.some((fieldGroup) => candidateBlock[fieldGroup].includes(name))), 0);

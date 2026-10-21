@@ -50,6 +50,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "vitest run --exclude src/engine/__tests__/rotation.test.ts --maxWorkers=1",
+    "test:slow": "vitest run src/engine/__tests__/rotation.test.ts",
     "test:engine": "vitest run src/engine src/live-schedule.test.ts src/coverage.test.ts",
     "benchmark:engine": "tsx scripts/benchmark-engine.ts",
     "fingerprints:update": "tsx scripts/update-fingerprints.ts"
