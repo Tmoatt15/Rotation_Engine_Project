@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -114,7 +114,26 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const [expandedPlayerName, setExpandedPlayerName] = useState<string | null>(null);
   const jerseyRefs = useRef<Record<string, TextInput | null>>({});
   const nameRefs = useRef<Record<string, TextInput | null>>({});
+  const newPlayerNameRef = useRef<TextInput | null>(null);
+  const rosterScrollRef = useRef<ScrollView | null>(null);
+  const focusedNameInputRef = useRef<TextInput | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const keyboardTopRef = useRef<number | null>(null);
   const playersRef = useRef<Player[]>([]);
+  const revealFocusedNameInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = focusedNameInputRef.current;
+      const keyboardTop = keyboardTopRef.current;
+      if (!input || keyboardTop === null) return;
+      input.measureInWindow((_x, y, _width, height) => {
+        const overlap = y + height + 12 - keyboardTop;
+        if (overlap <= 0) return;
+        const nextOffset = scrollOffsetRef.current + overlap;
+        scrollOffsetRef.current = nextOffset;
+        rosterScrollRef.current?.scrollTo({ y: nextOffset, animated: true });
+      });
+    });
+  }, []);
   const filteredPlayers = useMemo(
     () => (filter === 'all' ? players : players.filter((player) => player.group === filter))
       .slice()
@@ -126,6 +145,31 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const allPositionsHealthy = health.length > 0 && health.every((item) => item.status === 'green') && generalGroupIssues.length === 0;
 
   useEffect(() => subscribeToTeamChanges(() => setTeamChangeVersion((version) => version + 1)), []);
+
+  useEffect(() => {
+    const keyboardShown = Keyboard.addListener('keyboardDidShow', (event) => {
+      keyboardTopRef.current = event.endCoordinates.screenY;
+      revealFocusedNameInput();
+    });
+    const keyboardHidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardTopRef.current = null;
+      focusedNameInputRef.current = null;
+    });
+    return () => {
+      keyboardShown.remove();
+      keyboardHidden.remove();
+    };
+  }, [revealFocusedNameInput]);
+
+  function focusNameInput(input: TextInput | null) {
+    if (!input) return;
+    focusedNameInputRef.current = input;
+    if (keyboardTopRef.current !== null) revealFocusedNameInput();
+  }
+
+  function blurNameInput(input: TextInput | null) {
+    if (focusedNameInputRef.current === input) focusedNameInputRef.current = null;
+  }
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -311,7 +355,14 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={80} style={styles.keyboardAvoidingView}>
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              ref={rosterScrollRef}
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              scrollEventThrottle={16}
+              onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+              onContentSizeChange={revealFocusedNameInput}>
             <View style={styles.header}>
               {!embedded && (
                 <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back">
@@ -452,6 +503,8 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
                           <TextInput
                             ref={(input) => { nameRefs.current[player.name] = input; }}
                             defaultValue={player.name}
+                            onFocus={() => focusNameInput(nameRefs.current[player.name])}
+                            onBlur={() => blurNameInput(nameRefs.current[player.name])}
                             onEndEditing={(event) => void savePlayerName(player.name, event.nativeEvent.text)}
                             style={styles.nameEditInput}
                           />
@@ -463,7 +516,7 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
               })}
             </View>}
             {!loading && <View style={styles.addPlayerCard}>
-              <TextInput value={newPlayerName} onChangeText={setNewPlayerName} onSubmitEditing={() => void addPlayer()} placeholder="Player name" placeholderTextColor={palette.muted} style={[styles.addInput, styles.addNameInput]} returnKeyType="done" />
+              <TextInput ref={newPlayerNameRef} value={newPlayerName} onChangeText={setNewPlayerName} onFocus={() => focusNameInput(newPlayerNameRef.current)} onBlur={() => blurNameInput(newPlayerNameRef.current)} onSubmitEditing={() => void addPlayer()} placeholder="Player name" placeholderTextColor={palette.muted} style={[styles.addInput, styles.addNameInput]} returnKeyType="done" />
               <TextInput value={newPlayerNumber} onChangeText={(value) => setNewPlayerNumber(value.replace(/\D/g, '').slice(0, 2))} placeholder="#" placeholderTextColor={palette.muted} keyboardType="number-pad" style={[styles.addInput, styles.numberInput]} />
               <Pressable onPress={() => void addPlayer()} disabled={!newPlayerName.trim() || saving} style={styles.addButton}><Text style={styles.addButtonText}>Add</Text></Pressable>
             </View>}

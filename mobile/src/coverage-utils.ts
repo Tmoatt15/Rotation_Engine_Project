@@ -24,14 +24,18 @@ export type RosterHelperPlayer = CoveragePlayer & {
   keeper_eligible?: boolean;
 };
 
-export type RosterCheckGroup = {
-  group: CoveragePositionGroup;
+type RosterCheckGroupDetails = {
   label: string;
   count: number;
   minimum: number;
   maximum: number;
   status: 'in-range' | 'over' | 'under';
 };
+
+export type RosterCheckGroup = RosterCheckGroupDetails & (
+  | { group: 'D' | 'M' | 'F'; backups: number; backupCoverage: 'no-cover' | 'thin' | 'covered' }
+  | { group: 'GK'; backups?: never; backupCoverage?: never }
+);
 
 export type BackupNeed = {
   group: 'D' | 'M' | 'F';
@@ -76,20 +80,29 @@ export function calculateRosterCheck(
     !isDedicatedKeeper(player) && !isMissingGeneralGroup(player),
   );
   const fieldPlayerCount = fieldPlayers.length;
-  const coverage = calculateGroupCoverage(formation, fieldPlayers);
   const groups: RosterCheckGroup[] = (['D', 'M', 'F'] as const).map((group) => {
     const center = totalSlots ? Math.round(fieldPlayerCount * slots[group] / totalSlots) : 0;
-    const count = coverage.find((item) => item.group === group);
+    const primaryGroups = fieldPlayers.filter((player) => {
+      const general = (player.general_positions ?? []).map((position) => position.trim().toUpperCase());
+      return general.includes(group) || general.includes('ANY');
+    }).length;
+    const backups = countGroupBackups(
+      fieldPlayers.filter((player) => (player.general_positions ?? [])
+        .map((position) => position.trim().toUpperCase())
+        .some((position) => ['D', 'M', 'F'].includes(position) && position !== group)),
+      group,
+    );
     const minimum = Math.max(0, center - 1);
     const maximum = center + 1;
-    const assigned = (count?.assigned ?? 0) + (count?.backups ?? 0);
     return {
       group,
       label: groupLabels[group],
-      count: assigned,
+      count: primaryGroups,
       minimum,
       maximum,
-      status: assigned < minimum ? 'under' : assigned > maximum ? 'over' : 'in-range',
+      status: primaryGroups < minimum ? 'under' : primaryGroups > maximum ? 'over' : 'in-range',
+      backups,
+      backupCoverage: backups === 0 ? 'no-cover' : backups === 1 ? 'thin' : 'covered',
     };
   });
   if (showGoalkeepers) {

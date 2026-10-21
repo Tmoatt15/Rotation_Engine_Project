@@ -63,10 +63,54 @@ describe('position analytics coverage', () => {
       ];
 
       expect(calculateRosterCheck('4-3-3', players, true)).toEqual([
-        { group: 'D', label: 'Defenders', count: 7, minimum: 6, maximum: 8, status: 'in-range' },
-        { group: 'M', label: 'Midfielders', count: 5, minimum: 4, maximum: 6, status: 'in-range' },
-        { group: 'F', label: 'Forwards', count: 6, minimum: 4, maximum: 6, status: 'in-range' },
+        { group: 'D', label: 'Defenders', count: 7, minimum: 6, maximum: 8, status: 'in-range', backups: 0, backupCoverage: 'no-cover' },
+        { group: 'M', label: 'Midfielders', count: 5, minimum: 4, maximum: 6, status: 'in-range', backups: 0, backupCoverage: 'no-cover' },
+        { group: 'F', label: 'Forwards', count: 6, minimum: 4, maximum: 6, status: 'in-range', backups: 0, backupCoverage: 'no-cover' },
         { group: 'GK', label: 'Goalies', count: 2, minimum: 2, maximum: 3, status: 'in-range' },
+      ]);
+    });
+
+    it('judges roster targets by general group and reports backup cover separately', () => {
+      const players = [
+        ...Array.from({ length: 4 }, (_, index) => ({
+          name: `Defender ${index}`,
+          general_positions: ['D'],
+          backup_positions: [],
+          keeper_eligible: index === 0,
+        })),
+        ...Array.from({ length: 7 }, (_, index) => ({
+          name: `Midfielder ${index}`,
+          general_positions: ['M'],
+          backup_positions: index < 2 ? ['D', 'F'] : [],
+          keeper_eligible: index === 0,
+        })),
+        ...Array.from({ length: 5 }, (_, index) => ({
+          name: `Forward ${index}`,
+          general_positions: ['F'],
+          backup_positions: index < 2 ? ['M'] : [],
+          keeper_eligible: index === 0,
+        })),
+      ];
+
+      const current = calculateRosterCheck('3-4-3', players, true);
+      expect(current.map(({ group, count, backups, backupCoverage, status }) => ({
+        group, count, backups, backupCoverage, status,
+      }))).toEqual([
+        { group: 'D', count: 4, backups: 2, backupCoverage: 'covered', status: 'in-range' },
+        { group: 'M', count: 7, backups: 2, backupCoverage: 'covered', status: 'in-range' },
+        { group: 'F', count: 5, backups: 2, backupCoverage: 'covered', status: 'in-range' },
+        { group: 'GK', count: 3, backups: undefined, backupCoverage: undefined, status: 'in-range' },
+      ]);
+
+      const thin = calculateRosterCheck('3-4-3', players.map((player) => ({
+        ...player,
+        backup_positions: player.name === 'Midfielder 0' ? ['F'] : [],
+      })), true);
+      expect(thin.map(({ group, backups, backupCoverage }) => ({ group, backups, backupCoverage }))).toEqual([
+        { group: 'D', backups: 0, backupCoverage: 'no-cover' },
+        { group: 'M', backups: 0, backupCoverage: 'no-cover' },
+        { group: 'F', backups: 1, backupCoverage: 'thin' },
+        { group: 'GK', backups: undefined, backupCoverage: undefined },
       ]);
     });
 
