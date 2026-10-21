@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockDurationSummary, blockStartMinutes, calculateBlockDurations, maxBlocksForGameLength, nearestValidBlockCount, SeasonSetup } from '../season';
+import { blockDurationSummary, blockStartMinutes, calculateBlockDurations, commitGameLengthInput, maxBlocksForGameLength, nearestValidBlockCount, SeasonSetup } from '../season';
 
 describe('block time selection', () => {
   it.each([
@@ -16,6 +16,15 @@ describe('block time selection', () => {
     expect(nearestValidBlockCount(30, 16)).toBe(10);
     expect(nearestValidBlockCount(50, 16)).toBe(12);
     expect(nearestValidBlockCount(20, 4)).toBe(6);
+  });
+
+  it('commits game length input on blur, clamping out-of-range values and restoring empty input', () => {
+    expect(commitGameLengthInput('80', 20)).toBe(80);
+    expect(commitGameLengthInput('200', 20)).toBe(120);
+    expect(commitGameLengthInput('10', 80)).toBe(20);
+    expect(commitGameLengthInput('', 80)).toBe(80);
+    expect(calculateBlockDurations(commitGameLengthInput('80', 20), 6)).toEqual([14, 13, 13, 14, 13, 13]);
+    expect(blockDurationSummary(calculateBlockDurations(80, 6))).toBe('Blocks 1, 4 = 14 min (post-break first)\nAll others = 13 min each');
   });
 
   it('supports only even block counts from 6 through 12', () => {

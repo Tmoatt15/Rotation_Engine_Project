@@ -4,7 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 
 import PositionAssignmentScreen from '../position-assignment';
-import { blockDurationSummary, calculateBlockDurations, GAME_FORMATS, MAX_GAME_LENGTH_MINUTES, MAX_TOTAL_BLOCKS, MIN_GAME_LENGTH_MINUTES, MIN_TOTAL_BLOCKS, nearestValidBlockCount, validBlockCounts, FORMATIONS_BY_FORMAT } from '@/engine/season';
+import { blockDurationSummary, calculateBlockDurations, commitGameLengthInput, GAME_FORMATS, MAX_GAME_LENGTH_MINUTES, MAX_TOTAL_BLOCKS, MIN_GAME_LENGTH_MINUTES, MIN_TOTAL_BLOCKS, nearestValidBlockCount, validBlockCounts, FORMATIONS_BY_FORMAT } from '@/engine/season';
 import type { GameFormat, SeasonSettings, SubstitutionAlert } from '@/engine/models';
 import { formationPositionRows } from '@/position-validation';
 import { getActiveTeam, getRoster, getSeasonSettings, notifyTeamChanged, updateRoster, updateSeasonSettings } from '@/services/team-service';
@@ -159,7 +159,7 @@ function SeasonForm({ value, onChange, onCancel, onSave, saving }: { value: Seas
       <Text style={styles.label}>Formation</Text>
       <View style={styles.options}>{formations.map((formation) => <Pressable key={formation} onPress={() => update({ formation })} style={[styles.option, value.formation === formation && styles.selected]}><Text style={value.formation === formation ? styles.selectedText : styles.optionText}>{formation}</Text></Pressable>)}</View>
       <NumberField label="Games in Season" value={value.total_games} onChange={(total_games) => update({ total_games })} />
-      <NumberField label="Game Length (minutes)" value={value.game_length_minutes} onChange={setGameLength} min={MIN_GAME_LENGTH_MINUTES} max={MAX_GAME_LENGTH_MINUTES} />
+      <NumberField key={value.game_length_minutes} label="Game Length (minutes)" value={value.game_length_minutes} onChange={setGameLength} min={MIN_GAME_LENGTH_MINUTES} max={MAX_GAME_LENGTH_MINUTES} commitOnBlur />
       <Stepper label="Blocks" value={value.total_blocks} canDecrease={value.total_blocks > MIN_TOTAL_BLOCKS} canIncrease={value.total_blocks < Math.min(MAX_TOTAL_BLOCKS, Math.max(...validBlockCounts(value.game_length_minutes)))} onDecrease={() => setBlocks(blockStep(value.game_length_minutes, value.total_blocks, -1))} onIncrease={() => setBlocks(blockStep(value.game_length_minutes, value.total_blocks, 1))} />
       <Stepper label="Min / block" value={value.block_length_minutes} canDecrease={value.block_length_minutes > 1} canIncrease={value.block_length_minutes < Math.floor(value.game_length_minutes / MIN_TOTAL_BLOCKS)} onDecrease={() => setMinutesPerBlock(value.block_length_minutes - 1)} onIncrease={() => setMinutesPerBlock(value.block_length_minutes + 1)} />
       <Text style={styles.durationSummary}>{blockDurationSummary(durations)}</Text>
@@ -172,8 +172,21 @@ function SeasonForm({ value, onChange, onCancel, onSave, saving }: { value: Seas
   );
 }
 
-function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number }) {
-  return <View><Text style={styles.label}>{label}</Text><TextInput value={String(value)} onChangeText={(text) => { const parsed = Number(text.replace(/\D/g, '')); onChange(Math.max(min ?? 0, Math.min(max ?? Number.MAX_SAFE_INTEGER, parsed || 0))); }} keyboardType="number-pad" style={styles.numberInput} /></View>;
+function NumberField({ label, value, onChange, min, max, commitOnBlur = false }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; commitOnBlur?: boolean }) {
+  const [draftText, setDraftText] = useState(String(value));
+  const commit = () => {
+    const committed = commitGameLengthInput(draftText, value);
+    setDraftText(String(committed));
+    onChange(committed);
+  };
+  return <View><Text style={styles.label}>{label}</Text><TextInput value={commitOnBlur ? draftText : String(value)} onChangeText={(text) => {
+    if (commitOnBlur) {
+      setDraftText(text.replace(/\D/g, ''));
+      return;
+    }
+    const parsed = Number(text.replace(/\D/g, ''));
+    onChange(Math.max(min ?? 0, Math.min(max ?? Number.MAX_SAFE_INTEGER, parsed || 0)));
+  }} onBlur={commitOnBlur ? commit : undefined} keyboardType="number-pad" style={styles.numberInput} /></View>;
 }
 
 function Stepper({ label, value, onDecrease, onIncrease, canDecrease, canIncrease }: { label: string; value: number; onDecrease: () => void; onIncrease: () => void; canDecrease: boolean; canIncrease: boolean }) {

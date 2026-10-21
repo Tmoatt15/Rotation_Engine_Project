@@ -6,6 +6,11 @@ export const MAX_TOTAL_BLOCKS = 12;
 export const MIN_GAME_LENGTH_MINUTES = 20;
 export const MAX_GAME_LENGTH_MINUTES = 120;
 
+export function commitGameLengthInput(text: string, lastValid: number): number {
+  if (!/^\d+$/.test(text)) return lastValid;
+  return Math.max(MIN_GAME_LENGTH_MINUTES, Math.min(MAX_GAME_LENGTH_MINUTES, Number(text)));
+}
+
 export const GAME_FORMATS: Record<GameFormat, { players_on_field: number; has_goalkeeper: boolean; default_formation: Formation }> = {
   '4v4': { players_on_field: 4, has_goalkeeper: false, default_formation: '1-2-1' },
   '5v5': { players_on_field: 5, has_goalkeeper: true, default_formation: '1-2-1' },
