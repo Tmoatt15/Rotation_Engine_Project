@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -118,19 +118,29 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
   const rosterScrollRef = useRef<ScrollView | null>(null);
   const focusedNameInputRef = useRef<TextInput | null>(null);
   const scrollOffsetRef = useRef(0);
+  const pendingScrollRef = useRef(false);
+  const contentHeightRef = useRef(0);
   const keyboardTopRef = useRef<number | null>(null);
   const playersRef = useRef<Player[]>([]);
   const revealFocusedNameInput = useCallback(() => {
     requestAnimationFrame(() => {
       const input = focusedNameInputRef.current;
+      const scrollView = rosterScrollRef.current;
       const keyboardTop = keyboardTopRef.current;
-      if (!input || keyboardTop === null) return;
-      input.measureInWindow((_x, y, _width, height) => {
-        const overlap = y + height + 12 - keyboardTop;
-        if (overlap <= 0) return;
-        const nextOffset = scrollOffsetRef.current + overlap;
-        scrollOffsetRef.current = nextOffset;
-        rosterScrollRef.current?.scrollTo({ y: nextOffset, animated: true });
+      const nativeScrollView = scrollView?.getNativeScrollRef();
+      if (!input || !scrollView || !nativeScrollView || keyboardTop === null) return;
+      nativeScrollView.measureInWindow((_x, scrollTop, _width, scrollHeight) => {
+        input.measureInWindow((_inputX, inputTop, _inputWidth, inputHeight) => {
+          const visibleBottom = Math.min(scrollTop + scrollHeight, keyboardTop) - 12;
+          const overlap = inputTop + inputHeight - visibleBottom;
+          if (overlap <= 0 || pendingScrollRef.current) return;
+          const maxOffset = Math.max(0, contentHeightRef.current - scrollHeight);
+          const nextOffset = Math.min(maxOffset, scrollOffsetRef.current + overlap);
+          if (nextOffset <= scrollOffsetRef.current) return;
+          pendingScrollRef.current = true;
+          scrollOffsetRef.current = nextOffset;
+          scrollView.scrollTo({ y: nextOffset, animated: false });
+        });
       });
     });
   }, []);
@@ -354,15 +364,22 @@ export default function RosterScreen({ embedded = false, seasonSettingsContent }
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={80} style={styles.keyboardAvoidingView}>
+          <KeyboardAvoidingView behavior="height" keyboardVerticalOffset={0} style={styles.keyboardAvoidingView}>
             <ScrollView
               ref={rosterScrollRef}
               contentContainerStyle={styles.content}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               scrollEventThrottle={16}
-              onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}
-              onContentSizeChange={revealFocusedNameInput}>
+              onScroll={(event) => {
+                scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+                pendingScrollRef.current = false;
+              }}
+              onLayout={revealFocusedNameInput}
+              onContentSizeChange={(_width, height) => {
+                contentHeightRef.current = height;
+                revealFocusedNameInput();
+              }}>
             <View style={styles.header}>
               {!embedded && (
                 <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back">
