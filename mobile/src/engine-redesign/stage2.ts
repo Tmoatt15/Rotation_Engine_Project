@@ -86,7 +86,6 @@ const SHED_TIERS: RedesignGroup[] = ['developing', 'rotational'];
 const HIT_TIERS: RedesignGroup[] = ['developing', 'rotational', 'core'];
 const SURPLUS_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
 const FLEX_OUT_TIERS: RedesignGroup[] = ['rotational', 'developing', 'core'];
-const FLEX_IN_TIERS: RedesignGroup[] = ['core', 'rotational', 'developing'];
 const RELAXED_EQUALIZATION_ITERATION_CAP = 10_000;
 
 function groupForPosition(position: string): FieldGroup | null {
@@ -180,6 +179,7 @@ function buildWaterfillQuotaAttempt(
   const underfill: QuotaAssignment['audit']['underfill'] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
+  const developingFlexInBlocks = new Map<string, Map<FieldGroup, number>>();
   const overages: QuotaAssignment['audit']['overage'] = [];
   let relaxedEqualization: QuotaAssignment['audit']['relaxedEqualization'];
   let rosterTooLarge: QuotaAssignment['audit']['rosterTooLarge'];
@@ -685,16 +685,30 @@ function buildWaterfillQuotaAttempt(
           () => groupMembers(group).filter((candidate) => candidate.player.group === tier && !candidate.selectedKeeper),
           `${tier} surplus gains`);
       }
-      if (FLEX_IN_TIERS.includes(tier)) {
-        for (const group of FIELD_GROUPS) {
-          fillCandidates(group,
-            () => [...info.values()].filter((candidate) => candidate.primaryGroup !== group
-              && candidate.player.group === tier
-              && !candidate.selectedKeeper
-              && backupGroups(candidate.player).includes(group)),
-            `${tier} flex-in gains`);
+      for (const group of FIELD_GROUPS) {
+        const previousAssignmentCount = surplusAssignments.length;
+        fillCandidates(group,
+          () => [...info.values()].filter((candidate) => candidate.primaryGroup !== group
+            && candidate.player.group === tier
+            && !candidate.selectedKeeper
+            && backupGroups(candidate.player).includes(group)),
+          `${tier} flex-in gains`);
+        if (tier === 'developing') {
+          for (const assignment of surplusAssignments.slice(previousAssignmentCount)) {
+            const groups = developingFlexInBlocks.get(assignment.player) ?? new Map<FieldGroup, number>();
+            groups.set(group, (groups.get(group) ?? 0) + assignment.amount);
+            developingFlexInBlocks.set(assignment.player, groups);
+          }
         }
       }
+    }
+  }
+
+  for (const [player, groups] of developingFlexInBlocks) {
+    for (const group of FIELD_GROUPS) {
+      const blocks = groups.get(group);
+      if (blocks === undefined) continue;
+      warnings.push(`Developing flex-in used: ${player} into ${group}, ${blocks} ${blocks === 1 ? 'block' : 'blocks'}`);
     }
   }
 

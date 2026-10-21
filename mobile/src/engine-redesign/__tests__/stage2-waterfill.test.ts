@@ -645,8 +645,7 @@ describe('Stage 2 developing flex-in (strict)', () => {
 
     expect(quotas.audit.underfill).toEqual([]);
     expect(quotas.audit.errors).toEqual([]);
-    // The soft guardrail did not have to yield for this scenario.
-    expect(quotas.audit.warnings).toEqual([]);
+    expect(quotas.audit.warnings).toEqual(['Developing flex-in used: D3 into M, 1 block']);
 
     // D3 (developing, F primary, M backup) is the single developing flex-in: start 4 -> 5, entirely in M.
     expect(totalFor(quotas, 'D3')).toBe(Math.round(0.5 * 8) + 1);
@@ -674,6 +673,7 @@ describe('Stage 2 developing flex-in (strict)', () => {
     expect(quotas.audit.underfill).toEqual([]);
     expect(quotas.audit.errors).toEqual([]);
     expect(quotas.audit.warnings).toEqual([]);
+    expect(quotas.audit.warnings?.filter((warning) => warning.startsWith('Developing flex-in used:'))).toEqual([]);
 
     // R4 and R10 (rotational, F primary, M backup) are the two flex-ins: start 5 -> 6, one block in M.
     for (const player of ['R4', 'R10']) {
@@ -722,8 +722,7 @@ describe('Stage 2 developing flex-in (strict)', () => {
 
     expect(quotas.audit.underfill).toEqual([]);
     expect(quotas.audit.errors).toEqual([]);
-    // The soft guardrail did not have to yield for this scenario.
-    expect(quotas.audit.warnings).toEqual([]);
+    expect(quotas.audit.warnings).toEqual(['Developing flex-in used: Makenzie into M, 1 block']);
 
     // Every M primary on the field is at its band maximum, and the core flexer (Isla) is exhausted.
     expect(totalFor(quotas, 'Briana')).toBe(Math.round(0.6 * 10));

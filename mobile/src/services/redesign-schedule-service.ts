@@ -313,9 +313,13 @@ function throwForQuotaAuditErrors(
   });
 }
 
-function relaxedMinimumWarnings(quotas: ReturnType<typeof assignQuotas>): string[] {
-  if (!quotas.audit.relaxedPlayers?.length) return [];
-  return [`Minimums relaxed for: ${quotas.audit.relaxedPlayers.map((entry) => `${entry.player} (${entry.before} -> ${entry.after} blocks)`).join(', ')}.`];
+function quotaAuditWarnings(quotas: ReturnType<typeof assignQuotas>): string[] {
+  const warnings: string[] = [];
+  if (quotas.audit.relaxedPlayers?.length) {
+    warnings.push(`Minimums relaxed for: ${quotas.audit.relaxedPlayers.map((entry) => `${entry.player} (${entry.before} -> ${entry.after} blocks)`).join(', ')}.`);
+  }
+  warnings.push(...(quotas.audit.warnings ?? []).filter((warning) => warning.startsWith('Developing flex-in used:')));
+  return warnings;
 }
 
 function unfilledPlacementGroup(
@@ -664,7 +668,7 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
   }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
-  const relaxedWarnings = relaxedMinimumWarnings(quotas);
+  const relaxedWarnings = quotaAuditWarnings(quotas);
   const relaxedMaximumCount = quotas.audit.relaxedMaximums?.length ?? 0;
   if (relaxedMaximumCount > 0) {
     const availablePlayerCount = game.players.filter((player) => player.available).length;
@@ -705,6 +709,6 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
     team_id: input.teamId, team_name: base.team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name), formation: game.formation,
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
-    blocks: scheduleBlocks(game, demand, result.placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedMinimumWarnings(quotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
+    blocks: scheduleBlocks(game, demand, result.placement), warnings: ['Engine: redesign (Stages 0–6)', ...quotaAuditWarnings(quotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
 }
