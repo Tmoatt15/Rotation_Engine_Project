@@ -593,3 +593,152 @@ describe('Stage 2 per-group water-fill', () => {
     expect(quotas.quotas.find((quota) => quota.player === 'Keeper B')?.groupTargets?.D).toBe(0);
   });
 });
+
+// Developing flex-in regression tests. All strict mode (allowRelaxedMaximums=false).
+// At 8 blocks: core start = max = 6 (no flex room), rotational 5->6, developing 4->5.
+// At 10 blocks: core 7->8, rotational 6->7, developing 5->6.
+describe('Stage 2 developing flex-in (strict)', () => {
+  const tierByPrefix = { C: 'core', R: 'rotational', D: 'developing' } as const;
+
+  // `Name:general+backups`; the name prefix C/R/D is the tier and `+-` means no backup group.
+  function parseRoster(spec: string): RedesignPlayerInput[] {
+    return spec.split(/\s+/).map((token) => {
+      const [name, positions] = token.split(':');
+      const [general, backups] = positions.split('+');
+      return {
+        name,
+        group: tierByPrefix[name[0] as keyof typeof tierByPrefix],
+        general_positions: [general],
+        primary_positions: ['ANY'],
+        backup_positions: backups === '-' ? [] : backups.split(''),
+      };
+    });
+  }
+
+  const dedicatedKeepers: RedesignPlayerInput[] = [
+    { name: 'GK1', group: 'rotational', general_positions: ['GK'], primary_positions: ['GK'], keeper: true },
+    { name: 'GK2', group: 'rotational', general_positions: ['GK'], primary_positions: ['GK'], keeper: true },
+  ];
+
+  function strictQuotas(roster: RedesignPlayerInput[], input: Partial<RedesignGameInput> & { totalBlocks: number }) {
+    const game = normalizeGame({ format: '9v9', formation: '3-3-2', ...input }, roster);
+    return assignQuotas(game, buildDemandModel(game), false, false);
+  }
+
+  function strictNineVNine(spec: string) {
+    return strictQuotas([...parseRoster(spec), ...dedicatedKeepers], {
+      totalBlocks: 8, firstHalfKeeper: 'GK1', secondHalfKeeper: 'GK2',
+    });
+  }
+
+  const quotaFor = (quotas: ReturnType<typeof assignQuotas>, player: string) =>
+    quotas.quotas.find((quota) => quota.player === player)!;
+  const totalFor = (quotas: ReturnType<typeof assignQuotas>, player: string) => {
+    const quota = quotaFor(quotas, player);
+    return quota.fieldTarget + quota.pinnedBlocks.length;
+  };
+
+  it('uses developing flex-in to cover a shortage when core has no flex room', () => {
+    const quotas = strictNineVNine(
+      'C0:F+D R1:D+- R2:M+D D3:F+M C4:D+- C5:F+- D6:D+F R7:M+F R8:D+- C9:F+DM R10:M+-',
+    );
+
+    expect(quotas.audit.underfill).toEqual([]);
+    expect(quotas.audit.errors).toEqual([]);
+    // The soft guardrail did not have to yield for this scenario.
+    expect(quotas.audit.warnings).toEqual([]);
+
+    // D3 (developing, F primary, M backup) is the single developing flex-in: start 4 -> 5, entirely in M.
+    expect(totalFor(quotas, 'D3')).toBe(Math.round(0.5 * 8) + 1);
+    expect(quotaFor(quotas, 'D3').groupTargets).toEqual({ D: 0, M: 5, F: 0 });
+    expect(quotas.audit.surplusAssignments).toContainEqual({ group: 'developing', player: 'D3', amount: 1 });
+
+    // No core or rotational flex-in: core has no room at 8 blocks, and rotational gains stay in their primary group.
+    expect(quotas.audit.surplusAssignments?.filter((entry) => entry.group === 'core')).toEqual([]);
+    expect(quotaFor(quotas, 'R2').groupTargets).toEqual({ D: 0, M: 6, F: 0 });
+    expect(quotaFor(quotas, 'R7').groupTargets).toEqual({ D: 0, M: 6, F: 0 });
+    for (const player of ['C0', 'C4', 'C5', 'C9']) expect(totalFor(quotas, player)).toBe(6);
+
+    for (const quota of quotas.quotas.filter((entry) => entry.keeperBlocks === 0)) {
+      const total = quota.fieldTarget + quota.pinnedBlocks.length;
+      expect(total).toBeGreaterThanOrEqual(Math.ceil(0.4 * 8));
+      if (quota.group === 'developing') expect(total).toBeLessThanOrEqual(Math.round(0.6 * 8));
+    }
+  });
+
+  it('flexes rotational players in before touching a developing player who has a backup and room', () => {
+    const quotas = strictNineVNine(
+      'D0:M+- C1:D+M C2:F+DM R3:D+- R4:F+DM C5:D+- R6:M+D R7:D+- D8:M+F R9:M+- R10:F+DM',
+    );
+
+    expect(quotas.audit.underfill).toEqual([]);
+    expect(quotas.audit.errors).toEqual([]);
+    expect(quotas.audit.warnings).toEqual([]);
+
+    // R4 and R10 (rotational, F primary, M backup) are the two flex-ins: start 5 -> 6, one block in M.
+    for (const player of ['R4', 'R10']) {
+      expect(totalFor(quotas, player)).toBe(6);
+      expect(quotaFor(quotas, player).groupTargets).toEqual({ D: 0, M: 1, F: 5 });
+      expect(quotas.audit.surplusAssignments).toContainEqual({ group: 'rotational', player, amount: 1 });
+    }
+
+    // D8 has an F backup but is not flexed: its +1 over the start of 4 is an in-group (M) surplus gain,
+    // which brings it to the developing band maximum (5).
+    expect(quotaFor(quotas, 'D8').groupTargets).toEqual({ D: 0, M: 5, F: 0 });
+    expect(totalFor(quotas, 'D8')).toBe(Math.round(0.5 * 8) + 1);
+    expect(totalFor(quotas, 'D8')).toBeLessThanOrEqual(Math.round(0.6 * 8));
+    expect(quotas.audit.surplusAssignments?.filter((entry) => entry.group === 'developing')
+      .map((entry) => entry.player).sort()).toEqual(['D0', 'D8']);
+  });
+
+  // Chelsea 2024 (11v11, 3-4-3, 80 min / 10 blocks), device export 2026-10-21.
+  it('flexes developing Makenzie into a constructed midfield shortage on the real Chelsea 2024 roster', () => {
+    const player = (
+      name: string, group: string, general: string, backups: string[] = [], keeperEligible = false,
+    ): RedesignPlayerInput => ({
+      name, group, general_positions: [general], primary_positions: ['ANY'], backup_positions: backups,
+      keeper_eligible: keeperEligible,
+    });
+    const chelsea2024: RedesignPlayerInput[] = [
+      player('Avery', 'core', 'M', [], true), player('Briana', 'developing', 'M'),
+      player('Dolce', 'rotational', 'D'), player('Emma', 'core', 'F'),
+      player('Isla', 'core', 'F', ['M']), player('Izzy', 'rotational', 'M', ['F', 'D']),
+      player('Jasper', 'rotational', 'D'), player('Kalia', 'rotational', 'M'),
+      player('Katelyn', 'rotational', 'F'), player('Maddie', 'core', 'F', [], true),
+      player('Madelyn', 'core', 'M', ['F']), player('Makenzie', 'developing', 'F', ['M']),
+      player('Natalie', 'core', 'D', [], true), player('Noor', 'rotational', 'M'),
+      player('Rozenn', 'core', 'M', ['D']), player('Sophia', 'core', 'D'),
+    ];
+    // Constructed shortage: Avery (core M) is in goal for both halves and Kalia (rotational M) is out.
+    // That leaves M primaries plus Isla's core flex-in short by one block, which Makenzie covers.
+    const quotas = strictQuotas(chelsea2024, {
+      format: '11v11',
+      formation: '3-4-3',
+      totalBlocks: 10,
+      availablePlayerNames: chelsea2024.map((entry) => entry.name).filter((name) => name !== 'Kalia'),
+      firstHalfKeeper: 'Avery',
+      secondHalfKeeper: 'Avery',
+    });
+
+    expect(quotas.audit.underfill).toEqual([]);
+    expect(quotas.audit.errors).toEqual([]);
+    // The soft guardrail did not have to yield for this scenario.
+    expect(quotas.audit.warnings).toEqual([]);
+
+    // Every M primary on the field is at its band maximum, and the core flexer (Isla) is exhausted.
+    expect(totalFor(quotas, 'Briana')).toBe(Math.round(0.6 * 10));
+    for (const player of ['Izzy', 'Noor']) expect(totalFor(quotas, player)).toBe(Math.round(0.7 * 10));
+    for (const player of ['Madelyn', 'Rozenn']) expect(totalFor(quotas, player)).toBe(Math.round(0.8 * 10));
+    expect(totalFor(quotas, 'Isla')).toBe(Math.round(0.8 * 10));
+    expect(quotaFor(quotas, 'Isla').groupTargets?.M).toBe(1);
+
+    // Makenzie (developing F, M backup) covers the rest: start 5 -> 6, with M above her start of 0.
+    expect(totalFor(quotas, 'Makenzie')).toBe(Math.round(0.5 * 10) + 1);
+    expect(quotaFor(quotas, 'Makenzie').groupTargets).toEqual({ D: 0, M: 3, F: 3 });
+    expect(quotas.audit.surplusAssignments).toContainEqual({ group: 'developing', player: 'Makenzie', amount: 1 });
+
+    // Briana (developing M, no backup) is the negative control: she stays in M with no other group.
+    expect(quotaFor(quotas, 'Briana').groupTargets).toEqual({ D: 0, M: 6, F: 0 });
+    expect(quotaFor(quotas, 'Briana').pinnedBlocks).toEqual([]);
+  });
+});
