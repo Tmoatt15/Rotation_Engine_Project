@@ -21,13 +21,22 @@ export function runStages3And4(
   const hard = placeStage3(game, demand, quotas, frozen, false);
   if (hard.complete) return polishStage4(game, demand, quotas, hard);
   const soft = placeStage3(game, demand, quotas, frozen, true);
+  const repairPasses = {
+    ...(hard.audit.repair ? { hard: hard.audit.repair } : {}),
+    ...(soft.audit.repair ? { soft: soft.audit.repair } : {}),
+  };
   if (soft.complete) {
     soft.audit.softRestFallback = true;
+    if (Object.keys(repairPasses).length) soft.audit.repairPasses = repairPasses;
     return polishStage4(game, demand, quotas, soft);
   }
   return polishStage4(game, demand, quotas, {
     ...soft,
-    audit: { ...soft.audit, errors: [...hard.audit.errors, ...soft.audit.errors] },
+    audit: {
+      ...soft.audit,
+      errors: [...new Set([...hard.audit.errors, ...soft.audit.errors])],
+      ...(Object.keys(repairPasses).length ? { repairPasses } : {}),
+    },
   });
 }
 

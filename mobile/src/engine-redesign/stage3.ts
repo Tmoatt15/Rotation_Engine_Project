@@ -30,6 +30,10 @@ export interface PlacementAudit {
     difference: number;
   }[];
   repair?: { attempted: boolean; nodesSearched: number; success: boolean };
+  repairPasses?: {
+    hard?: NonNullable<PlacementAudit['repair']>;
+    soft?: NonNullable<PlacementAudit['repair']>;
+  };
   unplannedBackupUses?: { player: string; group: 'D' | 'M' | 'F'; blocks: number }[];
   relaxationTier?: number;
   relaxedLookaheadFallback?: boolean;
@@ -462,7 +466,14 @@ function placeDeterministically(
             const distance = (block: number) => occupiedBlocks.length
               ? Math.min(...occupiedBlocks.map((occupied) => Math.abs(block - occupied)))
               : 0;
+            const availablePeers = (block: number) => game.players.filter((peer) =>
+              peer.name !== player.name
+              && peer.available
+              && peer.generalPositions.some((peerGroup) => player.generalPositions.includes(peerGroup))
+              && !isKeeperHalf(game, peer, block)
+              && !assignmentsHasPlayer(blocks[block - 1].assignments, peer.name)).length;
             return distance(right.block) - distance(left.block)
+              || availablePeers(right.block) - availablePeers(left.block)
               || Math.abs(left.block - (game.totalBlocks + 1) / 2) - Math.abs(right.block - (game.totalBlocks + 1) / 2)
               || left.block - right.block;
           });
@@ -850,46 +861,69 @@ function placeDeterministically(
         && (player.generalPositions.includes(group) || hasBackupForGroup(player, group))
         && isFieldEligible(game, player, block, slot.slot);
     };
-    const repairCapacityFeasible = (startIndex: number): boolean => {
+    const remainingSlots = () => slotsToFill.filter(({ block, slot }) =>
+      !repairedBlocks[block - 1].assignments.has(slot.slot));
+    const repairCapacityFeasible = (remaining: ReturnType<typeof remainingSlots>): boolean => {
+      for (const group of ['D', 'M', 'F'] as const) {
+        const groupSlots = remaining.filter((future) => future.slot.group === group);
+        const remainingTarget = [...targetCounts.values()]
+          .reduce((total, counts) => total + (counts.get(group) ?? 0), 0);
+        if (remainingTarget !== groupSlots.length) return false;
+        for (const blockNumber of new Set(groupSlots.map((future) => future.block))) {
+          const blockSlots = groupSlots.filter((future) => future.block === blockNumber);
+          const eligiblePlayers = new Set(blockSlots.flatMap((future) =>
+            game.players
+              .filter((player) => canUseRepairSlot(player, blockNumber, future.slot))
+              .map((player) => player.name)));
+          if (eligiblePlayers.size < blockSlots.length) return false;
+        }
+      }
+      for (const [blockNumber, requiredPlayers] of requiredByBlock) {
+        const assignments = repairedBlocks[blockNumber - 1].assignments;
+        for (const requiredPlayer of requiredPlayers) {
+          if (assignmentsHasPlayer(assignments, requiredPlayer)) continue;
+          const player = players.get(requiredPlayer);
+          if (!player || !remaining.some((future) => future.block === blockNumber
+            && canUseRepairSlot(player, blockNumber, future.slot))) return false;
+        }
+      }
       for (const [playerName, counts] of targetCounts) {
         const player = players.get(playerName);
         if (!player) return false;
         let totalRemaining = 0;
         const possibleBlocks = new Set<number>();
         for (const group of ['D', 'M', 'F'] as const) {
-          const remaining = counts.get(group) ?? 0;
-          if (remaining <= 0) continue;
-          totalRemaining += remaining;
+          const groupDemand = counts.get(group) ?? 0;
+          if (groupDemand <= 0) continue;
+          totalRemaining += groupDemand;
           const groupBlocks = new Set<number>();
-          for (const future of slotsToFill.slice(startIndex)) {
+          for (const future of remaining) {
             if (future.slot.group === group && canUseRepairSlot(player, future.block, future.slot)) {
               groupBlocks.add(future.block);
             }
           }
-          if (groupBlocks.size < remaining) return false;
+          if (groupBlocks.size < groupDemand) return false;
           for (const futureBlock of groupBlocks) possibleBlocks.add(futureBlock);
         }
         if (possibleBlocks.size < totalRemaining) return false;
       }
       return true;
     };
-    const targetCountsMatchRemainingSlots = (): boolean => (['D', 'M', 'F'] as const).every((group) => {
-      const remainingTarget = [...targetCounts.values()]
-        .reduce((total, counts) => total + (counts.get(group) ?? 0), 0);
-      const remainingSlots = slotsToFill.filter((entry) => entry.slot.group === group).length;
-      return remainingTarget === remainingSlots;
-    });
-    const search = (index: number): boolean => {
+    const search = (): boolean => {
       nodesSearched += 1;
       if (nodesSearched > repairNodeCap) return false;
-      if (index === slotsToFill.length) return countsMatch();
-      const { block, slot } = slotsToFill[index];
+      const remaining = remainingSlots();
+      if (remaining.length === 0) return countsMatch();
+      const candidateOptions = remaining.map((entry) => ({
+        entry,
+        candidates: game.players.filter((player) => canUseRepairSlot(player, entry.block, entry.slot)),
+      })).sort((left, right) => left.candidates.length - right.candidates.length
+        || left.entry.block - right.entry.block);
+      const { block, slot } = candidateOptions[0].entry;
       const group = slot.group;
-      const candidates = game.players
-        .filter((player) => canUseRepairSlot(player, block, slot))
-        .sort((left, right) => {
+      const candidates = candidateOptions[0].candidates.sort((left, right) => {
           const groupCapacity = (player: NormalizedPlayer) => new Set(slotsToFill
-            .slice(index)
+            .filter((future) => !repairedBlocks[future.block - 1].assignments.has(future.slot.slot))
             .filter((future) => future.slot.group === group
               && canUseRepairSlot(player, future.block, future.slot))
             .map((future) => future.block)).size;
@@ -901,12 +935,13 @@ function placeDeterministically(
           || (targetCounts.get(right.name)?.get(group) ?? 0) - (targetCounts.get(left.name)?.get(group) ?? 0)
           || slotPriority(right, slot.slot) - slotPriority(left, slot.slot)
           || left.name.localeCompare(right.name);
-        });
+      });
       for (const player of candidates) {
         repairedBlocks[block - 1].assignments.set(slot.slot, player.name);
         targetCounts.get(player.name)!.set(group, targetCounts.get(player.name)!.get(group)! - 1);
         repairPlacedCounts.set(player.name, (repairPlacedCounts.get(player.name) ?? 0) + 1);
-        if (repairCapacityFeasible(index + 1) && search(index + 1)) return true;
+        const remainingAfterPlacement = remainingSlots();
+        if (repairCapacityFeasible(remainingAfterPlacement) && search()) return true;
         targetCounts.get(player.name)!.set(group, targetCounts.get(player.name)!.get(group)! + 1);
         repairPlacedCounts.set(player.name, (repairPlacedCounts.get(player.name) ?? 0) - 1);
         repairedBlocks[block - 1].assignments.delete(slot.slot);
@@ -915,9 +950,8 @@ function placeDeterministically(
       return false;
     };
     solved = fixedAssignmentIsValid()
-      && targetCountsMatchRemainingSlots()
-      && repairCapacityFeasible(0)
-      && search(0);
+      && repairCapacityFeasible(remainingSlots())
+      && search();
     repair = { attempted: true, nodesSearched: Math.min(nodesSearched, repairNodeCap), success: solved };
     if (solved) blocks = repairedBlocks;
     plannedVsPlaced = measurePlan(blocks);

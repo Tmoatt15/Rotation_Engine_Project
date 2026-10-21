@@ -20,20 +20,40 @@ const deviceRoster: RedesignPlayerInput[] = [
   { name: 'Sophia', group: 'core', general_positions: ['D'], primary_positions: ['CB'] },
 ];
 
+const currentRoster: RedesignPlayerInput[] = [
+  { name: 'Avery', group: 'rotational', general_positions: ['M'], primary_positions: ['M'], backup_positions: ['D'], keeper: true, keeper_eligible: true },
+  { name: 'Brooklyn', group: 'core', general_positions: ['M'], primary_positions: ['CM'], backup_positions: ['D', 'F'], keeper_eligible: true },
+  { name: 'Dolce', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['M'] },
+  { name: 'Emma', group: 'rotational', general_positions: ['F'], primary_positions: ['LF'], backup_positions: ['M'] },
+  { name: 'Kelsey', group: 'core', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['M'] },
+  { name: 'Maddie', group: 'core', general_positions: ['F'], primary_positions: ['RF'], backup_positions: ['M'], keeper: true, keeper_eligible: true },
+  { name: 'Madelyn', group: 'rotational', general_positions: ['M'], primary_positions: ['CM'], backup_positions: ['D'] },
+  { name: 'Meg', group: 'rotational', general_positions: ['D'], primary_positions: ['ANY'], backup_positions: ['M'] },
+  { name: 'Natalie', group: 'rotational', general_positions: ['D'], primary_positions: ['LB'] },
+  { name: 'Rachel', group: 'rotational', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['M'] },
+  { name: 'Reese', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['F', 'D'] },
+  { name: 'Selma', group: 'rotational', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['D'] },
+  { name: 'Sophia', group: 'core', general_positions: ['D'], primary_positions: ['CB'] },
+];
+
 const selectedKeepers = new Set(['Maddie', 'Avery']);
 const sweepPlayers = deviceRoster.filter((player) => !selectedKeepers.has(player.name));
 
-function makeGame(absent: string[] = []): NormalizedGame {
+function makeGame(
+  absent: string[] = [],
+  roster: RedesignPlayerInput[] = deviceRoster,
+  firstHalfKeeper: 'Maddie' | 'Avery' = 'Maddie',
+): NormalizedGame {
   return normalizeGame({
     format: '9v9',
     formation: '3-3-2',
     totalBlocks: 8,
-    availablePlayerNames: deviceRoster
+    availablePlayerNames: roster
       .filter((player) => !absent.includes(player.name))
       .map((player) => player.name),
-    firstHalfKeeper: 'Maddie',
-    secondHalfKeeper: 'Avery',
-  }, deviceRoster);
+    firstHalfKeeper,
+    secondHalfKeeper: firstHalfKeeper === 'Maddie' ? 'Avery' : 'Maddie',
+  }, roster);
 }
 
 function attempt(game: NormalizedGame, relaxedMinimums: boolean, relaxedMaximums: boolean) {
@@ -304,9 +324,145 @@ describe('Stage 2 relaxed equalization', () => {
     expect(quotas.audit.errors).toEqual([]);
     expect(placement.complete, JSON.stringify({ repair: placement.audit.repair, errors: placement.audit.errors }))
       .toBe(true);
-    expect(placement.audit.repair).toMatchObject({ attempted: true, success: true });
+    if (placement.audit.repair) {
+      expect(placement.audit.repair).toMatchObject({ attempted: true, success: true });
+    }
     expect(placement.audit.plannedVsPlaced?.every(({ difference }) => difference === 0)).toBe(true);
   });
+
+  it('completes the Dolce-out headline case on the current roster with exact Emma F quota', () => {
+    const game = makeGame(['Dolce'], currentRoster, 'Maddie');
+    const { demand, quotas, placement } = attempt(game, true, true);
+    const counts = fieldCounts(game, demand, placement);
+    const emmaQuota = quotas.quotas.find((quota) => quota.player === 'Emma');
+    const emmaFPlan = emmaQuota?.groupTargets?.F ?? 0;
+
+    expect(quotas.audit.errors).toEqual([]);
+    expect(placement.complete, JSON.stringify({ repair: placement.audit.repair, errors: placement.audit.errors }))
+      .toBe(true);
+    expect(placement.audit.plannedVsPlaced?.every(({ difference }) => difference === 0)).toBe(true);
+    expect(counts.groups.get('Emma')?.F).toBe(emmaFPlan);
+    console.info('Dolce-out Maddie-first headline repair:', JSON.stringify({
+      repair: placement.audit.repair,
+      emmaFPlan,
+      emmaFPlaced: counts.groups.get('Emma')?.F,
+    }));
+  });
+
+  it('passes both-roster, both-keeper-order sweeps and backup perturbations within repair and time bounds', () => {
+    const scenarios = [
+      ...combinations(sweepPlayers, 1),
+      ...combinations(sweepPlayers, 2),
+    ];
+    const startedAt = performance.now();
+    const sweepIssues: Record<string, unknown>[] = [];
+    const stats: {
+      roster: string;
+      firstHalfKeeper: string;
+      rescued: number;
+      greedyOnly: number;
+      maxRepairNodes: number;
+    }[] = [];
+
+    for (const { name, roster } of [
+      { name: 'morning', roster: deviceRoster },
+      { name: 'current', roster: currentRoster },
+    ]) {
+      for (const firstHalfKeeper of ['Maddie', 'Avery'] as const) {
+        let rescued = 0;
+        let greedyOnly = 0;
+        let maxRepairNodes = 0;
+        for (const absent of scenarios) {
+          const absentNames = absent.map((player) => player.name);
+          const game = makeGame(absentNames, roster, firstHalfKeeper);
+          const { demand, quotas, placement } = completeAttempt(game);
+          const counts = fieldCounts(game, demand, placement);
+          const repairs = Object.values(placement.audit.repairPasses
+            ?? (placement.audit.repair ? { current: placement.audit.repair } : {}));
+          const repairFired = repairs.some((repair) => repair.attempted);
+          const repairSucceeded = repairs.some((repair) => repair.success);
+          maxRepairNodes = Math.max(maxRepairNodes, ...repairs.map((repair) => repair.nodesSearched), 0);
+          if (repairSucceeded) rescued += 1;
+          else if (!repairFired && placement.complete) greedyOnly += 1;
+
+          const nonKeeperEights = [...counts.totals]
+            .filter(([player]) => !selectedKeepers.has(player) && counts.totals.get(player) === 8)
+            .map(([player]) => player);
+          const planDifferences = placement.audit.plannedVsPlaced?.filter(({ difference }) => difference !== 0) ?? [];
+          if (quotas.audit.errors?.length || !placement.complete || nonKeeperEights.length
+            || planDifferences.length) {
+            sweepIssues.push({
+              roster: name,
+              firstHalfKeeper,
+              absent: absentNames,
+              quotaErrors: quotas.audit.errors,
+              placementErrors: placement.audit.errors,
+              nonKeeperEights,
+              planDifferences,
+              repairs,
+            });
+          }
+          if (repairs.some((repair) => repair.nodesSearched > 2_500)) {
+            sweepIssues.push({
+              roster: name,
+              firstHalfKeeper,
+              absent: absentNames,
+              repairHeadroomExceeded: repairs,
+            });
+          }
+        }
+        stats.push({ roster: name, firstHalfKeeper, rescued, greedyOnly, maxRepairNodes });
+      }
+    }
+
+    const perturbationIssues: Record<string, unknown>[] = [];
+    const driftedBackups = [
+      { player: 'Emma', group: 'M' },
+      { player: 'Reese', group: 'D' },
+      { player: 'Selma', group: 'D' },
+    ];
+    for (let mask = 0; mask < 2 ** driftedBackups.length; mask += 1) {
+      const roster = currentRoster.map((player) => ({
+        ...player,
+        backup_positions: [...(player.backup_positions ?? [])],
+      }));
+      driftedBackups.forEach(({ player, group }, index) => {
+        const target = roster.find((candidate) => candidate.name === player)!;
+        const enabled = (mask & (1 << index)) !== 0;
+        target.backup_positions = enabled
+          ? [...new Set([...target.backup_positions, group])]
+          : target.backup_positions.filter((backup) => backup !== group);
+      });
+      for (const firstHalfKeeper of ['Maddie', 'Avery'] as const) {
+        const game = makeGame(['Dolce'], roster, firstHalfKeeper);
+        const { quotas, placement } = completeAttempt(game);
+        const planDifferences = placement.audit.plannedVsPlaced?.filter(({ difference }) => difference !== 0) ?? [];
+        if (quotas.audit.errors?.length || !placement.complete || planDifferences.length) {
+          perturbationIssues.push({
+            mask,
+            firstHalfKeeper,
+            quotaErrors: quotas.audit.errors,
+            placementErrors: placement.audit.errors,
+            planDifferences,
+            repair: placement.audit.repair,
+          });
+        }
+      }
+    }
+
+    const elapsedMs = performance.now() - startedAt;
+    console.info('Stage 3 backup-spread and repair acceptance:', JSON.stringify({
+      sweepRuns: scenarios.length * 4,
+      perturbationRuns: 16,
+      elapsedMs: Math.round(elapsedMs),
+      stats,
+      sweepIssues,
+      perturbationIssues,
+    }));
+    expect(sweepIssues).toEqual([]);
+    expect(perturbationIssues).toEqual([]);
+    expect(elapsedMs).toBeLessThan(10_000);
+  }, 15_000);
 
   it('returns an infeasible exact plan within the bounded repair search', () => {
     const game = makeGame(['Dolce', 'Reese']);
@@ -320,6 +476,9 @@ describe('Stage 2 relaxed equalization', () => {
     expect(placement.complete).toBe(false);
     expect(placement.audit.repair).toMatchObject({ attempted: true, success: false });
     expect(placement.audit.repair?.nodesSearched).toBeLessThanOrEqual(5_000);
+    expect(placement.audit.repairPasses?.hard).toMatchObject({ attempted: true, success: false });
+    expect(placement.audit.repairPasses?.soft).toMatchObject({ attempted: true, success: false });
+    expect(placement.audit.errors).toEqual([...new Set(placement.audit.errors)]);
     expect(performance.now() - startedAt).toBeLessThan(5000);
   });
 
