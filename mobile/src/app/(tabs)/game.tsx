@@ -14,6 +14,7 @@ import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
 import { RedesignOfferError, ScheduleGenerationCancelledError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
+import { clearRememberedGamedaySetup, getRememberedGamedaySetup, rememberGamedaySetup } from '@/gameday-setup';
 
 const palette = {
   ink: '#17221f',
@@ -105,6 +106,7 @@ export default function GameScreen() {
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
   const setupTeamId = useRef<string | null>(null);
+  const setupHydrated = useRef(false);
   const generationController = useRef<AbortController | null>(null);
   const gameScrollRef = useRef<ScrollView>(null);
   const availableCount = playerNames.length - unavailable.size;
@@ -118,6 +120,7 @@ export default function GameScreen() {
     setFirstHalfGK(null);
     setSecondHalfGK(null);
     setError(null);
+    clearRememberedGamedaySetup(teamId ?? undefined);
   }
 
   function loadRoster() {
@@ -143,8 +146,14 @@ export default function GameScreen() {
         const eligibleGoalkeepers = rosterPlayers
           .filter((player) => player.keeper_eligible === true)
           .map((player) => player.name);
+        const rememberedSetup = getRememberedGamedaySetup(setupTeamId.current!);
+        const rosterNames = new Set(rosterPlayers.map((player) => player.name));
+        setUnavailable(new Set((rememberedSetup?.unavailable ?? []).filter((name) => rosterNames.has(name))));
+        setFirstHalfGK(rememberedSetup?.firstHalfGk && eligibleGoalkeepers.includes(rememberedSetup.firstHalfGk) ? rememberedSetup.firstHalfGk : null);
+        setSecondHalfGK(rememberedSetup?.secondHalfGk && eligibleGoalkeepers.includes(rememberedSetup.secondHalfGk) ? rememberedSetup.secondHalfGk : null);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
+        setupHydrated.current = true;
       })
       .catch(() => {
         setTeamId(null);
@@ -164,6 +173,17 @@ export default function GameScreen() {
       requestScheduleGeneration();
     }
   }, [loadingRoster, rosterPlayers]);
+
+  useEffect(() => {
+    if (!setupHydrated.current || !teamId) return;
+    rememberGamedaySetup({
+      teamId,
+      unavailable: [...unavailable],
+      firstHalfGk: firstHalfGK,
+      secondHalfGk: secondHalfGK,
+    });
+  }, [firstHalfGK, secondHalfGK, teamId, unavailable]);
+
   function toggleAvailability(name: string) {
     setUnavailable((current) => {
       const next = new Set(current);
@@ -244,6 +264,12 @@ export default function GameScreen() {
     let activeTeamId = teamId;
     try {
       activeTeamId = activeTeamId ?? await getActiveTeamId();
+      rememberGamedaySetup({
+        teamId: activeTeamId,
+        unavailable: [...unavailable],
+        firstHalfGk: selectedFirstHalfGK,
+        secondHalfGk: selectedSecondHalfGK,
+      });
       const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK, allowRelaxedMinimums, allowRelaxedMaximums, signal: controller.signal });
       if (controller.signal.aborted) return;
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
