@@ -33,6 +33,7 @@ export default function AppTabs() {
           {live && <TabTrigger name="mark-unavailable" href="/mark-unavailable" asChild>
             <TabButton icon={{ ios: 'person.crop.circle.badge.xmark', web: 'person_off' }}>MARK UNAVAILABLE</TabButton>
           </TabTrigger>}
+          {live && <TabTrigger name="live" href="/live" hidden />}
           {!live && <TabTrigger name="roster" href="/roster" asChild>
             <TabButton icon={{ ios: 'person.3.fill', web: 'groups' }}>Roster</TabButton>
           </TabTrigger>}

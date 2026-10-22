@@ -31,6 +31,7 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>MARK UNAVAILABLE</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.crop.circle.badge.xmark" md="person_off" />
       </NativeTabs.Trigger>}
+      {live && <NativeTabs.Trigger name="live" hidden />}
       {!live && <NativeTabs.Trigger name="roster">
         <NativeTabs.Trigger.Label>Roster</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.3.fill" md="groups" />
