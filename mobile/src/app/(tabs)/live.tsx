@@ -11,6 +11,7 @@ import { POSITION_GROUP_BY_SLOT } from '@/engine/positional';
 import { createPlayer } from '@/engine/rotation';
 import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player, PositionGroup } from '@/engine/models';
+import { clearRememberedGamedaySetup } from '@/gameday-setup';
 import { getRoster } from '@/services/team-service';
 import { regenerateLateArrivalSchedule } from '@/services/schedule-service';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
@@ -366,6 +367,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   async function endGame() {
     if (!schedule) return;
     const report = buildAfterGameReport(schedule, liveBlocks, availabilityHistory, positionOverrides);
+    clearRememberedGamedaySetup(schedule.team_id);
     await clearAcceptedSchedule();
     if (onGameEnded) {
       onGameEnded(report);
