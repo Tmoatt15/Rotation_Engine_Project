@@ -12,7 +12,7 @@ import { backupEligiblePlayers, eligiblePlayers } from '@/engine/positional';
 import { getNextGameNumber, getSavedReports } from '@/services/report-service';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getActiveTeam, getActiveTeamId, getRoster, getSeasonSettings } from '@/services/team-service';
-import { RedesignOfferError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
+import { RedesignOfferError, ScheduleGenerationCancelledError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
 import { findPositionGaps } from '@/engine-redesign';
 
 const palette = {
@@ -104,6 +104,8 @@ export default function GameScreen() {
   const useRedesignEngine = true;
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
+  const preserveSetupOnFocus = useRef(false);
+  const generationController = useRef<AbortController | null>(null);
   const gameScrollRef = useRef<ScrollView>(null);
   const availableCount = playerNames.length - unavailable.size;
   const enteredGameNumber = Number.parseInt(gameNumber, 10);
@@ -111,7 +113,7 @@ export default function GameScreen() {
     ? `This is not ahead of the ${completedGameCount} completed ${completedGameCount === 1 ? 'game' : 'games'}. Check the number before continuing.`
     : null;
 
-  function loadRoster() {
+  function loadRoster(preserveSetup = false) {
     setLoadingRoster(true);
     getActiveTeam()
       .then((activeTeam) => {
@@ -134,7 +136,7 @@ export default function GameScreen() {
           .map((player) => player.name);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
-        if (!recheckCapacityOnFocus.current) {
+        if (!recheckCapacityOnFocus.current && !preserveSetup) {
           setFirstHalfGK(null);
           setSecondHalfGK(null);
         }
@@ -148,8 +150,9 @@ export default function GameScreen() {
   }
 
   useFocusEffect(useCallback(() => {
-    if (!recheckCapacityOnFocus.current) setUnavailable(new Set());
-    loadRoster();
+    const preserveSetup = preserveSetupOnFocus.current;
+    if (!recheckCapacityOnFocus.current && !preserveSetup) setUnavailable(new Set());
+    loadRoster(preserveSetup);
   }, []));
 
   useEffect(() => {
@@ -159,6 +162,7 @@ export default function GameScreen() {
     }
   }, [loadingRoster, rosterPlayers]);
   function toggleAvailability(name: string) {
+    preserveSetupOnFocus.current = false;
     setUnavailable((current) => {
       const next = new Set(current);
       if (next.has(name)) {
@@ -233,12 +237,16 @@ export default function GameScreen() {
     setLoading(true);
     setError(null);
     setShowGameNumberConfirmation(false);
+    const controller = new AbortController();
+    generationController.current = controller;
     let activeTeamId = teamId;
     try {
       activeTeamId = activeTeamId ?? await getActiveTeamId();
-      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK, allowRelaxedMinimums, allowRelaxedMaximums });
+      const payload = await generateLocalSchedule({ teamId: activeTeamId, availablePlayerNames: playerNames.filter((name) => !unavailable.has(name)), gameNumber: confirmedGameNumber, firstHalfGk: selectedFirstHalfGK, secondHalfGk: selectedSecondHalfGK, allowRelaxedMinimums, allowRelaxedMaximums, signal: controller.signal });
+      if (controller.signal.aborted) return;
       router.navigate({ pathname: '/schedule', params: { data: JSON.stringify(payload) } });
     } catch (requestError) {
+      if (requestError instanceof ScheduleGenerationCancelledError) return;
       if (requestError instanceof RedesignOfferError) {
         const offer = requestError.offer;
         const positionGroup = typeof offer.context.positionGroup === 'string' ? offer.context.positionGroup : null;
@@ -264,9 +272,7 @@ export default function GameScreen() {
                   const offeredSuggestions = Array.isArray(offer.context.suggestedPlayerNames)
                     ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
                     : null;
-                  const qualifyingNames = offer.kind === 'relaxed-maximums'
-                    ? offeredSuggestions ?? []
-                    : offeredSuggestions ?? await suggestBackupPlayerNames({
+                  const qualifyingNames = offeredSuggestions ?? await suggestBackupPlayerNames({
                       teamId: activeTeamId!,
                       gameNumber: confirmedGameNumber,
                       availablePlayerNames,
@@ -278,6 +284,7 @@ export default function GameScreen() {
                     Alert.alert('Backup suggestions unavailable', 'No backup currently qualifies for this position group.');
                     return;
                   }
+                  preserveSetupOnFocus.current = true;
                   router.push({
                     pathname: '/gameday-backup-suggest',
                     params: {
@@ -327,7 +334,12 @@ export default function GameScreen() {
       }
     } finally {
       setLoading(false);
+      if (generationController.current === controller) generationController.current = null;
     }
+  }
+
+  function cancelScheduleGeneration() {
+    generationController.current?.abort();
   }
 
   function tryCapacityGeneration() {
@@ -544,6 +556,11 @@ export default function GameScreen() {
                 tintColor={palette.panel}
               />}
             </Pressable>
+            {loading && (
+              <Pressable onPress={cancelScheduleGeneration} style={styles.cancelGenerationButton} accessibilityRole="button">
+                <Text style={styles.cancelGenerationText}>CANCEL GENERATION</Text>
+              </Pressable>
+            )}
 
             {error && (error === 'Choose a goalkeeper for both halves before generating the schedule.'
               ? <Pressable onPress={() => {
@@ -619,6 +636,8 @@ const styles = StyleSheet.create({
   statusTextUnavailable: { color: palette.coral },
   primaryAction: { alignItems: 'center', backgroundColor: palette.coral, borderRadius: 18, flexDirection: 'row', justifyContent: 'space-between', minHeight: 88, paddingHorizontal: 18, paddingVertical: 15 },
   primaryActionDisabled: { opacity: 0.5 },
+  cancelGenerationButton: { alignItems: 'center', borderColor: palette.line, borderRadius: 12, borderWidth: 1, paddingVertical: 12 },
+  cancelGenerationText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
   primaryEyebrow: { color: '#f9d7c9', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
   primaryTitle: { color: '#fffaf3', fontSize: 19, fontWeight: '800', marginTop: 6 },
   primaryDetail: { color: '#f9ddd2', fontSize: 12, marginTop: 4 },

@@ -4,6 +4,7 @@ import type { LiveSchedule, ScheduleBlock, SeasonRosterPlayer } from '@/engine/m
 import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
 import type { RedesignPlayerInput } from '@/engine-redesign/model';
 import { replanLateArrival } from '@/engine-redesign/stage5';
+import { REPAIR_TIME_BUDGET_MS } from '@/engine-redesign/stage3';
 import type { FrozenBlock, PlacementAudit } from '@/engine-redesign/stage3';
 import { offerForFailure, offerForRelaxedMinimums } from '@/engine-redesign/stage6';
 import type { Stage6Offer } from '@/engine-redesign/stage6';
@@ -108,18 +109,42 @@ function fieldRestRisk(
   return { group, warning };
 }
 
-function qualifyingBackupPlayerNames(
+export class ScheduleGenerationCancelledError extends Error {
+  constructor() {
+    super('Schedule generation was cancelled.');
+    this.name = 'ScheduleGenerationCancelledError';
+  }
+}
+
+async function yieldToEventLoop(signal?: AbortSignal): Promise<void> {
+  throwIfCancelled(signal);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  throwIfCancelled(signal);
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new ScheduleGenerationCancelledError();
+}
+
+async function qualifyingBackupPlayerNames(
   input: { availablePlayerNames: string[]; group: FieldGroup },
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
   roster: RedesignPlayerInput[],
-): string[] {
+  signal?: AbortSignal,
+): Promise<string[]> {
   const availableRoster = roster.filter((player) => input.availablePlayerNames.includes(player.name));
   const candidateNames = new Set(backupSuggestions(availableRoster, input.group).map((candidate) => candidate.name));
   const qualifyingNames: string[] = [];
+  const deadline = Date.now() + 1_500;
+  let candidatesEvaluated = 0;
 
   for (const player of game.players) {
     if (!candidateNames.has(player.name)) continue;
+    if (candidatesEvaluated >= 6 || Date.now() >= deadline) break;
+    await yieldToEventLoop(signal);
+    if (Date.now() >= deadline) break;
+    candidatesEvaluated += 1;
     const simulatedGame = {
       ...game,
       players: game.players.map((candidate) => candidate.name === player.name
@@ -127,9 +152,11 @@ function qualifyingBackupPlayerNames(
         : candidate),
     };
     const quotas = assignQuotas(simulatedGame, demand, true, true);
+    throwIfCancelled(signal);
     if (quotas.audit.errors?.length
       || (quotas.quotas.find((quota) => quota.player === player.name)?.groupTargets?.[input.group] ?? 0) <= 0) continue;
-    const placement = runStages3And4(simulatedGame, demand, quotas);
+    const placement = runStages3And4(simulatedGame, demand, quotas, [], deadline);
+    throwIfCancelled(signal);
     if (!placement.complete) continue;
     const placedInGroup = placement.blocks.reduce((total, block) => total
       + [...block.assignments.keys()].filter((slot) =>
@@ -181,7 +208,9 @@ function offerForRelaxedMaximumFailure(
     ?? quotas.audit.errors?.[0]
     ?? 'The relaxed assignment could not cover every field position.';
   const article = group === 'D' ? 'a' : 'an';
-  const warning = `Relaxed generation failed: ${diagnostic} Add ${article} ${group} backup and try again.`;
+  const warning = placement.audit.failureReason === 'search-budget-exhausted'
+    ? `Stage 3 repair search reached its ${REPAIR_TIME_BUDGET_MS} ms budget: ${diagnostic} Add ${article} ${group} backup to an available player eligible for that slot, then try again.`
+    : `Relaxed generation failed: ${diagnostic} Add ${article} ${group} backup and try again.`;
   return {
     kind: 'relaxed-maximums',
     message: warning,
@@ -197,28 +226,19 @@ function offerForRelaxedMaximumFailure(
 
 function offerWithQualifiedBackupSuggestions(
   offer: Stage6Offer,
-  game: ReturnType<typeof normalizeGame>,
-  demand: ReturnType<typeof buildDemandModel>,
-  roster: RedesignPlayerInput[],
 ): Stage6Offer {
   const group = offer.context.positionGroup;
-  const suggestedPlayerNames = isFieldGroup(group)
-    ? qualifyingBackupPlayerNames({
-      availablePlayerNames: game.players.filter((player) => player.available).map((player) => player.name),
-      group,
-    }, game, demand, roster)
-    : [];
   return {
     ...offer,
     buttons: [
-      ...(suggestedPlayerNames.length ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
+      ...(isFieldGroup(group) ? [{ label: 'Suggest Backup', action: 'suggest-backup' as const }] : []),
       ...offer.buttons.filter((button) => button.action !== 'suggest-backup'),
     ],
-    context: { ...offer.context, suggestedPlayerNames },
+    context: offer.context,
   };
 }
 
-function throwForQuotaAuditErrors(
+async function throwForQuotaAuditErrors(
   quotas: ReturnType<typeof assignQuotas>,
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
@@ -226,27 +246,28 @@ function throwForQuotaAuditErrors(
   allowRelaxedMinimums = false,
   allowRelaxedMaximums = false,
   offerMaximumRelaxation = true,
-): void {
+  signal?: AbortSignal,
+): Promise<void> {
   if (!quotas.audit.errors?.length) return;
   const rosterTooLarge = quotas.audit.rosterTooLarge;
   const auditErrors = quotas.audit.errors ?? [];
   const maximumCapacityShortfall = quotas.audit.maximumCapacityShortfall ?? 0;
   if (!rosterTooLarge && maximumCapacityShortfall > 0 && !allowRelaxedMaximums) {
     if (offerMaximumRelaxation) {
-      const relaxedMaximum = placementAttempt(game, demand, allowRelaxedMinimums, true);
+      const relaxedMaximum = await placementAttempt(game, demand, allowRelaxedMinimums, true, signal);
       if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
         throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximumFailure(
           relaxedMaximum.quotas,
           demand,
           relaxedMaximum.placement,
-        ), game, demand, roster));
+        )));
       }
       throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximums(
         quotas,
         game,
         demand,
         relaxedMaximum.placement,
-      ), game, demand, roster));
+      )));
     }
     throw new RedesignOfferError({
       kind: 'position-shortage',
@@ -340,9 +361,12 @@ function waterfillPlacementFailureOffer(
     ?? 'No placement diagnostic was reported.';
   const group = unfilledPlacementGroup(placement, demand) ?? 'unknown';
   const stage = placement.audit.failureReason ? 'Stage 3' : 'Stage 3/4';
+  const message = placement.audit.failureReason === 'search-budget-exhausted'
+    ? `${stage} repair search reached its ${REPAIR_TIME_BUDGET_MS} ms budget while placing ${diagnostic}. Add a ${group} backup to an available player eligible for that slot, then try again.`
+    : `Water-fill placement failed in ${stage} for group ${group}: ${diagnostic}`;
   return {
     kind: 'impossible',
-    message: `Water-fill placement failed in ${stage} for group ${group}: ${diagnostic}`,
+    message,
     buttons: [{ label: 'Cancel', action: 'cancel' }],
     context: { failureType: 'waterfill-placement-failed', stage, group, diagnostic },
   };
@@ -546,14 +570,35 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, demand: ReturnTy
   });
 }
 
-function placementAttempt(
+async function placementAttempt(
   game: ReturnType<typeof normalizeGame>,
   demand: ReturnType<typeof buildDemandModel>,
   allowRelaxedMinimums: boolean,
   allowRelaxedMaximums = false,
+  signal?: AbortSignal,
 ) {
+  await yieldToEventLoop(signal);
   const quotas = assignQuotas(game, demand, allowRelaxedMinimums, allowRelaxedMaximums);
-  return { placement: runStages3And4(game, demand, quotas), quotas };
+  throwIfCancelled(signal);
+  if (quotas.audit.errors?.length) {
+    return {
+      placement: {
+        blocks: [],
+        complete: false,
+        audit: {
+          restPins: [],
+          softRestFallback: false,
+          outOfPositionBlocks: {},
+          errors: quotas.audit.errors,
+        },
+        metrics: { maxCoreBenches: 0, maxBoundaryTurnovers: 0, restWindowViolations: 0 },
+      },
+      quotas,
+    };
+  }
+  const placement = runStages3And4(game, demand, quotas);
+  throwIfCancelled(signal);
+  return { placement, quotas };
 }
 
 async function context(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null }) {
@@ -596,71 +641,75 @@ export async function suggestBackupPlayerNames(input: {
   firstHalfGk?: string | null;
   secondHalfGk?: string | null;
   group: FieldGroup;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   const { game, demand, roster } = await context(input);
-  return qualifyingBackupPlayerNames(input, game, demand, roster);
+  return qualifyingBackupPlayerNames(input, game, demand, roster, input.signal);
 }
 
-export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean; allowRelaxedMaximums?: boolean }): Promise<RedesignSchedule> {
+export async function generateRedesignSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; allowRelaxedMinimums?: boolean; allowRelaxedMaximums?: boolean; previewOnly?: boolean; signal?: AbortSignal }): Promise<RedesignSchedule> {
   const { settings, team, game, demand, roster } = await context(input);
+  if (input.signal?.aborted) throw new ScheduleGenerationCancelledError();
   let placement: ReturnType<typeof runStages3And4>;
   let quotas: ReturnType<typeof assignQuotas>;
   if (input.allowRelaxedMaximums) {
-    ({ placement, quotas } = placementAttempt(game, demand, true, true));
+    ({ placement, quotas } = await placementAttempt(game, demand, true, true, input.signal));
     if (quotas.audit.errors?.length || !placement.complete) {
       throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(
-        offerForRelaxedMaximumFailure(quotas, demand, placement), game, demand, roster,
+        offerForRelaxedMaximumFailure(quotas, demand, placement),
       ));
     }
   } else if (input.allowRelaxedMinimums) {
-    ({ placement, quotas } = placementAttempt(game, demand, true));
+    ({ placement, quotas } = await placementAttempt(game, demand, true, false, input.signal));
     if (quotas.audit.errors?.length || !placement.complete) {
-      const relaxedMaximum = placementAttempt(game, demand, true, true);
+      const relaxedMaximum = await placementAttempt(game, demand, true, true, input.signal);
       if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
         throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximumFailure(
           relaxedMaximum.quotas,
           demand,
           relaxedMaximum.placement,
-        ), game, demand, roster));
+        )));
       }
       throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximums(
         quotas,
         game,
         demand,
         relaxedMaximum.placement,
-      ), game, demand, roster));
+      )));
     }
   } else {
-    const strict = placementAttempt(game, demand, false);
-    const relaxed = placementAttempt(game, demand, true);
+    const strict = await placementAttempt(game, demand, false, false, input.signal);
+    const relaxed = await placementAttempt(game, demand, true, false, input.signal);
     if (!strict.quotas.audit.errors?.length && strict.placement.complete) {
       ({ placement, quotas } = strict);
     } else if (!relaxed.quotas.audit.errors?.length && relaxed.placement.complete) {
       throw new RedesignOfferError(offerForRelaxedMinimums(relaxed.quotas));
     } else {
-      const relaxedMaximum = placementAttempt(game, demand, true, true);
+      const relaxedMaximum = await placementAttempt(game, demand, true, true, input.signal);
       if (relaxedMaximum.quotas.audit.errors?.length || !relaxedMaximum.placement.complete) {
         throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximumFailure(
           relaxedMaximum.quotas,
           demand,
           relaxedMaximum.placement,
-        ), game, demand, roster));
+        )));
       }
       throw new RedesignOfferError(offerWithQualifiedBackupSuggestions(offerForRelaxedMaximums(
         relaxed.quotas,
         game,
         demand,
         relaxedMaximum.placement,
-      ), game, demand, roster));
+      )));
     }
   }
-  throwForQuotaAuditErrors(
+  await throwForQuotaAuditErrors(
     quotas,
     game,
     demand,
     roster,
     Boolean(input.allowRelaxedMinimums || input.allowRelaxedMaximums),
     input.allowRelaxedMaximums ?? false,
+    true,
+    input.signal,
   );
   if (!placement.complete) {
     const placementErrors = placement.audit.errors ?? [];
@@ -685,7 +734,10 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation), placement_audit: placement.audit,
     blocks: scheduleBlocks(game, demand, placement), warnings: ['Engine: redesign (Stages 0–6)', ...relaxedWarnings], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
-  await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
+  if (input.signal?.aborted) throw new ScheduleGenerationCancelledError();
+  if (!input.previewOnly) {
+    await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
+  }
   return result;
 }
 
@@ -702,7 +754,7 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
   const frozen: FrozenBlock[] = input.previousSchedule.blocks.slice(0, input.startBlock - 1).map((block, index) => ({ block: index + 1, assignments: new Map(Object.entries(block.positions).filter(([slot]) => slot !== 'GK')) }));
   const result = replanLateArrival({ game, demand, quotas, frozen, arrivalTarget: input.targetBlocks });
   if (result.kind !== 'success') throw new RedesignOfferError(offerForFailure(result.failure));
-  throwForQuotaAuditErrors(quotas, game, demand, base.roster, false, false, false);
+  await throwForQuotaAuditErrors(quotas, game, demand, base.roster, false, false, false);
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
   const blockLengths = new SeasonSetup({ ...(base.settings), block_length_minutes: undefined }).block_lengths_minutes;
   return {

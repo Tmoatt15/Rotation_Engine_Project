@@ -1,5 +1,5 @@
 import type { DemandModel, NormalizedGame, QuotaAssignment } from './model';
-import { deriveRestPins, excludedFromSlot, groupForSlot, placeStage3, positionTier } from './stage3';
+import { deriveRestPins, excludedFromSlot, groupForSlot, placeStage3, positionTier, REPAIR_TIME_BUDGET_MS } from './stage3';
 import type { PlacementBlock, PlacementResult, FrozenBlock } from './stage3';
 
 export interface PolishMetrics {
@@ -17,10 +17,14 @@ export function runStages3And4(
   demand: DemandModel,
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
+  repairDeadline = Date.now() + REPAIR_TIME_BUDGET_MS,
 ): PolishedPlacement {
-  const hard = placeStage3(game, demand, quotas, frozen, false);
+  const hard = placeStage3(game, demand, quotas, frozen, false, repairDeadline);
   if (hard.complete) return polishStage4(game, demand, quotas, hard);
-  const soft = placeStage3(game, demand, quotas, frozen, true);
+  if (hard.audit.failureReason === 'search-budget-exhausted') {
+    return polishStage4(game, demand, quotas, hard);
+  }
+  const soft = placeStage3(game, demand, quotas, frozen, true, repairDeadline);
   const repairPasses = {
     ...(hard.audit.repair ? { hard: hard.audit.repair } : {}),
     ...(soft.audit.repair ? { soft: soft.audit.repair } : {}),

@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
@@ -9,7 +9,7 @@ import type { SeasonRosterPlayer } from '@/engine/models';
 import { appendBackupPosition, backupSuggestions, formatGeneralPositions } from '@/coverage-utils';
 import { generateLocalSchedule } from '@/services/schedule-service';
 import { getRoster, updateRoster } from '@/services/team-service';
-import { RedesignOfferError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
+import { RedesignOfferError, ScheduleGenerationCancelledError, suggestBackupPlayerNames } from '@/services/redesign-schedule-service';
 
 const palette = {
   ink: '#17221f',
@@ -93,8 +93,11 @@ export default function GamedayBackupSuggestScreen() {
   const [warning, setWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [backupAdded, setBackupAdded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submissionStarted = useRef(false);
+  const generationController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -142,6 +145,8 @@ export default function GamedayBackupSuggestScreen() {
     };
   }, [rawAvailablePlayerNames, rawFirstHalfGk, rawGameNumber, rawGroup, rawSecondHalfGk, rawSuggestedPlayerNames, rawTeamId, rawWarning]);
 
+  useEffect(() => () => generationController.current?.abort(), []);
+
   const availableNames = useMemo(
     () => new Set(scheduleRequest?.availablePlayerNames ?? []),
     [scheduleRequest],
@@ -158,22 +163,85 @@ export default function GamedayBackupSuggestScreen() {
     [availableNames, group, players, suggestedNames],
   );
 
+  async function openBackupSuggestions(
+    request: ScheduleRequest,
+    backupGroup: FieldGroup,
+    backupWarning: string,
+    offeredNames: string[] | null,
+  ) {
+    const qualifyingNames = offeredNames ?? await suggestBackupPlayerNames({
+      ...request,
+      group: backupGroup,
+    });
+    if (!qualifyingNames.length) {
+      Alert.alert('Backup suggestions unavailable', 'No backup currently qualifies for this position group.');
+      return;
+    }
+    router.push({
+      pathname: '/gameday-backup-suggest',
+      params: {
+        group: backupGroup,
+        teamId: request.teamId,
+        gameNumber: String(request.gameNumber),
+        availablePlayerNames: JSON.stringify(request.availablePlayerNames),
+        firstHalfGk: request.firstHalfGk ?? '',
+        secondHalfGk: request.secondHalfGk ?? '',
+        warning: backupWarning,
+        suggestedPlayerNames: JSON.stringify(qualifyingNames),
+      },
+    });
+  }
+
+  function confirmRelaxedSchedule(
+    request: ScheduleRequest,
+    backupPlayerName: string,
+    backupGroup: FieldGroup,
+    missedBackup: boolean,
+  ) {
+    Alert.alert(
+      missedBackup ? 'Backup not needed' : 'Confirm relaxed schedule',
+      missedBackup
+        ? `${backupPlayerName} wasn't needed at ${backupGroup}. The schedule also needs relaxed playing-time limits. Generate it?`
+        : 'The schedule needs relaxed minimum and maximum playing-time limits. Generate it?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Generate Relaxed',
+          onPress: () => void generateAfterBackup(request, backupPlayerName, backupGroup, true, true),
+        },
+      ],
+    );
+  }
+
   async function generateAfterBackup(
     request: ScheduleRequest,
     backupPlayerName: string,
     backupGroup: FieldGroup,
     allowRelaxedMinimums = false,
     allowRelaxedMaximums = false,
+    requireRelaxedConsent = false,
   ) {
+    const controller = new AbortController();
+    generationController.current = controller;
+    setRegenerating(true);
+    setError(null);
     try {
       const schedule = await generateLocalSchedule({
         ...request,
         allowRelaxedMinimums,
         allowRelaxedMaximums,
+        previewOnly: requireRelaxedConsent,
+        signal: controller.signal,
       });
       const missedBackup = schedule.placement_audit?.plannedVsPlaced?.find((entry) =>
         entry.player === backupPlayerName && entry.group === backupGroup && entry.placed === 0);
+      const needsRelaxedConsent = requireRelaxedConsent && schedule.warnings.some((entry) =>
+        entry.startsWith('Minimums relaxed for:') || entry.startsWith('Playing time relaxed to fit'));
       if (missedBackup) {
+        if (needsRelaxedConsent) {
+          confirmRelaxedSchedule(request, backupPlayerName, backupGroup, true);
+          return;
+        }
         Alert.alert(
           'Backup not needed',
           `${backupPlayerName} wasn't needed at ${backupGroup} this game`,
@@ -181,8 +249,13 @@ export default function GamedayBackupSuggestScreen() {
         );
         return;
       }
+      if (needsRelaxedConsent) {
+        confirmRelaxedSchedule(request, backupPlayerName, backupGroup, false);
+        return;
+      }
       router.replace({ pathname: '/schedule', params: { data: JSON.stringify(schedule) } });
     } catch (generationError) {
+      if (generationError instanceof ScheduleGenerationCancelledError) return;
       if (generationError instanceof RedesignOfferError && generationError.offer.kind === 'position-shortage') {
         const offer = generationError.offer;
         const nextGroup = offer.context.positionGroup;
@@ -191,7 +264,7 @@ export default function GamedayBackupSuggestScreen() {
           : offer.message;
         const suggestedNames = Array.isArray(offer.context.suggestedPlayerNames)
           ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
-          : [];
+          : null;
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
@@ -201,19 +274,7 @@ export default function GamedayBackupSuggestScreen() {
                 Alert.alert('Backup suggestions unavailable', 'The schedule warning did not include a valid position group.');
                 return;
               }
-              router.push({
-                pathname: '/gameday-backup-suggest',
-                params: {
-                  group: nextGroup,
-                  teamId: request.teamId,
-                  gameNumber: String(request.gameNumber),
-                  availablePlayerNames: JSON.stringify(request.availablePlayerNames),
-                  firstHalfGk: request.firstHalfGk ?? '',
-                  secondHalfGk: request.secondHalfGk ?? '',
-                  warning: nextGroupWarning,
-                  suggestedPlayerNames: JSON.stringify(suggestedNames),
-                },
-              });
+              void openBackupSuggestions(request, nextGroup, nextGroupWarning, suggestedNames);
             }
           },
         })));
@@ -237,7 +298,7 @@ export default function GamedayBackupSuggestScreen() {
           : offer.message;
         const suggestedNames = Array.isArray(offer.context.suggestedPlayerNames)
           ? offer.context.suggestedPlayerNames.filter((value): value is string => typeof value === 'string')
-          : [];
+          : null;
         Alert.alert('Can\'t Generate Schedule', offer.message, offer.buttons.map((button) => ({
           text: button.label,
           style: button.action === 'cancel' ? 'cancel' as const : 'default' as const,
@@ -248,26 +309,18 @@ export default function GamedayBackupSuggestScreen() {
                 Alert.alert('Backup suggestions unavailable', 'The schedule warning did not include a valid position group.');
                 return;
               }
-              router.push({
-                pathname: '/gameday-backup-suggest',
-                params: {
-                  group: nextGroup,
-                  teamId: request.teamId,
-                  gameNumber: String(request.gameNumber),
-                  availablePlayerNames: JSON.stringify(request.availablePlayerNames),
-                  firstHalfGk: request.firstHalfGk ?? '',
-                  secondHalfGk: request.secondHalfGk ?? '',
-                  warning: nextGroupWarning,
-                  suggestedPlayerNames: JSON.stringify(suggestedNames),
-                },
-              });
+              void openBackupSuggestions(request, nextGroup, nextGroupWarning, suggestedNames);
             }
           },
         })));
         return;
       }
       const message = generationError instanceof Error ? generationError.message : 'Unable to regenerate the schedule.';
-      Alert.alert('Schedule not generated', `The backup was saved, but the schedule could not be regenerated: ${message}`);
+      setError(`The backup was saved, but the schedule could not be regenerated: ${message}`);
+    } finally {
+      setRegenerating(false);
+      setSaving(false);
+      if (generationController.current === controller) generationController.current = null;
     }
   }
 
@@ -286,13 +339,18 @@ export default function GamedayBackupSuggestScreen() {
         candidate.name === playerName ? appendBackupPosition(candidate, group) : candidate,
       );
       await updateRoster(scheduleRequest.teamId, updatedRoster);
-      router.back();
-      void generateAfterBackup(scheduleRequest, playerName, group);
+      setBackupAdded(true);
+      await generateAfterBackup(scheduleRequest, playerName, group, true, true, true);
     } catch (saveError) {
       submissionStarted.current = false;
       setSaving(false);
       setError(saveError instanceof Error ? saveError.message : 'Unable to save the backup position.');
     }
+  }
+
+  function cancelRetry() {
+    generationController.current?.abort();
+    router.back();
   }
 
   return (
@@ -312,11 +370,17 @@ export default function GamedayBackupSuggestScreen() {
             </View>
 
             {error && <View style={styles.errorBanner}><Text style={styles.errorText}>{error}</Text></View>}
+            {regenerating && (
+              <View style={styles.regeneratingBanner} accessibilityLiveRegion="polite">
+                <ActivityIndicator color={palette.green} />
+                <Text style={styles.regeneratingText}>Backup saved. Regenerating schedule...</Text>
+              </View>
+            )}
             {loading ? <Text style={styles.helperText}>Loading available players...</Text> : group && (
               <View style={styles.card}>
                 <Text style={styles.groupTitle}>{groupNames[group]}</Text>
                 <Text style={styles.warningText}>{warning}</Text>
-                <Text style={styles.helperText}>Choose an available player to add a {group} backup. The schedule will regenerate after you add one.</Text>
+                <Text style={styles.helperText}>{backupAdded ? 'The backup is saved. Review the retry result or return to Gameday.' : `Choose an available player to add a ${group} backup. The schedule will regenerate after you add one.`}</Text>
                 {candidates.length === 0 ? (
                   <Text style={styles.emptyText}>No backup helps this game</Text>
                 ) : (
@@ -326,17 +390,17 @@ export default function GamedayBackupSuggestScreen() {
                         <Text style={styles.playerName} numberOfLines={2}>{player.name} ({formatGeneralPositions(player.general_positions)})</Text>
                         <Pressable
                           onPress={() => void addBackup(player.name)}
-                          disabled={saving}
+                          disabled={backupAdded || saving || regenerating}
                           style={[styles.addButton, saving && styles.disabledButton]}
                           accessibilityRole="button">
-                          <Text style={styles.addButtonText}>{saving ? 'ADDING...' : 'ADD'}</Text>
+                          <Text style={styles.addButtonText}>{saving ? 'ADDING...' : backupAdded ? 'ADDED' : 'ADD'}</Text>
                         </Pressable>
                       </View>
                     ))}
                   </View>
                 )}
-                <Pressable onPress={() => router.back()} disabled={saving} style={styles.cancelButton} accessibilityRole="button">
-                  <Text style={styles.cancelButtonText}>CANCEL</Text>
+                <Pressable onPress={regenerating ? cancelRetry : () => router.back()} disabled={saving && !regenerating} style={styles.cancelButton} accessibilityRole="button">
+                  <Text style={styles.cancelButtonText}>{regenerating ? 'CANCEL RETRY' : 'CANCEL'}</Text>
                 </Pressable>
               </View>
             )}
@@ -371,4 +435,6 @@ const styles = StyleSheet.create({
   cancelButtonText: { color: palette.muted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
   errorBanner: { backgroundColor: palette.redSoft, borderRadius: 11, padding: 11 },
   errorText: { color: palette.red, fontSize: 12, lineHeight: 17 },
+  regeneratingBanner: { alignItems: 'center', backgroundColor: palette.greenSoft, borderRadius: 11, flexDirection: 'row', gap: 10, padding: 12 },
+  regeneratingText: { color: palette.green, flex: 1, fontSize: 12, fontWeight: '700' },
 });

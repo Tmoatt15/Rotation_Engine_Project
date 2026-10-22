@@ -46,6 +46,9 @@ export interface PlacementResult {
   complete: boolean;
 }
 
+export const REPAIR_NODE_CAP = 256;
+export const REPAIR_TIME_BUDGET_MS = 250;
+
 interface PlacementState {
   remainingMin: Map<string, number>;
   remainingTarget: Map<string, number>;
@@ -237,6 +240,7 @@ function placeDeterministically(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[],
   softRest: boolean,
+  repairDeadline?: number,
 ): PlacementResult {
   const restPins = deriveRestPins(game, quotas);
   const rest = new Map(restPins.map((pin) => [pin.player, new Set(pin.blocks)]));
@@ -763,8 +767,10 @@ function placeDeterministically(
   const greedyUnfilledSlots = blocks.some((block) =>
     demand.fieldSlots.some((slot) => !block.assignments.has(slot.slot)));
   let repair: PlacementAudit['repair'];
-  if (greedyUnfilledSlots || plannedVsPlaced.some(({ difference }) => difference !== 0)) {
-    const repairNodeCap = 5_000;
+  let searchBudgetExhausted = false;
+  if (greedyUnfilledSlots && !quotas.audit.errors?.length) {
+    const repairNodeCap = REPAIR_NODE_CAP;
+    const deadline = repairDeadline ?? Date.now() + REPAIR_TIME_BUDGET_MS;
     const repairedBlocks = Array.from({ length: game.totalBlocks }, (_, index) => ({
       block: index + 1,
       assignments: new Map<string, string>(),
@@ -837,6 +843,10 @@ function placeDeterministically(
       && repairedBlocks.every((block) => [...(requiredByBlock.get(block.block) ?? [])]
         .every((player) => assignmentsHasPlayer(block.assignments, player)));
     const canUseRepairSlot = (player: NormalizedPlayer, block: number, slot: DemandModel['fieldSlots'][number]): boolean => {
+      if (Date.now() >= deadline) {
+        searchBudgetExhausted = true;
+        return false;
+      }
       const group = slot.group;
       const target = targetCounts.get(player.name)?.get(group) ?? 0;
       const selectedKeeper = player.name === game.firstHalfKeeper || player.name === game.secondHalfKeeper;
@@ -910,8 +920,11 @@ function placeDeterministically(
       return true;
     };
     const search = (): boolean => {
+      if (Date.now() >= deadline || nodesSearched >= repairNodeCap) {
+        searchBudgetExhausted = true;
+        return false;
+      }
       nodesSearched += 1;
-      if (nodesSearched > repairNodeCap) return false;
       const remaining = remainingSlots();
       if (remaining.length === 0) return countsMatch();
       const candidateOptions = remaining.map((entry) => ({
@@ -919,6 +932,7 @@ function placeDeterministically(
         candidates: game.players.filter((player) => canUseRepairSlot(player, entry.block, entry.slot)),
       })).sort((left, right) => left.candidates.length - right.candidates.length
         || left.entry.block - right.entry.block);
+      if (searchBudgetExhausted) return false;
       const { block, slot } = candidateOptions[0].entry;
       const group = slot.group;
       const candidates = candidateOptions[0].candidates.sort((left, right) => {
@@ -941,18 +955,20 @@ function placeDeterministically(
         targetCounts.get(player.name)!.set(group, targetCounts.get(player.name)!.get(group)! - 1);
         repairPlacedCounts.set(player.name, (repairPlacedCounts.get(player.name) ?? 0) + 1);
         const remainingAfterPlacement = remainingSlots();
-        if (repairCapacityFeasible(remainingAfterPlacement) && search()) return true;
+        const feasible = repairCapacityFeasible(remainingAfterPlacement);
+        if (Date.now() >= deadline) searchBudgetExhausted = true;
+        if (feasible && !searchBudgetExhausted && search()) return true;
         targetCounts.get(player.name)!.set(group, targetCounts.get(player.name)!.get(group)! + 1);
         repairPlacedCounts.set(player.name, (repairPlacedCounts.get(player.name) ?? 0) - 1);
         repairedBlocks[block - 1].assignments.delete(slot.slot);
-        if (nodesSearched > repairNodeCap) break;
+        if (searchBudgetExhausted) break;
       }
       return false;
     };
-    solved = fixedAssignmentIsValid()
-      && repairCapacityFeasible(remainingSlots())
-      && search();
-    repair = { attempted: true, nodesSearched: Math.min(nodesSearched, repairNodeCap), success: solved };
+    const initiallyFeasible = fixedAssignmentIsValid() && repairCapacityFeasible(remainingSlots());
+    if (Date.now() >= deadline) searchBudgetExhausted = true;
+    solved = initiallyFeasible && !searchBudgetExhausted && search();
+    repair = { attempted: true, nodesSearched, success: solved };
     if (solved) blocks = repairedBlocks;
     plannedVsPlaced = measurePlan(blocks);
   }
@@ -986,7 +1002,9 @@ function placeDeterministically(
       ...(repair ? { repair } : {}),
       unplannedBackupUses,
       failureReason: unfilledSlots.length
-        ? 'no-eligible-player'
+        ? searchBudgetExhausted
+          ? 'search-budget-exhausted'
+          : 'no-eligible-player'
         : minimumErrors.length
           ? 'minimum-window-exhausted'
           : undefined,
@@ -1004,6 +1022,7 @@ export function placeStage3(
   quotas: QuotaAssignment,
   frozen: FrozenBlock[] = [],
   softRest = false,
+  repairDeadline?: number,
 ): PlacementResult {
-  return placeDeterministically(game, demand, quotas, frozen, softRest);
+  return placeDeterministically(game, demand, quotas, frozen, softRest, repairDeadline);
 }

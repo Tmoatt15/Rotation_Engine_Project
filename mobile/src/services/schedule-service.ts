@@ -49,7 +49,7 @@ function maximumConstraintFailure(errors: string[]): boolean {
     || error.includes('capacity is blocked by half maximums'));
 }
 
-export async function generateLocalSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; disableMaximumLimits?: boolean; allowRelaxedMinimums?: boolean; allowRelaxedMaximums?: boolean }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'shipping' | 'redesign'; placement_audit?: PlacementAudit }> {
+export async function generateLocalSchedule(input: { teamId: string; gameNumber: number; availablePlayerNames: string[]; firstHalfGk?: string | null; secondHalfGk?: string | null; disableMaximumLimits?: boolean; allowRelaxedMinimums?: boolean; allowRelaxedMaximums?: boolean; previewOnly?: boolean; signal?: AbortSignal }): Promise<LiveSchedule & { warnings: string[]; errors: string[]; available_player_names: string[]; engine_source: 'shipping' | 'redesign'; placement_audit?: PlacementAudit }> {
   if (isRedesignEngineEnabled()) return generateRedesignSchedule(input);
   const settings = await getSeasonSettings(input.teamId);
   const team = await getLocalTeam(input.teamId);

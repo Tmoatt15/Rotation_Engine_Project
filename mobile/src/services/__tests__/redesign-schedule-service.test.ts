@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '@/engine-redesign';
 import type { RedesignGameInput, RedesignPlayerInput, WaterfillRotationState } from '@/engine-redesign/model';
 import type { SeasonRosterPlayer, SeasonSettings } from '@/engine/models';
-import { generateRedesignSchedule, RedesignOfferError, regenerateRedesignLateArrival, suggestBackupPlayerNames } from '../redesign-schedule-service';
+import { generateRedesignSchedule, RedesignOfferError, regenerateRedesignLateArrival, ScheduleGenerationCancelledError, suggestBackupPlayerNames } from '../redesign-schedule-service';
 import type { LateArrivalReplanInput, LateArrivalReplanResult } from '@/engine-redesign/stage5';
 import type { PolishedPlacement } from '@/engine-redesign/stage4';
 
@@ -16,11 +16,24 @@ const mocks = vi.hoisted(() => ({
   getWaterfillRotationState: vi.fn(),
   saveWaterfillRotationState: vi.fn(),
   replanLateArrival: vi.fn(),
+  forceCleanQuotaAudit: false,
+  cleanQuotaAuditWhenRelaxedOnly: false,
 }));
 
 vi.mock('@/engine-redesign', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/engine-redesign')>();
-  return { ...actual, runStages3And4: vi.fn() };
+  return {
+    ...actual,
+    assignQuotas: (...args: Parameters<typeof actual.assignQuotas>) => {
+      const result = actual.assignQuotas(...args);
+      const cleanAudit = mocks.forceCleanQuotaAudit
+        && (!mocks.cleanQuotaAuditWhenRelaxedOnly || args[2]);
+      return cleanAudit
+        ? { ...result, audit: { ...result.audit, errors: undefined, underfill: [], overage: [] } }
+        : result;
+    },
+    runStages3And4: vi.fn(),
+  };
 });
 vi.mock('@/engine-redesign/stage5', () => ({ replanLateArrival: mocks.replanLateArrival }));
 vi.mock('../team-service', () => ({
@@ -143,6 +156,7 @@ function mockRestRiskOffer(
   atRiskFieldBlocks: number,
   qualifyingNames: string[],
 ): void {
+  mocks.forceCleanQuotaAudit = true;
   vi.mocked(runStages3And4)
     .mockReturnValueOnce(placement(false))
     .mockReturnValueOnce(placement(false))
@@ -211,6 +225,8 @@ function gameInput(roster: SeasonRosterPlayer[], totalBlocks: number, rotation: 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.forceCleanQuotaAudit = false;
+  mocks.cleanQuotaAuditWhenRelaxedOnly = false;
 });
 
 describe('redesign schedule service', () => {
@@ -268,7 +284,7 @@ describe('redesign schedule service', () => {
     });
   });
 
-  it('does not offer a backup when a rest alert has no qualifying candidates', async () => {
+  it('defers rest-alert candidate qualification until the backup picker opens', async () => {
     configureService(rotationRoster, 8);
     mockRestRiskOffer(8, 'Brooklyn', 'D', 7, []);
     const availablePlayerNames = rotationRoster
@@ -285,15 +301,16 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           positionGroup: 'D',
-          suggestedPlayerNames: [],
         }),
       },
     });
+    expect(runStages3And4).toHaveBeenCalledTimes(3);
   });
 
   it('recomputes qualified backups after a saved backup changes the roster', async () => {
@@ -315,9 +332,17 @@ describe('redesign schedule service', () => {
     })).rejects.toMatchObject({
       offer: {
         buttons: expect.arrayContaining([{ label: 'Suggest Backup', action: 'suggest-backup' }]),
-        context: expect.objectContaining({ suggestedPlayerNames: ['Selma'] }),
+        context: expect.objectContaining({ positionGroup: 'D' }),
       },
     });
+    expect(await suggestBackupPlayerNames({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      group: 'D',
+    })).toContain('Selma');
 
     vi.mocked(runStages3And4).mockReset();
     configureService(updatedRoster, 8);
@@ -331,14 +356,19 @@ describe('redesign schedule service', () => {
       secondHalfGk: 'Maddie',
     })).rejects.toMatchObject({
       offer: {
-        buttons: [
-          { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
-          { label: 'Cancel', action: 'cancel' },
-        ],
-        context: expect.objectContaining({ suggestedPlayerNames: [] }),
+        buttons: expect.arrayContaining([{ label: 'Suggest Backup', action: 'suggest-backup' }]),
+        context: expect.objectContaining({ positionGroup: 'D' }),
       },
     });
-    expect(mocks.getRoster).toHaveBeenCalledTimes(2);
+    expect(await suggestBackupPlayerNames({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      group: 'D',
+    })).not.toContain('Selma');
+    expect(mocks.getRoster).toHaveBeenCalledTimes(4);
   });
 
   it('offers a different qualifying backup after the saved player is excluded', async () => {
@@ -360,9 +390,19 @@ describe('redesign schedule service', () => {
     })).rejects.toMatchObject({
       offer: {
         buttons: expect.arrayContaining([{ label: 'Suggest Backup', action: 'suggest-backup' }]),
-        context: expect.objectContaining({ suggestedPlayerNames: ['Selma'] }),
+        context: expect.objectContaining({ positionGroup: 'D' }),
       },
     });
+    const suggestions = await suggestBackupPlayerNames({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames,
+      firstHalfGk: 'Avery',
+      secondHalfGk: 'Maddie',
+      group: 'D',
+    });
+    expect(suggestions).toContain('Selma');
+    expect(suggestions).not.toContain('Reese');
   });
 
   it.each([6, 8, 10, 12])('suggests a backup for a non-keeper with at least totalBlocks - 1 field blocks (%d blocks)', async (totalBlocks) => {
@@ -371,8 +411,6 @@ describe('redesign schedule service', () => {
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
-    const hasQualifyingBackup = totalBlocks <= 8;
-
     await expect(generateRedesignSchedule({
       teamId: 'team-1',
       gameNumber: 1,
@@ -384,14 +422,13 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          ...(hasQualifyingBackup ? [{ label: 'Suggest Backup', action: 'suggest-backup' }] : []),
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining(`Brooklyn (${totalBlocks - 1}/${totalBlocks} field blocks)`),
-          suggestedPlayerNames: hasQualifyingBackup ? ['Dolce'] : [],
         }),
       },
     });
@@ -403,8 +440,6 @@ describe('redesign schedule service', () => {
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
-    const hasQualifyingBackup = totalBlocks <= 8;
-
     await expect(generateRedesignSchedule({
       teamId: 'team-1',
       gameNumber: 1,
@@ -416,14 +451,13 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
-          ...(hasQualifyingBackup ? [{ label: 'Suggest Backup', action: 'suggest-backup' }] : []),
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Generate Relaxed', action: 'allow-relaxed-maximums' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining(`Avery (${totalBlocks / 2}/${totalBlocks / 2} field blocks)`),
-          suggestedPlayerNames: hasQualifyingBackup ? ['Dolce'] : [],
         }),
       },
     });
@@ -431,6 +465,7 @@ describe('redesign schedule service', () => {
 
   it('does not suggest a half-keeper backup when one field block is available for rest', async () => {
     configureService(rotationRoster, 8);
+    mocks.forceCleanQuotaAudit = true;
     vi.mocked(runStages3And4)
       .mockReturnValueOnce(placement(false))
       .mockReturnValueOnce(placement(false))
@@ -478,7 +513,25 @@ describe('redesign schedule service', () => {
     expect(result.engine_source).toBe('redesign');
   });
 
-  it('delivers the repaired Dolce/Reese schedule through the service', async () => {
+  it('does not persist a relaxed schedule preview before coach confirmation', async () => {
+    const roster = abundanceRoster();
+    configureService(roster, 6);
+
+    await generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+      allowRelaxedMinimums: true,
+      allowRelaxedMaximums: true,
+      previewOnly: true,
+    });
+
+    expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
+  });
+
+  it('skips repair when the Dolce/Reese placement is already complete', async () => {
     configureService(rotationRoster, 8);
     const engine = await vi.importActual<typeof import('@/engine-redesign')>('@/engine-redesign');
     vi.mocked(runStages3And4).mockImplementation(engine.runStages3And4);
@@ -496,7 +549,7 @@ describe('redesign schedule service', () => {
     });
 
     expect(result.engine_source).toBe('redesign');
-    expect(result.placement_audit?.repair).toMatchObject({ attempted: true, success: true });
+    expect(result.placement_audit?.repair).toBeUndefined();
     expect(result.placement_audit?.errors.some((error) => error.startsWith('Cannot place minimum'))).toBe(false);
   });
 
@@ -539,6 +592,7 @@ describe('redesign schedule service', () => {
       secondHalfKeeper: 'Keeper B',
     }, redesignPlayers(roster));
     const demand = buildDemandModel(game);
+    mocks.forceCleanQuotaAudit = true;
     vi.mocked(runStages3And4).mockReturnValue({
       ...placement(false, ['Unfilled slot: Block 1, slot RF.']),
       blocks: Array.from({ length: game.totalBlocks }, (_, index) => ({
@@ -595,7 +649,7 @@ describe('redesign schedule service', () => {
     expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
   });
 
-  it('keeps group-specific diagnostics when no backup passes the dry run', async () => {
+  it('keeps group-specific diagnostics and defers backup qualification for a failed placement', async () => {
     const roster = [
       ...Array.from({ length: 12 }, (_, index) =>
         rosterPlayer(`Defender ${index + 1}`, 'rotational', ['D'], { primaryPositions: ['ANY'] })),
@@ -616,16 +670,64 @@ describe('redesign schedule service', () => {
         kind: 'relaxed-maximums',
         message: expect.stringContaining('Relaxed generation failed: Midfield group (M)'),
         buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: expect.objectContaining({
           failureType: 'relaxed-maximums-failed',
           positionGroup: 'M',
           positionGroupWarning: expect.stringContaining('Add an M backup and try again.'),
-          suggestedPlayerNames: [],
         }),
       },
     });
+  });
+
+  it('turns a repair-budget hit into a specific actionable offer', async () => {
+    const roster = abundanceRoster();
+    configureService(roster, 6);
+    mocks.forceCleanQuotaAudit = true;
+    vi.mocked(runStages3And4).mockReturnValue({
+      ...placement(false, ['Unfilled slot: Block 2, slot CM.']),
+      audit: {
+        ...placement(false, ['Unfilled slot: Block 2, slot CM.']).audit,
+        failureReason: 'search-budget-exhausted',
+      },
+    });
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+      allowRelaxedMaximums: true,
+    })).rejects.toMatchObject({
+      offer: {
+        kind: 'relaxed-maximums',
+        message: expect.stringMatching(/repair search reached its 250 ms budget.*Add (?:a|an) [DMF] backup to an available player eligible for that slot/),
+      },
+    });
+  });
+
+  it('observes cancellation at the yield between generation attempts', async () => {
+    const roster = abundanceRoster();
+    configureService(roster, 6);
+    mocks.forceCleanQuotaAudit = true;
+    const controller = new AbortController();
+    vi.mocked(runStages3And4).mockImplementationOnce(() => {
+      setTimeout(() => controller.abort(), 0);
+      return placement(true);
+    });
+
+    await expect(generateRedesignSchedule({
+      teamId: 'team-1',
+      gameNumber: 1,
+      availablePlayerNames: roster.map((player) => player.name),
+      firstHalfGk: 'Keeper A',
+      secondHalfGk: 'Keeper B',
+      signal: controller.signal,
+    })).rejects.toBeInstanceOf(ScheduleGenerationCancelledError);
+    expect(runStages3And4).toHaveBeenCalledOnce();
   });
 
   it('includes abundance relaxation in the late-arrival warnings', async () => {
@@ -671,6 +773,8 @@ describe('redesign schedule service', () => {
       rosterPlayer('Keeper B', 'rotational', ['M'], { keeperEligible: true }),
     ];
     configureService(roster, 6);
+    mocks.forceCleanQuotaAudit = true;
+    mocks.cleanQuotaAuditWhenRelaxedOnly = true;
 
     await expect(generateRedesignSchedule({
       teamId: 'team-1',
@@ -695,12 +799,13 @@ describe('redesign schedule service', () => {
         },
       },
     });
-    expect(runStages3And4).toHaveBeenCalledTimes(2);
+    expect(runStages3And4).toHaveBeenCalledOnce();
   });
 
   it('requires a backup when relaxed generation cannot fill a position', async () => {
     const roster = abundanceRoster();
     configureService(roster, 6);
+    mocks.forceCleanQuotaAudit = true;
     vi.mocked(runStages3And4).mockReturnValue(placement(false, ['Unfilled slot: Block 1, slot D1.']));
 
     await expect(generateRedesignSchedule({
@@ -714,6 +819,7 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: {
@@ -728,6 +834,7 @@ describe('redesign schedule service', () => {
   it('offers a backup when an explicitly requested relaxed generation fails', async () => {
     const roster = abundanceRoster();
     configureService(roster, 6);
+    mocks.forceCleanQuotaAudit = true;
     vi.mocked(runStages3And4).mockReturnValue(placement(false, ['Unfilled slot: Block 1, slot D1.']));
 
     await expect(generateRedesignSchedule({
@@ -742,6 +849,7 @@ describe('redesign schedule service', () => {
       offer: {
         kind: 'relaxed-maximums',
         buttons: [
+          { label: 'Suggest Backup', action: 'suggest-backup' },
           { label: 'Cancel', action: 'cancel' },
         ],
         context: { failureType: 'relaxed-maximums-failed', positionGroup: 'D' },
