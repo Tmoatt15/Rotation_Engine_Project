@@ -13,6 +13,7 @@ import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player, PositionGroup } from '@/engine/models';
 import { getRoster } from '@/services/team-service';
 import { regenerateLateArrivalSchedule } from '@/services/schedule-service';
+import { RedesignOfferError } from '@/services/redesign-schedule-service';
 import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
 
 const palette = {
@@ -322,7 +323,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setLateArrivedNames((names) => [...names, arrivingPlayer]);
       setShowLateArrival(false);
     } catch (error) {
-      setLateError(error instanceof Error ? error.message : 'The future rotation could not be updated.');
+      if (error instanceof RedesignOfferError) {
+        setLateError(error.offer.message);
+        if (error.offer.kind === 'never-five-violation') setContinueBelowMinimum(true);
+      } else {
+        setLateError(error instanceof Error ? error.message : 'The future rotation could not be updated.');
+      }
     } finally {
       setLateSaving(false);
     }

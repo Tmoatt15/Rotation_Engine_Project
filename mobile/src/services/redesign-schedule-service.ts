@@ -741,7 +741,7 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   return result;
 }
 
-export async function regenerateRedesignLateArrival(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null }): Promise<RedesignSchedule> {
+export async function regenerateRedesignLateArrival(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean }): Promise<RedesignSchedule> {
   const base = await context(input);
   const game = normalizeGame({
     format: base.game.format, formation: base.game.formation, totalBlocks: base.game.totalBlocks, availablePlayerNames: input.availablePlayerNames,
@@ -753,14 +753,19 @@ export async function regenerateRedesignLateArrival(input: { teamId: string; gam
   const quotas = assignQuotas(game, demand);
   const frozen: FrozenBlock[] = input.previousSchedule.blocks.slice(0, input.startBlock - 1).map((block, index) => ({ block: index + 1, assignments: new Map(Object.entries(block.positions).filter(([slot]) => slot !== 'GK')) }));
   const result = replanLateArrival({ game, demand, quotas, frozen, arrivalTarget: input.targetBlocks });
-  if (result.kind !== 'success') throw new RedesignOfferError(offerForFailure(result.failure));
-  await throwForQuotaAuditErrors(quotas, game, demand, base.roster, false, false, false);
-  await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, quotas.rotationState ?? {});
+  if (result.kind !== 'success'
+    && !(input.continueBelowMinimum && result.failure.kind === 'never-five-violation' && result.failure.placement)) {
+    throw new RedesignOfferError(offerForFailure(result.failure));
+  }
+  const acceptedPlacement = result.kind === 'success' ? result.placement : result.failure.placement!;
+  const resultQuotas = result.quotas;
+  await throwForQuotaAuditErrors(resultQuotas, game, demand, base.roster, false, false, false);
+  await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, resultQuotas.rotationState ?? {});
   const blockLengths = new SeasonSetup({ ...(base.settings), block_length_minutes: undefined }).block_lengths_minutes;
   return {
     team_id: input.teamId, team_name: base.team.name, game_number: input.gameNumber, first_half_gk: input.firstHalfGk ?? null, second_half_gk: input.secondHalfGk ?? null,
     available_player_names: input.availablePlayerNames, core_player_names: game.players.filter((player) => player.group === 'core').map((player) => player.name), formation: game.formation,
     block_start_minutes: blockStartMinutes(blockLengths), block_lengths_minutes: blockLengths, position_rows: positionRows(game.formation),
-    blocks: scheduleBlocks(game, demand, result.placement), warnings: ['Engine: redesign (Stages 0–6)', ...quotaAuditWarnings(quotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
+    blocks: scheduleBlocks(game, demand, acceptedPlacement), warnings: ['Engine: redesign (Stages 0–6)', ...quotaAuditWarnings(resultQuotas)], errors: [], structural_errors: [], review_status: 'generated', engine_source: 'redesign',
   };
 }
