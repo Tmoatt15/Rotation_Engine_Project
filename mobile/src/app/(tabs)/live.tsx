@@ -150,6 +150,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [storedSchedule, setStoredSchedule] = useState<LiveSchedule | null>(null);
   const schedule = providedSchedule ?? storedSchedule;
   const positionRows = schedule?.position_rows?.length ? schedule.position_rows : fallbackPositionRows;
+  const liveScrollRef = useRef<ScrollView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
@@ -635,7 +636,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ScrollView style={styles.liveScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView ref={liveScrollRef} style={styles.liveScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
               <Pressable onPress={exitLiveMode} style={styles.backButton} accessibilityLabel="Exit live game">
                 <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
@@ -739,7 +740,9 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                           : 'None'}
                       </Text>
                       {selectingUnavailablePlayer && blockIndex === activeBlock ? (
-                        <View style={styles.selectionPrompt}>
+                        <View
+                          style={styles.selectionPrompt}
+                          onLayout={() => liveScrollRef.current?.scrollToEnd({ animated: false })}>
                           <Text style={styles.selectionPromptText}>TAP A FIELD PLAYER TO MARK UNAVAILABLE</Text>
                           <Pressable onPress={cancelUnavailableSelection} style={styles.undoSelectionButton} accessibilityRole="button">
                             <Text style={styles.undoSelectionText}>UNDO</Text>
