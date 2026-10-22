@@ -104,7 +104,7 @@ export default function GameScreen() {
   const useRedesignEngine = true;
   const [positionShortage, setPositionShortage] = useState<PositionShortage | null>(null);
   const recheckCapacityOnFocus = useRef(false);
-  const preserveSetupOnFocus = useRef(false);
+  const setupTeamId = useRef<string | null>(null);
   const generationController = useRef<AbortController | null>(null);
   const gameScrollRef = useRef<ScrollView>(null);
   const availableCount = playerNames.length - unavailable.size;
@@ -113,10 +113,19 @@ export default function GameScreen() {
     ? `This is not ahead of the ${completedGameCount} completed ${completedGameCount === 1 ? 'game' : 'games'}. Check the number before continuing.`
     : null;
 
-  function loadRoster(preserveSetup = false) {
+  function clearSetup() {
+    setUnavailable(new Set());
+    setFirstHalfGK(null);
+    setSecondHalfGK(null);
+    setError(null);
+  }
+
+  function loadRoster() {
     setLoadingRoster(true);
     getActiveTeam()
       .then((activeTeam) => {
+        if (setupTeamId.current && setupTeamId.current !== activeTeam.id) clearSetup();
+        setupTeamId.current = activeTeam.id;
         setTeamId(activeTeam.id);
         setTeamName(activeTeam.name);
         return Promise.all([getRoster(activeTeam.id), getSavedReports(activeTeam.id), getNextGameNumber(activeTeam.id), getSeasonSettings(activeTeam.id)]);
@@ -136,10 +145,6 @@ export default function GameScreen() {
           .map((player) => player.name);
         setPlayerNames(rosterPlayers.map((player) => player.name));
         setGoalkeeperNames(eligibleGoalkeepers);
-        if (!recheckCapacityOnFocus.current && !preserveSetup) {
-          setFirstHalfGK(null);
-          setSecondHalfGK(null);
-        }
       })
       .catch(() => {
         setTeamId(null);
@@ -150,9 +155,7 @@ export default function GameScreen() {
   }
 
   useFocusEffect(useCallback(() => {
-    const preserveSetup = preserveSetupOnFocus.current;
-    if (!recheckCapacityOnFocus.current && !preserveSetup) setUnavailable(new Set());
-    loadRoster(preserveSetup);
+    loadRoster();
   }, []));
 
   useEffect(() => {
@@ -162,7 +165,6 @@ export default function GameScreen() {
     }
   }, [loadingRoster, rosterPlayers]);
   function toggleAvailability(name: string) {
-    preserveSetupOnFocus.current = false;
     setUnavailable((current) => {
       const next = new Set(current);
       if (next.has(name)) {
@@ -284,7 +286,6 @@ export default function GameScreen() {
                     Alert.alert('Backup suggestions unavailable', 'No backup currently qualifies for this position group.');
                     return;
                   }
-                  preserveSetupOnFocus.current = true;
                   router.push({
                     pathname: '/gameday-backup-suggest',
                     params: {
@@ -455,7 +456,12 @@ export default function GameScreen() {
 
             <View style={styles.listHeader}>
               <Text style={styles.sectionTitle}>Players</Text>
-              <Text style={styles.resultCount}>{unavailable.size} unavailable</Text>
+              <View style={styles.listHeaderActions}>
+                <Text style={styles.resultCount}>{unavailable.size} unavailable</Text>
+                <Pressable onPress={clearSetup} style={styles.clearSetupButton} accessibilityRole="button">
+                  <Text style={styles.clearSetupButtonText}>CLEAR SETUP</Text>
+                </Pressable>
+              </View>
             </View>
 
             {hasGoalkeeper && <View style={styles.goalkeeperCard}>
@@ -604,8 +610,11 @@ const styles = StyleSheet.create({
   infoTitle: { color: palette.ink, fontSize: 15, fontWeight: '800' },
   infoDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   listHeader: { alignItems: 'baseline', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  listHeaderActions: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   sectionTitle: { color: palette.ink, fontSize: 19, fontWeight: '800' },
   resultCount: { color: palette.muted, fontSize: 11 },
+  clearSetupButton: { borderColor: palette.line, borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 5 },
+  clearSetupButtonText: { color: palette.coral, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   goalkeeperCard: { backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 17, borderWidth: 1, marginBottom: 18, padding: 15 },
   goalkeeperTitle: { color: palette.ink, fontSize: 17, fontWeight: '800' },
   goalkeeperDetail: { color: palette.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
