@@ -23,7 +23,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
-      {live && <NativeTabs.Trigger name="add-player">
+      {live && <NativeTabs.Trigger name="live">
         <NativeTabs.Trigger.Label>ADD PLAYER</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.badge.plus" md="person_add" />
       </NativeTabs.Trigger>}
@@ -31,7 +31,6 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>MARK UNAVAILABLE</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.crop.circle.badge.xmark" md="person_off" />
       </NativeTabs.Trigger>}
-      {live && <NativeTabs.Trigger name="live" hidden />}
       {!live && <NativeTabs.Trigger name="roster">
         <NativeTabs.Trigger.Label>Roster</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.3.fill" md="groups" />

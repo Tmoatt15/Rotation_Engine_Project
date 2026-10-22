@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
@@ -145,6 +145,7 @@ type LiveScreenProps = {
 
 export default function LiveScreen({ schedule: providedSchedule, onExit, onGameEnded }: LiveScreenProps = {}) {
   const router = useRouter();
+  const navigation = useNavigation();
   const { open: requestedAction } = useLocalSearchParams<{ open?: string }>();
   const [storedSchedule, setStoredSchedule] = useState<LiveSchedule | null>(null);
   const schedule = providedSchedule ?? storedSchedule;
@@ -283,6 +284,20 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     }
   }, [activeBlock, requestedAction, schedule]);
 
+  useEffect(() => navigation.addListener('tabPress', (event) => {
+    const state = navigation.getState();
+    const currentRoute = state.routes[state.index];
+    const targetRoute = state.routes.find((route) => route.key === event.target);
+    if (currentRoute?.name !== 'live' || targetRoute?.name !== 'live' || !schedule) return;
+    const nextBlock = Math.min(activeBlock + 1, Math.max(1, schedule.blocks.length - 1));
+    setLatePlayerName(null);
+    setLateStartBlock(nextBlock + 1);
+    setLateTakeoverGk(false);
+    setLateError(null);
+    setContinueBelowMinimum(false);
+    setShowLateArrival(true);
+  }), [activeBlock, navigation, schedule]);
+
   function resetForSecondHalf() {
     setRunning(false);
     setSeconds(0);
@@ -309,16 +324,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     warnedBlocks.current.clear();
     setTimeError(null);
     setShowTimeEditor(false);
-  }
-
-  function openLateArrival() {
-    const nextBlock = Math.min(activeBlock + 1, Math.max(1, (schedule?.blocks.length ?? 1) - 1));
-    setLatePlayerName(null);
-    setLateStartBlock(nextBlock + 1);
-    setLateTakeoverGk(false);
-    setLateError(null);
-    setContinueBelowMinimum(false);
-    setShowLateArrival(true);
   }
 
   async function confirmLateArrival() {
@@ -474,13 +479,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setPositionOverrides(nextOverrides);
     setPendingSwap(null);
     await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, warnings: liveWarnings, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, live_returned_players: returnedPlayers });
-  }
-
-  function openUnavailable(blockIndex: number) {
-    setAvailabilityBlockIndex(blockIndex);
-    setSelectedUnavailablePlayer(null);
-    setSelectedReplacement(null);
-    setSelectingUnavailablePlayer(true);
   }
 
   function cancelUnavailableSelection() {
