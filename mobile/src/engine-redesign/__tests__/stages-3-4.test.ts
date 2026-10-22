@@ -124,6 +124,7 @@ describe('redesign stages 3-4', () => {
   it('drops rest pins before a late arrival block', () => {
     const { game, quotas } = setup({ lateArrival: { player: 'Rest A', arrivalBlock: 5, targetBlocks: 3 } });
     expect(deriveRestPins(game, quotas).find((pin) => pin.player === 'Rest A')?.blocks.every((block) => block >= 5)).toBe(true);
+    expect(quotas.quotas.find((quota) => quota.player === 'Rest A')?.pinnedBlocks).toContain(5);
   });
 
   it('honors frozen blocks and keeps placement deterministic', () => {

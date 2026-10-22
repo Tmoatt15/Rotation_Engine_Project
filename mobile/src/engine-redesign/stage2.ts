@@ -55,10 +55,16 @@ function maximumFieldBlocks(game: NormalizedGame, player: NormalizedPlayer, dema
 }
 
 function endpointPins(game: NormalizedGame, player: NormalizedPlayer): number[] {
-  if (player.group !== 'core' || !player.available) return [];
+  if (!player.available) return [];
+  const lateArrival = game.lateArrival?.player === player.name ? game.lateArrival : undefined;
+  if (lateArrival) {
+    const half = game.totalBlocks / 2;
+    return [lateArrival.arrivalBlock].filter((block) => !((player.name === game.firstHalfKeeper && block <= half)
+      || (player.name === game.secondHalfKeeper && block > half)));
+  }
+  if (player.group !== 'core') return [];
   const blockOnePin = game.pins.some((pin) => pin.block === 1 && pin.player === player.name);
-  const late = game.lateArrival?.player === player.name;
-  const pins = late || (!blockOnePin && game.pins.length > 0) ? [game.totalBlocks] : [1, game.totalBlocks];
+  const pins = !blockOnePin && game.pins.length > 0 ? [game.totalBlocks] : [1, game.totalBlocks];
   const half = game.totalBlocks / 2;
   return pins.filter((block) => !((player.name === game.firstHalfKeeper && block <= half)
     || (player.name === game.secondHalfKeeper && block > half)));

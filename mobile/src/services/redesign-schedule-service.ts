@@ -559,12 +559,18 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, demand: ReturnTy
       const player = positions[slot.slot];
       if (player) grouped[slot.group].push(player);
     }
+    const lateArrival = game.lateArrival;
+    const bench = game.players
+      .filter((player) => player.available
+        && (!lateArrival || player.name !== lateArrival.player || block.block >= lateArrival.arrivalBlock)
+        && !playing.has(player.name))
+      .map((player) => player.name);
     return {
       GK: positions.GK ?? '',
       D: grouped.D,
       M: grouped.M,
       F: grouped.F,
-      bench: game.players.filter((player) => player.available && !playing.has(player.name)).map((player) => player.name),
+      bench,
       positions,
     };
   });
