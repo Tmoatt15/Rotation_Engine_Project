@@ -31,13 +31,13 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>Create Schedule</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="calendar.badge.plus" md="event" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="live">
-        <NativeTabs.Trigger.Label>{live ? 'ADD PLAYER' : 'Game'}</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={live ? 'person.badge.plus' : 'play.circle.fill'} md={live ? 'person_add' : 'play_circle'} />
-      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="mark-unavailable" hidden={!live}>
         <NativeTabs.Trigger.Label>MARK UNAVAILABLE</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="person.crop.circle.badge.xmark" md="person_off" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="live">
+        <NativeTabs.Trigger.Label>{live ? 'ADD PLAYER' : 'Game'}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={live ? 'person.badge.plus' : 'play.circle.fill'} md={live ? 'person_add' : 'play_circle'} />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="more">

@@ -27,11 +27,11 @@ export default function AppTabs() {
           <TabTrigger name="index" href={'/' as never} asChild>
             <TabButton icon={{ ios: 'house.fill', web: 'home' }}>Home</TabButton>
           </TabTrigger>
-          {live && <TabTrigger name="live" href="/live" asChild>
-            <TabButton icon={{ ios: 'person.badge.plus', web: 'person_add' }}>ADD PLAYER</TabButton>
-          </TabTrigger>}
           {live && <TabTrigger name="mark-unavailable" href="/mark-unavailable" asChild>
             <TabButton icon={{ ios: 'person.crop.circle.badge.xmark', web: 'person_off' }}>MARK UNAVAILABLE</TabButton>
+          </TabTrigger>}
+          {live && <TabTrigger name="live" href="/live" asChild>
+            <TabButton icon={{ ios: 'person.badge.plus', web: 'person_add' }}>ADD PLAYER</TabButton>
           </TabTrigger>}
           {!live && <TabTrigger name="roster" href="/roster" asChild>
             <TabButton icon={{ ios: 'person.3.fill', web: 'groups' }}>Roster</TabButton>
