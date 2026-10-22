@@ -2,6 +2,8 @@ import type { DemandModel, NormalizedGame, QuotaAssignment, PlayerQuota } from '
 import { runStages3And4 } from './stage4';
 import type { FrozenBlock, PlacementBlock } from './stage3';
 import type { PolishedPlacement } from './stage4';
+import { missingHalfParticipation } from './half-participation';
+export { missingHalfParticipation } from './half-participation';
 
 export interface LateArrivalReplanInput {
   game: NormalizedGame;
@@ -149,8 +151,8 @@ export function replanLateArrival(input: LateArrivalReplanInput): LateArrivalRep
   if (!arrival) throw new Error('Late-arrival replan requires a late-arrival player.');
   const arrivalQuota = quotas.quotas.find((quota) => quota.player === arrival.player);
   if (!arrivalQuota) throw new Error(`Late-arrival player ${arrival.player} has no quota.`);
-  const target = input.arrivalTarget ?? arrival.targetBlocks ?? arrivalQuota.totalMin;
-  const targetDelta = target - arrivalQuota.totalMin;
+  const target = arrivalQuota.totalMin;
+  const targetDelta = 0;
   arrivalQuota.totalMin = target;
   arrivalQuota.totalMax = target;
   arrivalQuota.remainingMin = Math.max(0, target - input.frozen.filter((block) => [...block.assignments.values()].includes(arrival.player)).length);
@@ -180,18 +182,23 @@ export function replanLateArrival(input: LateArrivalReplanInput): LateArrivalRep
     }
     return { kind: 'failure', failure, quotas };
   }
-  const halfLength = input.game.totalBlocks / 2;
-  const violation = fiveViolation(placement.blocks, input.game.players.map((player) => player.name), halfLength);
-  if (violation) {
+  if (wholeHalfPlayer(placement.blocks, input.game.players.map((player) => player.name), input.game.totalBlocks)) {
+    const retryDeadline = Date.now() + 500;
+    const retry = runStages3And4(input.game, input.demand, quotas, input.frozen, retryDeadline);
+    if (retry.complete && !wholeHalfPlayer(retry.blocks, input.game.players.map((player) => player.name), input.game.totalBlocks)) {
+      placement = retry;
+    }
+  }
+  const halfParticipationFailure = missingHalfParticipation(placement.blocks, input.game.players, input.game.totalBlocks, input.game.firstHalfKeeper, input.game.secondHalfKeeper, arrival);
+  if (halfParticipationFailure) {
     return {
       kind: 'failure',
       failure: {
-        kind: 'never-five-violation',
-        player: violation.player,
-        half: violation.half,
+        kind: 'late-arrival-exhausted',
+        player: halfParticipationFailure,
         placement,
         arrival: arrival.player,
-        errors: ['A player would be scheduled for five consecutive blocks without approval.'],
+        errors: [`${halfParticipationFailure} must play at least one block in each eligible half. Add an eligible player or adjust the roster before regenerating.`],
       },
       quotas,
     };
@@ -229,17 +236,12 @@ export function hasFiveConsecutiveBlocks(blocks: PlacementBlock[], player: strin
     if (blocks.slice(start, start + 5).every((block) => [...block.assignments.values()].includes(player))) return true;
     if (blocks.slice(halfLength + start, halfLength + start + 5).every((block) => [...block.assignments.values()].includes(player))) return true;
   }
-  return false;
-}
 
-function fiveViolation(blocks: PlacementBlock[], players: string[], halfLength: number): { player: string; half: 'first' | 'second' } | undefined {
-  for (const player of players) {
-    for (const half of ['first', 'second'] as const) {
-      const offset = half === 'first' ? 0 : halfLength;
-      for (let start = offset; start <= offset + halfLength - 5; start += 1) {
-        if (blocks.slice(start, start + 5).every((block) => [...block.assignments.values()].includes(player))) return { player, half };
-      }
-    }
+  function wholeHalfPlayer(blocks: PlacementBlock[], players: string[], totalBlocks: number): string | undefined {
+    const halfLength = totalBlocks / 2;
+    return players.find((player) =>
+      blocks.slice(0, halfLength).every((block) => [...block.assignments.values()].includes(player))
+      || blocks.slice(halfLength).every((block) => [...block.assignments.values()].includes(player)));
   }
-  return undefined;
+  return false;
 }

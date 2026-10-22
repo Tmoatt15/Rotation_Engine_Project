@@ -56,10 +56,11 @@ export function offerForFailure(failure: LateArrivalFailure): Stage6Offer {
   if (failure.kind === 'late-arrival-exhausted') {
     const candidates = failure.candidates ?? [];
     const recommended = failure.recommended ?? candidates[0];
+    const hardConstraint = failure.errors.find((error) => error.includes('must play at least one block in each eligible half.'));
     return {
       kind: 'entire-half',
-      message: `The arriving player cannot be added without changing the rest of this half. ${recommended ?? 'Choose a player'} could cover the half.`,
-      buttons: [{ label: 'Cancel', action: 'cancel' }, { label: 'Continue Anyway', action: 'continue' }],
+      message: hardConstraint ?? `The arriving player cannot be added without changing the rest of this half. ${recommended ?? 'Choose a player'} could cover the half.`,
+      buttons: hardConstraint ? [{ label: 'Cancel', action: 'cancel' }] : [{ label: 'Cancel', action: 'cancel' }, { label: 'Continue Anyway', action: 'continue' }],
       context: { failure, recommended, candidates },
     };
   }

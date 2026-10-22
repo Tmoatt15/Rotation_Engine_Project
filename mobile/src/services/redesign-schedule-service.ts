@@ -4,6 +4,7 @@ import type { LiveSchedule, ScheduleBlock, SeasonRosterPlayer } from '@/engine/m
 import { assignQuotas, buildDemandModel, checkRosterFeasibility, normalizeGame, positionTier, runStages3And4 } from '@/engine-redesign';
 import type { RedesignPlayerInput } from '@/engine-redesign/model';
 import { replanLateArrival } from '@/engine-redesign/stage5';
+import { missingHalfParticipation } from '@/engine-redesign/half-participation';
 import { REPAIR_TIME_BUDGET_MS } from '@/engine-redesign/stage3';
 import type { FrozenBlock, PlacementAudit } from '@/engine-redesign/stage3';
 import { offerForFailure, offerForRelaxedMinimums } from '@/engine-redesign/stage6';
@@ -547,10 +548,16 @@ function positionRows(formation: string) {
 function scheduleBlocks(game: ReturnType<typeof normalizeGame>, demand: ReturnType<typeof buildDemandModel>, placement: ReturnType<typeof runStages3And4>): ScheduleBlock[] {
   return placement.blocks.map((block) => {
     const positions: Record<string, string> = {};
-    if (game.firstHalfKeeper && block.block <= game.totalBlocks / 2) positions.GK = game.firstHalfKeeper;
-    if (game.secondHalfKeeper && block.block > game.totalBlocks / 2) positions.GK = game.secondHalfKeeper;
+    const lateArrival = game.lateArrival;
+    const half = game.totalBlocks / 2;
+    const lateKeeperTakesOver = lateArrival
+      && (lateArrival.player === game.firstHalfKeeper || lateArrival.player === game.secondHalfKeeper)
+      && block.block >= lateArrival.arrivalBlock;
+    const goalkeeper = lateKeeperTakesOver
+      ? lateArrival.player
+      : (block.block <= half ? game.firstHalfKeeper : game.secondHalfKeeper);
     for (const [slot, player] of block.assignments) {
-      if (player === positions.GK) continue;
+      if (player === goalkeeper) continue;
       positions[slot] = player;
     }
     const playing = new Set(Object.values(positions));
@@ -559,14 +566,17 @@ function scheduleBlocks(game: ReturnType<typeof normalizeGame>, demand: ReturnTy
       const player = positions[slot.slot];
       if (player) grouped[slot.group].push(player);
     }
-    const lateArrival = game.lateArrival;
     const bench = game.players
       .filter((player) => player.available
         && (!lateArrival || player.name !== lateArrival.player || block.block >= lateArrival.arrivalBlock)
         && !playing.has(player.name))
       .map((player) => player.name);
+    if (goalkeeper) {
+      positions.GK = goalkeeper;
+      playing.add(goalkeeper);
+    }
     return {
-      GK: positions.GK ?? '',
+      GK: goalkeeper ?? positions.GK ?? '',
       D: grouped.D,
       M: grouped.M,
       F: grouped.F,
@@ -722,6 +732,16 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
     console.error('[redesign] placement failed:', placementErrors);
     throw new RedesignOfferError(placementFailureOffer(game, demand, placement));
   }
+  const missingPlayer = missingHalfParticipation(
+    placement.blocks,
+    game.players,
+    game.totalBlocks,
+    game.firstHalfKeeper,
+    game.secondHalfKeeper,
+  );
+  if (missingPlayer) {
+    throw new Error(`${missingPlayer} must play at least one block in each half. Add an eligible player or adjust the roster before regenerating.`);
+  }
   const blockLengths = new SeasonSetup({ ...settings, block_length_minutes: undefined }).block_lengths_minutes;
   const relaxedWarnings = quotaAuditWarnings(quotas);
   const relaxedMaximumCount = quotas.audit.relaxedMaximums?.length ?? 0;
@@ -747,23 +767,26 @@ export async function generateRedesignSchedule(input: { teamId: string; gameNumb
   return result;
 }
 
-export async function regenerateRedesignLateArrival(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean }): Promise<RedesignSchedule> {
+export async function regenerateRedesignLateArrival(input: { teamId: string; gameNumber: number; previousSchedule: LiveSchedule; availablePlayerNames: string[]; playerName: string; startBlock: number; targetBlocks?: number; firstHalfGk?: string | null; secondHalfGk?: string | null; continueBelowMinimum?: boolean }): Promise<RedesignSchedule> {
   const base = await context(input);
   const game = normalizeGame({
     format: base.game.format, formation: base.game.formation, totalBlocks: base.game.totalBlocks, availablePlayerNames: input.availablePlayerNames,
     firstHalfKeeper: input.firstHalfGk ?? null, secondHalfKeeper: input.secondHalfGk ?? null,
-    lateArrival: { player: input.playerName, arrivalBlock: input.startBlock, targetBlocks: input.targetBlocks },
+    lateArrival: {
+      player: input.playerName,
+      arrivalBlock: input.startBlock,
+      ...(input.targetBlocks === undefined ? {} : { targetBlocks: input.targetBlocks }),
+    },
     seasonRotation: base.game.seasonRotation,
   }, base.game.players.map((player) => ({ name: player.name, group: player.group, general_positions: player.generalPositions, primary_positions: player.primaryPositions, backup_positions: player.backupPositions, excluded_positions: player.excludedPositions, keeper: player.keeper, keeper_eligible: player.keeperEligible })));
   const demand = buildDemandModel(game);
   const quotas = assignQuotas(game, demand);
   const frozen: FrozenBlock[] = input.previousSchedule.blocks.slice(0, input.startBlock - 1).map((block, index) => ({ block: index + 1, assignments: new Map(Object.entries(block.positions).filter(([slot]) => slot !== 'GK')) }));
-  const result = replanLateArrival({ game, demand, quotas, frozen, arrivalTarget: input.targetBlocks });
-  if (result.kind !== 'success'
-    && !(input.continueBelowMinimum && result.failure.kind === 'never-five-violation' && result.failure.placement)) {
+  const result = replanLateArrival({ game, demand, quotas, frozen });
+  if (result.kind !== 'success') {
     throw new RedesignOfferError(offerForFailure(result.failure));
   }
-  const acceptedPlacement = result.kind === 'success' ? result.placement : result.failure.placement!;
+  const acceptedPlacement = result.placement;
   const resultQuotas = result.quotas;
   await throwForQuotaAuditErrors(resultQuotas, game, demand, base.roster, false, false, false);
   await saveWaterfillRotationState(await getDatabase(), input.teamId, input.gameNumber, resultQuotas.rotationState ?? {});

@@ -492,32 +492,28 @@ describe('redesign schedule service', () => {
     });
   });
 
-  it('generates with relaxed maximums and explains the playing-time change', async () => {
+  it('fails loudly when relaxed maximums would bench an available player for a half', async () => {
     configureService(rotationRoster, 8);
     const availablePlayerNames = rotationRoster
       .filter((player) => player.name !== 'Emma' && player.name !== 'Madelyn')
       .map((player) => player.name);
 
-    const result = await generateRedesignSchedule({
+    await expect(generateRedesignSchedule({
       teamId: 'team-1',
       gameNumber: 1,
       availablePlayerNames,
       firstHalfGk: 'Avery',
       secondHalfGk: 'Maddie',
       allowRelaxedMaximums: true,
-    });
-
-    expect(result.warnings).toEqual(expect.arrayContaining([
-      expect.stringMatching(/^Playing time relaxed to fit \d+ available players \(maximums increased for \d+\)\.$/),
-    ]));
-    expect(result.engine_source).toBe('redesign');
+    })).rejects.toThrow(/must play at least one block in each half/);
+    expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
   });
 
-  it('does not persist a relaxed schedule preview before coach confirmation', async () => {
+  it('does not persist an infeasible relaxed schedule preview', async () => {
     const roster = abundanceRoster();
     configureService(roster, 6);
 
-    await generateRedesignSchedule({
+    await expect(generateRedesignSchedule({
       teamId: 'team-1',
       gameNumber: 1,
       availablePlayerNames: roster.map((player) => player.name),
@@ -526,7 +522,7 @@ describe('redesign schedule service', () => {
       allowRelaxedMinimums: true,
       allowRelaxedMaximums: true,
       previewOnly: true,
-    });
+    })).rejects.toThrow(/must play at least one block in each half/);
 
     expect(mocks.saveWaterfillRotationState).not.toHaveBeenCalled();
   });

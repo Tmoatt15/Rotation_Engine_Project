@@ -1,4 +1,4 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
@@ -145,6 +145,7 @@ type LiveScreenProps = {
 
 export default function LiveScreen({ schedule: providedSchedule, onExit, onGameEnded }: LiveScreenProps = {}) {
   const router = useRouter();
+  const { open: requestedAction } = useLocalSearchParams<{ open?: string }>();
   const [storedSchedule, setStoredSchedule] = useState<LiveSchedule | null>(null);
   const schedule = providedSchedule ?? storedSchedule;
   const positionRows = schedule?.position_rows?.length ? schedule.position_rows : fallbackPositionRows;
@@ -174,7 +175,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [showLateArrival, setShowLateArrival] = useState(false);
   const [latePlayerName, setLatePlayerName] = useState<string | null>(null);
   const [lateStartBlock, setLateStartBlock] = useState(1);
-  const [lateTargetBlocks, setLateTargetBlocks] = useState(1);
   const [lateTakeoverGk, setLateTakeoverGk] = useState(false);
   const [lateError, setLateError] = useState<string | null>(null);
   const [lateSaving, setLateSaving] = useState(false);
@@ -183,6 +183,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const [availablePlayerNames, setAvailablePlayerNames] = useState<string[]>([]);
   const [liveWarnings, setLiveWarnings] = useState<string[]>([]);
   const warnedBlocks = useRef(new Set<string>());
+  const actionOpened = useRef(false);
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentAvailablePlayerNames = availablePlayerNames.length ? availablePlayerNames : (schedule?.available_player_names ?? []);
   const visibleLiveWarnings = filterStaleQuotaWarnings(liveWarnings, liveBlocks as unknown as import('@/engine/models').ScheduleBlock[], roster);
@@ -262,6 +263,26 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     }
   }, [activeBlock, running, schedule, secondHalf, seconds]);
 
+  useEffect(() => {
+    if (!schedule || actionOpened.current) return;
+    if (requestedAction === 'add') {
+      actionOpened.current = true;
+      const nextBlock = Math.min(activeBlock + 1, Math.max(1, schedule.blocks.length - 1));
+      setLatePlayerName(null);
+      setLateStartBlock(nextBlock + 1);
+      setLateTakeoverGk(false);
+      setLateError(null);
+      setContinueBelowMinimum(false);
+      setShowLateArrival(true);
+    } else if (requestedAction === 'unavailable') {
+      actionOpened.current = true;
+      setAvailabilityBlockIndex(activeBlock);
+      setSelectedUnavailablePlayer(null);
+      setSelectedReplacement(null);
+      setSelectingUnavailablePlayer(true);
+    }
+  }, [activeBlock, requestedAction, schedule]);
+
   function resetForSecondHalf() {
     setRunning(false);
     setSeconds(0);
@@ -294,7 +315,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     const nextBlock = Math.min(activeBlock + 1, Math.max(1, (schedule?.blocks.length ?? 1) - 1));
     setLatePlayerName(null);
     setLateStartBlock(nextBlock + 1);
-    setLateTargetBlocks(Math.max(1, Math.ceil(((schedule?.blocks.length ?? 1) - nextBlock) / 2)));
     setLateTakeoverGk(false);
     setLateError(null);
     setContinueBelowMinimum(false);
@@ -304,12 +324,13 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   async function confirmLateArrival() {
     if (!schedule?.team_id || !latePlayerName) return;
     const arrivingPlayer = latePlayerName;
-    const remainingBlocks = schedule.blocks.length - lateStartBlock + 1;
     setLateSaving(true);
     setLateError(null);
     try {
       const availableNames = [...new Set([...currentAvailablePlayerNames, arrivingPlayer])];
-      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks as unknown as import('@/engine/models').ScheduleBlock[] }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, targetBlocks: lateTargetBlocks, minimumBlocks: lateTargetBlocks, maximumBlocks: Math.min(lateTargetBlocks, remainingBlocks), firstHalfGk: schedule.first_half_gk ?? undefined, secondHalfGk: lateTakeoverGk ? arrivingPlayer : (schedule.second_half_gk ?? undefined), continueBelowMinimum });
+      const takesCurrentHalfGoal = lateTakeoverGk && lateStartBlock <= Math.ceil(schedule.blocks.length / 2);
+      const takesSecondHalfGoal = lateTakeoverGk && lateStartBlock > Math.ceil(schedule.blocks.length / 2);
+      const nextSchedule = await regenerateLateArrivalSchedule({ teamId: schedule.team_id, gameNumber: schedule.game_number, previousSchedule: { ...schedule, blocks: liveBlocks as unknown as import('@/engine/models').ScheduleBlock[] }, availablePlayerNames: availableNames, playerName: arrivingPlayer, startBlock: lateStartBlock, firstHalfGk: takesCurrentHalfGoal ? arrivingPlayer : (schedule.first_half_gk ?? undefined), secondHalfGk: takesSecondHalfGoal ? arrivingPlayer : (schedule.second_half_gk ?? undefined), continueBelowMinimum });
       if (nextSchedule.needs_minimum_warning && !continueBelowMinimum) {
         setLateError(nextSchedule.minimum_warning ?? `Adding ${arrivingPlayer} would put a player below minimum.`);
         setContinueBelowMinimum(true);
@@ -642,7 +663,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <Text style={styles.setTimeButtonText}>SET TIME</Text>
               </Pressable>
             </View>
-            {!isEndOfGame && <Pressable onPress={openLateArrival} style={styles.lateArrivalButton} accessibilityRole="button"><SymbolView name={{ ios: 'person.badge.plus', android: 'person_add', web: 'person_add' }} size={16} tintColor={palette.green} /><Text style={styles.lateArrivalText}>ADD PLAYER</Text></Pressable>}
             {visibleLiveWarnings.length > 0 && <View style={styles.liveWarningBanner}><Text style={styles.liveWarningTitle}>ROTATION NOTES</Text>{visibleLiveWarnings.slice(-3).map((warning) => <Text key={warning} style={styles.liveWarningText}>{warning}</Text>)}</View>}
 
             <View style={styles.blockHeading}>
@@ -727,11 +747,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                             <Text style={styles.undoSelectionText}>UNDO</Text>
                           </Pressable>
                         </View>
-                      ) : (
-                        <Pressable onPress={() => openUnavailable(blockIndex)} style={styles.availabilityButton} accessibilityRole="button">
-                          <Text style={styles.availabilityButtonText}>MARK AS UNAVAILABLE</Text>
-                        </Pressable>
-                      )}
+                      ) : null}
                       {availabilityRecords.filter((record) => record.blockIndex <= blockIndex).map((record) => (
                         <View key={`${record.blockIndex}-${record.player}`} style={styles.unavailableRow}>
                           <View>
@@ -872,7 +888,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
           <View style={styles.timeModal}>
             <Text style={styles.modalEyebrow}>LATE ARRIVAL</Text>
             <Text style={styles.modalTitle}>{latePlayerName ? 'Set playing time' : 'Who arrived?'}</Text>
-            <Text style={styles.modalDetail}>{latePlayerName ? 'Choose when they start and how many blocks they play.' : 'Players who were unavailable before the game.'}</Text>
+            <Text style={styles.modalDetail}>{latePlayerName ? 'Choose when they start. Playing time follows the rotation rules.' : 'Players who were unavailable before the game.'}</Text>
             {!latePlayerName ? (
               <ScrollView style={styles.latePlayerList}>
                 {roster.filter((player) => !currentAvailablePlayerNames.includes(player.name) && !lateArrivedNames.includes(player.name)).map((player) => (
@@ -885,8 +901,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
             ) : (
               <>
                 <View style={styles.stepperRow}><Text style={styles.stepperLabel}>START BLOCK</Text><View style={styles.stepper}><Pressable onPress={() => setLateStartBlock((value) => Math.max(activeBlock + 2, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateStartBlock}</Text><Pressable onPress={() => setLateStartBlock((value) => Math.min(schedule.blocks.length, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
-                <View style={styles.stepperRow}><Text style={styles.stepperLabel}>BLOCKS TO PLAY</Text><View style={styles.stepper}><Pressable onPress={() => setLateTargetBlocks((value) => Math.max(0, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>-</Text></Pressable><Text style={styles.stepperValue}>{lateTargetBlocks}</Text><Pressable onPress={() => setLateTargetBlocks((value) => Math.min(schedule.blocks.length - lateStartBlock + 1, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View></View>
-                {lateStartBlock === halftimeIndex + 1 && latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper in the second half</Text></Pressable>}
+                {latePlayerName && playerHasGoalkeeperRole(roster.find((item) => item.name === latePlayerName)) && <Pressable onPress={() => setLateTakeoverGk((value) => !value)} style={styles.gkChoice}><Text style={styles.gkChoiceText}>{lateTakeoverGk ? '✓ ' : ''}Take goalkeeper for the rest of this half</Text></Pressable>}
                 {lateError && <Text style={styles.timeError}>{lateError}</Text>}
                 <View style={styles.modalActions}><Pressable onPress={() => setLatePlayerName(null)} style={styles.cancelButton}><Text style={styles.cancelButtonText}>BACK</Text></Pressable><Pressable onPress={() => void confirmLateArrival()} disabled={lateSaving} style={styles.applyButton}><Text style={styles.applyButtonText}>{lateSaving ? 'UPDATING' : continueBelowMinimum ? 'CONTINUE ANYWAY' : 'DONE'}</Text></Pressable></View>
               </>

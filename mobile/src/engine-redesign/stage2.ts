@@ -729,9 +729,9 @@ function buildWaterfillQuotaAttempt(
     const pins = playerInfoValue?.pinnedBlocks.length ?? 0;
     const fieldCount = playerInfoValue ? playerTotal(player.name) : 0;
     const floor = playerInfoValue?.floor ?? 0;
-    const fieldMin = Math.max(0, floor - pins);
+    const fieldMin = Math.max(1, floor - pins);
     const fieldTarget = Math.max(0, fieldCount - pins);
-    const fieldMax = fieldTarget;
+    const fieldMax = Math.max(fieldTarget, fieldMin);
     const groupTargets = playerInfoValue
       ? Object.fromEntries(FIELD_GROUPS.map((group) => [
         group,
