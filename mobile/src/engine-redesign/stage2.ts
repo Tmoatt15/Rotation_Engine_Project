@@ -128,6 +128,21 @@ function rotatedPlayers(
   return index < 0 ? sorted : [...sorted.slice(index + 1), ...sorted.slice(0, index + 1)];
 }
 
+export function orderRerouteMovers(
+  candidates: WaterfillPlayer[],
+  group: FieldGroup,
+  rotation: WaterfillRotationState,
+): WaterfillPlayer[] {
+  return [true, false].flatMap((homeMover) => SURPLUS_TIERS.flatMap((tier) => rotatedPlayers(
+    candidates.filter((candidate) =>
+      (candidate.primaryGroup === group) === homeMover && candidate.player.group === tier),
+    rotation,
+    group,
+    tier,
+    'lastGained',
+  )));
+}
+
 function writeRotation(
   rotation: WaterfillRotationState,
   group: FieldGroup,
@@ -524,6 +539,28 @@ function buildWaterfillQuotaAttempt(
       if (!gainFrom(group, candidates(), action)) break;
     }
   };
+  const canAbsorb = (group: FieldGroup, mover: WaterfillPlayer): boolean => [...info.values()].some((candidate) =>
+    candidate !== mover
+    && playerTotal(candidate.player.name) < candidate.maximum
+    && (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group)));
+  const rerouteMover = (group: FieldGroup): { candidate: WaterfillPlayer; from: FieldGroup } | undefined => {
+    const candidates = orderRerouteMovers(
+      [...info.values()].filter((candidate) => !candidate.selectedKeeper
+        && (candidate.primaryGroup === group || backupGroups(candidate.player).includes(group))
+        && FIELD_GROUPS.some((source) => source !== group
+          && amountInGroup(candidate.player.name, source) > (candidate.pinnedByGroup[source] ?? 0)
+          && canAbsorb(source, candidate))),
+      group,
+      rotationState,
+    );
+    for (const candidate of candidates) {
+      const from = FIELD_GROUPS.find((source) => source !== group
+        && amountInGroup(candidate.player.name, source) > (candidate.pinnedByGroup[source] ?? 0)
+        && canAbsorb(source, candidate));
+      if (from) return { candidate, from };
+    }
+    return undefined;
+  };
 
   const equalizeRelaxedTotals = (): NonNullable<QuotaAssignment['audit']['relaxedEqualization']> => {
     const pool = [...info.values()]
@@ -706,6 +743,19 @@ function buildWaterfillQuotaAttempt(
             developingFlexInBlocks.set(assignment.player, groups);
           }
         }
+      }
+    }
+    for (const group of FIELD_GROUPS) {
+      while (groupLoad(group) < (slots.get(group) ?? 0)) {
+        const move = rerouteMover(group);
+        if (!move) break;
+        if (!transfer(move.candidate, move.from, group)) {
+          throw new Error('Stage 2 selected an invalid short-group reroute.');
+        }
+        fillCandidates(move.from,
+          () => [...info.values()].filter((candidate) => candidate.primaryGroup === move.from
+            || backupGroups(candidate.player).includes(move.from)),
+          'reroute gains');
       }
     }
   }

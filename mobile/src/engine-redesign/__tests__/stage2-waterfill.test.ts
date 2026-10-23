@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { assignQuotas, buildDemandModel, normalizeGame, runStages3And4 } from '..';
 import type { FieldGroup, RedesignGameInput, RedesignPlayerInput } from '../model';
+import { orderRerouteMovers } from '../stage2';
 
 const chelseaRoster: RedesignPlayerInput[] = [
   { name: 'Avery', group: 'rotational', general_positions: ['M'], primary_positions: ['M'], keeper: true, keeper_eligible: true },
@@ -594,6 +595,67 @@ describe('Stage 2 per-group water-fill', () => {
   });
 });
 
+describe('Stage 2 reroute mover ordering', () => {
+  const roster = [
+    { name: 'Home', group: 'developing', general_positions: ['F'] },
+    { name: 'Core backup', group: 'core', general_positions: ['M'], backup_positions: ['F'] },
+    { name: 'Rotational A', group: 'rotational', general_positions: ['M'], backup_positions: ['F'] },
+    { name: 'Rotational B', group: 'rotational', general_positions: ['D'], backup_positions: ['F'] },
+    { name: 'Developing backup', group: 'developing', general_positions: ['D'], backup_positions: ['F'] },
+  ] satisfies RedesignPlayerInput[];
+  const game = normalizeGame({
+    format: '4v4', formation: '1-2-1', totalBlocks: 6,
+    firstHalfKeeper: null, secondHalfKeeper: null,
+  }, roster);
+  const candidate = (name: string, primary: FieldGroup) => {
+    const player = game.players.find((entry) => entry.name === name);
+    if (!player) throw new Error(`Missing test player: ${name}`);
+    return {
+      player,
+      primaryGroup: primary,
+      keeperBlocks: 0,
+      selectedKeeper: false,
+      hardFloor: 0,
+      floor: 0,
+      bandFloor: 0,
+      bandMaximum: 6,
+      maximum: 6,
+      pinnedBlocks: [],
+      pinnedByGroup: { D: 0, M: 0, F: 0 },
+    };
+  };
+
+  it('prefers a home mover over a backup mover regardless of tier', () => {
+    const ordered = orderRerouteMovers([
+      candidate('Core backup', 'M'),
+      candidate('Home', 'F'),
+    ], 'F', {});
+
+    expect(ordered.map((entry) => entry.player.name)).toEqual(['Home', 'Core backup']);
+  });
+
+  it('orders movers by core, rotational, then developing tier', () => {
+    const ordered = orderRerouteMovers([
+      candidate('Developing backup', 'D'),
+      candidate('Rotational A', 'M'),
+      candidate('Core backup', 'M'),
+    ], 'F', {});
+
+    expect(ordered.map((entry) => entry.player.name)).toEqual([
+      'Core backup', 'Rotational A', 'Developing backup',
+    ]);
+  });
+
+  it('rotates same-tier movers using the existing last-gained season state', () => {
+    const ordered = orderRerouteMovers([
+      candidate('Rotational A', 'M'),
+      candidate('Rotational B', 'D'),
+    ], 'F', { 'F:rotational': { lastGained: 'Rotational A' } });
+
+    expect(ordered.map((entry) => entry.player.name)).toEqual(['Rotational B', 'Rotational A']);
+  });
+});
+
 // Developing flex-in regression tests. All strict mode (allowRelaxedMaximums=false).
 // At 8 blocks: core start = max = 6 (no flex room), rotational 5->6, developing 4->5.
 // At 10 blocks: core 7->8, rotational 6->7, developing 5->6.
@@ -739,5 +801,48 @@ describe('Stage 2 developing flex-in (strict)', () => {
     // Briana (developing M, no backup) is the negative control: she stays in M with no other group.
     expect(quotaFor(quotas, 'Briana').groupTargets).toEqual({ D: 0, M: 6, F: 0 });
     expect(quotaFor(quotas, 'Briana').pinnedBlocks).toEqual([]);
+  });
+
+  it('reroutes an existing allocation to cover a late-arrival forward shortage', () => {
+    const roster: RedesignPlayerInput[] = [
+      { name: 'Avery', group: 'core', general_positions: ['M'], primary_positions: ['LCM', 'RCM'], keeper_eligible: true },
+      { name: 'Briana', group: 'developing', general_positions: ['M'], primary_positions: ['LM', 'RM'] },
+      { name: 'Dolce', group: 'rotational', general_positions: ['D'], primary_positions: ['LB', 'RB'] },
+      { name: 'Emma', group: 'core', general_positions: ['F'], primary_positions: ['LF'] },
+      { name: 'Isla', group: 'core', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['M'] },
+      { name: 'Izzy', group: 'rotational', general_positions: ['M'], primary_positions: ['RM', 'LM'], backup_positions: ['F', 'D'] },
+      { name: 'Jasper', group: 'rotational', general_positions: ['D'], primary_positions: ['RB', 'LB'] },
+      { name: 'Kalia', group: 'rotational', general_positions: ['M'], primary_positions: ['LM', 'RM'], backup_positions: ['F'] },
+      { name: 'Katelyn', group: 'rotational', general_positions: ['F'], primary_positions: ['RF'] },
+      { name: 'Maddie', group: 'core', general_positions: ['F'], primary_positions: ['CF'], keeper_eligible: true },
+      { name: 'Madelyn', group: 'core', general_positions: ['M'], primary_positions: ['LCM', 'RCM'], backup_positions: ['F'] },
+      { name: 'Makenzie', group: 'developing', general_positions: ['F'], primary_positions: ['ANY'], backup_positions: ['M'] },
+      { name: 'Natalie', group: 'core', general_positions: ['D'], primary_positions: ['LB'], keeper_eligible: true },
+      { name: 'Noor', group: 'rotational', general_positions: ['M'], primary_positions: ['LM', 'RM'] },
+      { name: 'Rozenn', group: 'core', general_positions: ['M'], primary_positions: ['ANY'], backup_positions: ['D'] },
+      { name: 'Sophia', group: 'core', general_positions: ['D'], primary_positions: ['CB'] },
+    ];
+    const createQuotas = (seasonRotation = {}) => {
+      const game = normalizeGame({
+        format: '11v11',
+        formation: '3-4-3',
+        totalBlocks: 10,
+        availablePlayerNames: roster.map((player) => player.name).filter((name) => name !== 'Makenzie'),
+        firstHalfKeeper: 'Maddie',
+        secondHalfKeeper: 'Avery',
+        lateArrival: { player: 'Rozenn', arrivalBlock: 4, targetBlocks: 5 },
+        seasonRotation,
+      }, roster);
+      return assignQuotas(game, buildDemandModel(game), false, false);
+    };
+    const quotas = createQuotas();
+
+    expect(quotas.audit.underfill).toEqual([]);
+    expect(quotas.audit.errors).toEqual([]);
+    expect(quotas.rotationState?.['F:core']?.lastGained).toBe('Madelyn');
+    expect(quotas.rotationState?.['F:rotational']?.lastGained).toBe('Kalia');
+    const rotated = createQuotas({ 'F:rotational': { lastGained: 'Izzy' } });
+    expect(rotated.audit.underfill).toEqual([]);
+    expect(rotated.rotationState?.['F:rotational']?.lastGained).toBe('Kalia');
   });
 });
