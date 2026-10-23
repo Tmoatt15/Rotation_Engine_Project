@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-export { buildAfterGameReport, canonicalFieldAssignments } from './report-utils';
+export { buildAfterGameReport, canonicalFieldAssignments, getResumeBlockIndex } from './report-utils';
 export type { AfterGameReport, AvailabilityHistory, LivePositionOverride, PlayerGameReport, ScheduleBlock } from './report-utils';
 import type { AfterGameReport, AvailabilityHistory, LivePositionOverride, ScheduleBlock } from './report-utils';
 import type { LateArrivalApprovalResult } from './engine/models';
@@ -24,6 +24,7 @@ export type LiveSchedule = {
     position: string;
   }>;
   completed_blocks?: number[];
+  last_active_block?: number;
   live_returned_players?: Array<{ player: string; blockIndex: number }>;
   live_availability_history?: AvailabilityHistory[];
   live_position_overrides?: LivePositionOverride[];

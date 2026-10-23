@@ -1,4 +1,16 @@
 export type ScheduleBlock = { positions: Record<string, string>; bench: string[]; GK: string; [key: string]: unknown };
+
+export function getResumeBlockIndex(schedule: { blocks: unknown[]; completed_blocks?: number[]; last_active_block?: number }): number {
+  const lastActiveBlock = schedule.last_active_block;
+  if (typeof lastActiveBlock === 'number' && Number.isInteger(lastActiveBlock)
+    && lastActiveBlock >= 0 && lastActiveBlock < schedule.blocks.length) {
+    return lastActiveBlock;
+  }
+  const completed = new Set(schedule.completed_blocks ?? []);
+  const firstIncompleteBlock = schedule.blocks.findIndex((_block, index) => !completed.has(index));
+  return firstIncompleteBlock >= 0 ? firstIncompleteBlock : Math.max(0, schedule.blocks.length - 1);
+}
+
 export type AvailabilityHistory = {
   player: string;
   replacement: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAfterGameReport, canonicalFieldAssignments } from './report-utils';
+import { buildAfterGameReport, canonicalFieldAssignments, getResumeBlockIndex } from './report-utils';
 import type { LiveSchedule } from './live-schedule';
 
 function makeSchedule(): LiveSchedule {
@@ -28,6 +28,24 @@ function makeSchedule(): LiveSchedule {
 }
 
 describe('live schedule reporting', () => {
+  it('resumes at the first incomplete block instead of restarting at block 1', () => {
+    const schedule = { ...makeSchedule(), blocks: [...makeSchedule().blocks, ...makeSchedule().blocks, ...makeSchedule().blocks], completed_blocks: [0, 1] };
+
+    expect(getResumeBlockIndex(schedule)).toBe(2);
+  });
+
+  it('resumes at the saved active block when a block was skipped', () => {
+    const schedule = { ...makeSchedule(), blocks: [...makeSchedule().blocks, ...makeSchedule().blocks, ...makeSchedule().blocks, ...makeSchedule().blocks, ...makeSchedule().blocks], completed_blocks: [0, 1, 3], last_active_block: 4 };
+
+    expect(getResumeBlockIndex(schedule)).toBe(4);
+  });
+
+  it('lands on the final block when every block is complete', () => {
+    const schedule = { ...makeSchedule(), blocks: [...makeSchedule().blocks, ...makeSchedule().blocks], completed_blocks: [0, 1] };
+
+    expect(getResumeBlockIndex(schedule)).toBe(1);
+  });
+
   it('uses the dedicated goalkeeper when a legacy positions map is stale', () => {
     const schedule = makeSchedule();
     schedule.blocks[0].GK = 'Replacement keeper';

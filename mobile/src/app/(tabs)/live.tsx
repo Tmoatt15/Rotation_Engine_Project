@@ -15,7 +15,7 @@ import { getRoster } from '@/services/team-service';
 import { saveLocalReport } from '@/services/report-service';
 import { regenerateLateArrivalSchedule } from '@/services/schedule-service';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
-import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
+import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, getResumeBlockIndex, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
 
 const palette = {
   ink: '#17221f', muted: '#6b7873', paper: '#f5f1e8', panel: '#fffdf8', line: '#e4ded1',
@@ -154,6 +154,8 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const liveScrollOffset = useRef(0);
   const unavailablePromptRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const livePageWidth = useRef(0);
+  const scheduleHydrated = useRef(false);
   const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
   const [activeBlock, setActiveBlock] = useState(0);
@@ -225,13 +227,41 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setLiveBlocks(schedule.blocks.map((block) => ({ ...block, positions: { ...block.positions }, bench: [...block.bench] })));
       setAvailabilityRecords(schedule.live_availability ?? []);
       setAvailabilityHistory(schedule.live_availability_history ?? schedule.live_availability ?? []);
-      setCompletedBlocks(schedule.completed_blocks ?? []);
+      const completed = schedule.completed_blocks ?? [];
+      const resumeBlock = getResumeBlockIndex(schedule);
+      const resumeSecondHalf = resumeBlock >= Math.ceil(schedule.blocks.length / 2);
+      setCompletedBlocks(completed);
+      setSecondHalf(resumeSecondHalf);
+      setActiveBlock(resumeBlock);
+      scheduleHydrated.current = true;
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({
+          x: livePageWidth.current * Math.max(0, resumeBlock - (resumeSecondHalf ? Math.ceil(schedule.blocks.length / 2) : 0)),
+          animated: false,
+        });
+      });
       setReturnedPlayers(schedule.live_returned_players ?? []);
       setPositionOverrides(schedule.live_position_overrides ?? []);
       setAvailablePlayerNames(schedule.available_player_names ?? []);
       setLiveWarnings(schedule.warnings ?? []);
     }
   }, [schedule]);
+
+  useEffect(() => {
+    if (!schedule || !scheduleHydrated.current || !liveBlocks.length) return;
+    void setAcceptedSchedule({
+      ...schedule,
+      blocks: liveBlocks,
+      completed_blocks: completedBlocks,
+      last_active_block: activeBlock,
+      live_availability: availabilityRecords,
+      live_availability_history: availabilityHistory,
+      live_position_overrides: positionOverrides,
+      live_returned_players: returnedPlayers,
+      available_player_names: currentAvailablePlayerNames,
+      warnings: liveWarnings,
+    });
+  }, [activeBlock, availabilityHistory, availabilityRecords, completedBlocks, currentAvailablePlayerNames, liveBlocks, liveWarnings, positionOverrides, returnedPlayers, schedule]);
 
   useEffect(() => {
     if (!schedule?.team_id) return undefined;
@@ -366,7 +396,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       setAvailablePlayerNames(nextSchedule.available_player_names ?? availableNames);
       const nextWarnings = [...new Set(nextSchedule.warnings ?? [])];
       setLiveWarnings(nextWarnings);
-      await setAcceptedSchedule({ ...schedule, ...nextSchedule, warnings: nextWarnings, blocks: nextBlocks as unknown as ScheduleBlock[], completed_blocks: completedBlocks, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
+      await setAcceptedSchedule({ ...schedule, ...nextSchedule, warnings: nextWarnings, blocks: nextBlocks as unknown as ScheduleBlock[], completed_blocks: completedBlocks, last_active_block: activeBlock, live_availability: availabilityRecords, live_availability_history: availabilityHistory, live_position_overrides: positionOverrides, live_returned_players: returnedPlayers });
       setLateArrivedNames((names) => [...names, arrivingPlayer]);
       setShowLateArrival(false);
     } catch (error) {
@@ -500,7 +530,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     setLiveBlocks(nextBlocks);
     setPositionOverrides(nextOverrides);
     setPendingSwap(null);
-    await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, warnings: liveWarnings, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, live_returned_players: returnedPlayers });
+    await setAcceptedSchedule({ ...schedule, blocks: nextBlocks, warnings: liveWarnings, live_position_overrides: nextOverrides, live_availability: availabilityRecords, live_availability_history: availabilityHistory, completed_blocks: completedBlocks, last_active_block: activeBlock, live_returned_players: returnedPlayers });
   }
 
   function cancelUnavailableSelection() {
@@ -520,6 +550,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       live_availability_history: availabilityHistory,
       live_position_overrides: positionOverrides,
       completed_blocks: nextCompletedBlocks,
+      last_active_block: activeBlock,
       live_returned_players: returnedPlayers,
     });
   }
@@ -647,6 +678,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       live_availability_history: nextAvailabilityHistory,
       live_position_overrides: positionOverrides,
       completed_blocks: completedBlocks,
+      last_active_block: activeBlock,
       live_returned_players: nextReturnedPlayers,
     });
     closeAvailability();
@@ -711,6 +743,11 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              onLayout={(event) => {
+                livePageWidth.current = event.nativeEvent.layout.width;
+                const pageIndex = activeBlock - (secondHalf ? halftimeIndex : 0);
+                if (pageIndex >= 0) scrollRef.current?.scrollTo({ x: event.nativeEvent.layout.width * pageIndex, animated: false });
+              }}
               onMomentumScrollEnd={(event) => {
                 const width = event.nativeEvent.layoutMeasurement.width;
                 const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
