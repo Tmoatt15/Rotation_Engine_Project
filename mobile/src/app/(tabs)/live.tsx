@@ -9,7 +9,6 @@ import { BottomTabInset, MaxContentWidth } from '@/constants/theme';
 import { canCoverSlot } from '@/engine/timeline';
 import { POSITION_GROUP_BY_SLOT } from '@/engine/positional';
 import { createPlayer } from '@/engine/rotation';
-import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player, PositionGroup } from '@/engine/models';
 import { clearRememberedGamedaySetup } from '@/gameday-setup';
 import { getRoster } from '@/services/team-service';
@@ -191,7 +190,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const actionOpened = useRef(false);
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentAvailablePlayerNames = availablePlayerNames.length ? availablePlayerNames : (schedule?.available_player_names ?? []);
-  const visibleLiveWarnings = filterStaleQuotaWarnings(liveWarnings, liveBlocks as unknown as import('@/engine/models').ScheduleBlock[], roster);
 
   function revealUnavailablePrompt() {
     if (!selectingUnavailablePlayer) return;
@@ -696,8 +694,6 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                 <Text style={styles.setTimeButtonText}>SET TIME</Text>
               </Pressable>
             </View>
-            {visibleLiveWarnings.length > 0 && <View style={styles.liveWarningBanner}><Text style={styles.liveWarningTitle}>ROTATION NOTES</Text>{visibleLiveWarnings.slice(-3).map((warning) => <Text key={warning} style={styles.liveWarningText}>{warning}</Text>)}</View>}
-
             <View style={styles.blockHeading}>
               <View>
                 <Text style={styles.sectionEyebrow}>CURRENT BLOCK</Text>
