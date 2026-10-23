@@ -151,6 +151,8 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const schedule = providedSchedule ?? storedSchedule;
   const positionRows = schedule?.position_rows?.length ? schedule.position_rows : fallbackPositionRows;
   const liveScrollRef = useRef<ScrollView>(null);
+  const liveScrollOffset = useRef(0);
+  const unavailablePromptRef = useRef<View>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
@@ -189,6 +191,19 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   const flashInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentAvailablePlayerNames = availablePlayerNames.length ? availablePlayerNames : (schedule?.available_player_names ?? []);
   const visibleLiveWarnings = filterStaleQuotaWarnings(liveWarnings, liveBlocks as unknown as import('@/engine/models').ScheduleBlock[], roster);
+
+  function revealUnavailablePrompt() {
+    if (!selectingUnavailablePlayer) return;
+    unavailablePromptRef.current?.measureInWindow((_promptX, promptY, _promptWidth, promptHeight) => {
+      liveScrollRef.current?.measureInWindow((_scrollX, scrollY, _scrollWidth, scrollHeight) => {
+        const desiredBottomGap = BottomTabInset + 16;
+        const promptBottom = promptY + promptHeight;
+        const visibleBottom = scrollY + scrollHeight - desiredBottomGap;
+        const nextOffset = Math.max(0, liveScrollOffset.current + promptBottom - visibleBottom);
+        liveScrollRef.current?.scrollTo({ y: nextOffset, animated: false });
+      });
+    });
+  }
 
   useEffect(() => {
     if (providedSchedule) return undefined;
@@ -645,8 +660,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
             ref={liveScrollRef}
             style={styles.liveScroll}
             contentContainerStyle={styles.content}
+            onScroll={(event) => {
+              liveScrollOffset.current = event.nativeEvent.contentOffset.y;
+            }}
+            scrollEventThrottle={16}
             onContentSizeChange={() => {
-              if (selectingUnavailablePlayer) liveScrollRef.current?.scrollToEnd({ animated: false });
+              if (selectingUnavailablePlayer) requestAnimationFrame(revealUnavailablePrompt);
             }}
             showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
@@ -752,7 +771,10 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                           : 'None'}
                       </Text>
                       {selectingUnavailablePlayer && blockIndex === activeBlock ? (
-                        <View style={styles.selectionPrompt}>
+                        <View
+                          ref={unavailablePromptRef}
+                          style={styles.selectionPrompt}
+                          onLayout={() => requestAnimationFrame(revealUnavailablePrompt)}>
                           <Text style={styles.selectionPromptText}>TAP A FIELD PLAYER TO MARK UNAVAILABLE</Text>
                           <Pressable onPress={cancelUnavailableSelection} style={styles.undoSelectionButton} accessibilityRole="button">
                             <Text style={styles.undoSelectionText}>UNDO</Text>
