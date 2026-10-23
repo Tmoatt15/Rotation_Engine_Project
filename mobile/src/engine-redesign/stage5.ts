@@ -236,12 +236,12 @@ export function hasFiveConsecutiveBlocks(blocks: PlacementBlock[], player: strin
     if (blocks.slice(start, start + 5).every((block) => [...block.assignments.values()].includes(player))) return true;
     if (blocks.slice(halfLength + start, halfLength + start + 5).every((block) => [...block.assignments.values()].includes(player))) return true;
   }
-
-  function wholeHalfPlayer(blocks: PlacementBlock[], players: string[], totalBlocks: number): string | undefined {
-    const halfLength = totalBlocks / 2;
-    return players.find((player) =>
-      blocks.slice(0, halfLength).every((block) => [...block.assignments.values()].includes(player))
-      || blocks.slice(halfLength).every((block) => [...block.assignments.values()].includes(player)));
-  }
   return false;
+}
+
+function wholeHalfPlayer(blocks: PlacementBlock[], players: string[], totalBlocks: number): string | undefined {
+  const halfLength = totalBlocks / 2;
+  return players.find((player) =>
+    blocks.slice(0, halfLength).every((block) => [...block.assignments.values()].includes(player))
+    || blocks.slice(halfLength).every((block) => [...block.assignments.values()].includes(player)));
 }
