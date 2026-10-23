@@ -636,7 +636,14 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ScrollView ref={liveScrollRef} style={styles.liveScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            ref={liveScrollRef}
+            style={styles.liveScroll}
+            contentContainerStyle={styles.content}
+            onContentSizeChange={() => {
+              if (selectingUnavailablePlayer) liveScrollRef.current?.scrollToEnd({ animated: false });
+            }}
+            showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
               <Pressable onPress={exitLiveMode} style={styles.backButton} accessibilityLabel="Exit live game">
                 <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={20} tintColor={palette.ink} />
@@ -740,9 +747,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
                           : 'None'}
                       </Text>
                       {selectingUnavailablePlayer && blockIndex === activeBlock ? (
-                        <View
-                          style={styles.selectionPrompt}
-                          onLayout={() => liveScrollRef.current?.scrollToEnd({ animated: false })}>
+                        <View style={styles.selectionPrompt}>
                           <Text style={styles.selectionPromptText}>TAP A FIELD PLAYER TO MARK UNAVAILABLE</Text>
                           <Pressable onPress={cancelUnavailableSelection} style={styles.undoSelectionButton} accessibilityRole="button">
                             <Text style={styles.undoSelectionText}>UNDO</Text>
@@ -942,7 +947,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.paper },
   safeArea: { flex: 1, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
   liveScroll: { flex: 1 },
-  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: BottomTabInset + 96 },
+  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: BottomTabInset + 16 },
   liveActionFooter: { backgroundColor: palette.paper, paddingHorizontal: 16, paddingBottom: BottomTabInset + 8, paddingTop: 6 },
   header: { alignItems: 'center', flexDirection: 'row', marginBottom: 12 },
   backButton: { alignItems: 'center', backgroundColor: palette.panel, borderColor: palette.line, borderRadius: 14, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
