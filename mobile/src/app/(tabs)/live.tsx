@@ -13,6 +13,7 @@ import { filterStaleQuotaWarnings } from '@/engine/surplus';
 import type { Player, PositionGroup } from '@/engine/models';
 import { clearRememberedGamedaySetup } from '@/gameday-setup';
 import { getRoster } from '@/services/team-service';
+import { saveLocalReport } from '@/services/report-service';
 import { regenerateLateArrivalSchedule } from '@/services/schedule-service';
 import { RedesignOfferError } from '@/services/redesign-schedule-service';
 import { buildAfterGameReport, clearAcceptedSchedule, getAcceptedSchedule, setAcceptedSchedule, type AvailabilityHistory, type LivePositionOverride, type LiveSchedule } from '@/live-schedule';
@@ -414,12 +415,14 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
   async function endGame() {
     if (!schedule) return;
     const report = buildAfterGameReport(schedule, liveBlocks, availabilityHistory, positionOverrides);
+    if (!schedule.team_id) throw new Error('The completed game has no team to save its report to.');
+    await saveLocalReport(schedule.team_id, { ...report, team_id: report.team_id ?? schedule.team_id, team_name: report.team_name ?? schedule.team_name });
     clearRememberedGamedaySetup(schedule.team_id);
     await clearAcceptedSchedule();
     if (onGameEnded) {
       onGameEnded(report);
     } else {
-      router.push({ pathname: '/after-game', params: { data: JSON.stringify(report) } });
+      router.replace('/');
     }
   }
 
