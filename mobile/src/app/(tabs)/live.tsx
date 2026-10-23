@@ -211,14 +211,14 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
       if (!active) return;
       if (savedSchedule) {
         setStoredSchedule(savedSchedule);
-      } else {
+      } else if (navigation.isFocused()) {
         router.replace('/game');
       }
     });
     return () => {
       active = false;
     };
-  }, [providedSchedule]);
+  }, [navigation, providedSchedule, router]);
 
   useEffect(() => {
     if (schedule) {
@@ -416,12 +416,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     if (!schedule.team_id) throw new Error('The completed game has no team to save its report to.');
     await saveLocalReport(schedule.team_id, { ...report, team_id: report.team_id ?? schedule.team_id, team_name: report.team_name ?? schedule.team_name });
     clearRememberedGamedaySetup(schedule.team_id);
-    await clearAcceptedSchedule();
     if (onGameEnded) {
       onGameEnded(report);
     } else {
-      router.replace('/(tabs)/index');
+      router.replace('/');
     }
+    await clearAcceptedSchedule();
   }
 
   function getPositionGroup(position: string): PositionGroup | null {

@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { clearAcceptedSchedule, getAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
+import { clearAcceptedSchedule, getAcceptedSchedule, subscribeAcceptedSchedule, type LiveSchedule } from '@/live-schedule';
 import { activateTeam, getTeams, notifyTeamChanged } from '@/services/team-service';
 
 const palette = {
@@ -62,6 +62,23 @@ export default function HomeScreen() {
       active = false;
     };
   }, []));
+
+  useEffect(() => {
+    let active = true;
+    const refreshAcceptedSchedule = () => {
+      getAcceptedSchedule().then((schedule) => {
+        if (active) {
+          setAcceptedSchedule(schedule);
+          setHasAcceptedSchedule(Boolean(schedule));
+        }
+      });
+    };
+    const unsubscribe = subscribeAcceptedSchedule(refreshAcceptedSchedule);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const activeTeam = teams.find((team) => team.active);
