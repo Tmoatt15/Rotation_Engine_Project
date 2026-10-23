@@ -420,7 +420,7 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     if (onGameEnded) {
       onGameEnded(report);
     } else {
-      router.replace('/');
+      router.replace('/(tabs)/index');
     }
   }
 
