@@ -9,16 +9,33 @@ import {
 import { useSegments } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
 
 import { ExternalLink } from './external-link';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
+import { getAcceptedSchedule, subscribeAcceptedSchedule } from '@/live-schedule';
 
 export default function AppTabs() {
   const segments = useSegments();
-  const live = segments.includes('live');
+  const [hasAcceptedSchedule, setHasAcceptedSchedule] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void getAcceptedSchedule().then((schedule) => {
+        if (active) setHasAcceptedSchedule(Boolean(schedule));
+      });
+    };
+    refresh();
+    const unsubscribe = subscribeAcceptedSchedule(refresh);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  const live = segments.includes('live') && hasAcceptedSchedule;
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />

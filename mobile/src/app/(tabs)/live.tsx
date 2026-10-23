@@ -194,7 +194,12 @@ export default function LiveScreen({ schedule: providedSchedule, onExit, onGameE
     if (providedSchedule) return undefined;
     let active = true;
     getAcceptedSchedule().then((savedSchedule) => {
-      if (active) setStoredSchedule(savedSchedule);
+      if (!active) return;
+      if (savedSchedule) {
+        setStoredSchedule(savedSchedule);
+      } else {
+        router.replace('/game');
+      }
     });
     return () => {
       active = false;

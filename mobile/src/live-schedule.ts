@@ -42,9 +42,20 @@ export type LiveSchedule = {
 
 const ACCEPTED_SCHEDULE_FILE = `${FileSystem.documentDirectory}accepted-schedule.json`;
 let acceptedSchedule: LiveSchedule | null = null;
+const acceptedScheduleListeners = new Set<() => void>();
+
+export function subscribeAcceptedSchedule(listener: () => void): () => void {
+  acceptedScheduleListeners.add(listener);
+  return () => acceptedScheduleListeners.delete(listener);
+}
+
+function notifyAcceptedScheduleChanged() {
+  acceptedScheduleListeners.forEach((listener) => listener());
+}
 
 export async function setAcceptedSchedule(schedule: LiveSchedule): Promise<void> {
   acceptedSchedule = schedule;
+  notifyAcceptedScheduleChanged();
   try {
     await FileSystem.writeAsStringAsync(ACCEPTED_SCHEDULE_FILE, JSON.stringify(schedule));
   } catch {
@@ -57,6 +68,7 @@ export async function getAcceptedSchedule(): Promise<LiveSchedule | null> {
   try {
     const storedSchedule = await FileSystem.readAsStringAsync(ACCEPTED_SCHEDULE_FILE);
     acceptedSchedule = JSON.parse(storedSchedule) as LiveSchedule;
+    notifyAcceptedScheduleChanged();
     return acceptedSchedule;
   } catch {
     return null;
@@ -69,5 +81,7 @@ export async function clearAcceptedSchedule(): Promise<void> {
     await FileSystem.deleteAsync(ACCEPTED_SCHEDULE_FILE, { idempotent: true });
   } catch {
     // The schedule is cleared in memory even if the file cannot be removed.
+  } finally {
+    notifyAcceptedScheduleChanged();
   }
 }

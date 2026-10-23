@@ -1,14 +1,31 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useSegments } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { getAcceptedSchedule, subscribeAcceptedSchedule } from '@/live-schedule';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
   const segments = useSegments();
   const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
-  const live = segments.includes('live');
+  const [hasAcceptedSchedule, setHasAcceptedSchedule] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void getAcceptedSchedule().then((schedule) => {
+        if (active) setHasAcceptedSchedule(Boolean(schedule));
+      });
+    };
+    refresh();
+    const unsubscribe = subscribeAcceptedSchedule(refresh);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  const live = segments.includes('live') && hasAcceptedSchedule;
 
   return (
     <NativeTabs
